@@ -19,25 +19,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Logo } from '@/components/icons/logo';
-// import { getDays } from '@/data/workout-data'; // No longer needed for direct day links
 import { Separator } from '@/components/ui/separator';
 
-// Comment out or remove workoutNavItems if individual day links are no longer desired
-// const workoutNavItems = getDays().map(day => ({
-//   href: `/workout/${day.id}`,
-//   icon: CalendarDays, // Or a more generic icon if it becomes a "Full Plan" link
-//   label: day.dayName,
-//   subLabel: day.title,
-// }));
-
-const mainDashboardNavItems = [
-  {
-    href: '/dashboard/progressive-overload',
-    icon: TrendingUp,
-    label: 'Progress Dashboard',
-    subLabel: 'Track your gains',
-  }
-];
 
 const todayNavItem = {
   href: '/dashboard/today',
@@ -46,13 +29,20 @@ const todayNavItem = {
   subLabel: 'Log your current workout',
 };
 
-// Optional: Link to a page that might list all workout days, if needed later
-// const fullPlanNavItem = {
-//   href: '/workout-plan', // Example: a new page to list all days
-//   icon: LayoutGrid,
-//   label: 'Full Workout Plan',
-//   subLabel: 'View all days',
-// };
+const mainDashboardNavItems = [
+  {
+    href: '/dashboard/progressive-overload',
+    icon: TrendingUp,
+    label: 'Progress Dashboard',
+    subLabel: 'Track your gains',
+  },
+  {
+    href: '/workout-plan', 
+    icon: LayoutGrid,
+    label: 'Full Workout Plan',
+    subLabel: 'View all days',
+  }
+];
 
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -106,7 +96,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
             )}
 
-            {/* Main Navigation Items (e.g., Progress Dashboard) */}
+            {/* Main Navigation Items (e.g., Progress Dashboard, Full Workout Plan) */}
             {mainDashboardNavItems.length > 0 && (
               <SidebarMenu className="p-2 lg:p-4">
                 {mainDashboardNavItems.map((item) => (
@@ -132,25 +122,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarMenu>
             )}
             
-            {/* Removed Daily Workouts Section or repurpose for a "Full Plan" link if desired later
-            
-            {workoutNavItems.length > 0 && mainDashboardNavItems.length > 0 && (
-                 <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
-            )}
-
-            {workoutNavItems.length > 0 && (
-              <>
-                <SidebarHeader className="px-2 lg:px-4 pt-2 pb-1 group-data-[collapsible=icon]:hidden">
-                  <span className="text-xs font-medium uppercase text-sidebar-foreground/70">Daily Workouts</span>
-                </SidebarHeader>
-                <SidebarMenu className="p-2 lg:p-4">
-                  {workoutNavItems.map((item) => (
-                    // ...
-                  ))}
-                </SidebarMenu>
-              </>
-            )}
-            */}
           </ScrollArea>
         </SidebarContent>
         {/* 
@@ -187,3 +158,4 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </>
   );
 }
+
