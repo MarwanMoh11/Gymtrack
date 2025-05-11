@@ -1,3 +1,4 @@
+
 import type { WeeklyPlan } from '@/types/workout';
 
 export const weeklyPlan: WeeklyPlan = [
@@ -305,7 +306,7 @@ export const weeklyPlan: WeeklyPlan = [
         ],
       },
       {
-        id: 'fri-ex4', name: 'Bodyweight/Jump Squats', unit: 'reps',
+        id: 'fri-ex4', name: 'Bodyweight/Jump Squats', unit: 'reps', targetWeight: 'bodyweight',
         sets: [
           { id: 'fri-ex4-set1', targetReps: 15 },
           { id: 'fri-ex4-set2', targetReps: 13 },
@@ -313,7 +314,7 @@ export const weeklyPlan: WeeklyPlan = [
         ],
       },
       {
-        id: 'fri-ex5', name: 'Hanging Windshield Wipers or L-Sit', unit: 'reps', isCore: true,
+        id: 'fri-ex5', name: 'Hanging Windshield Wipers or L-Sit', unit: 'reps', isCore: true, targetWeight: 'bodyweight',
         sets: [
           { id: 'fri-ex5-set1', targetReps: '10 (or hold)' },
           { id: 'fri-ex5-set2', targetReps: '8 (or hold)' },
@@ -321,7 +322,7 @@ export const weeklyPlan: WeeklyPlan = [
         ],
       },
       {
-        id: 'fri-ex6', name: 'Inverted Rows', unit: 'reps',
+        id: 'fri-ex6', name: 'Inverted Rows', unit: 'reps', targetWeight: 'bodyweight',
         sets: [
           { id: 'fri-ex6-set1', targetReps: 10 },
           { id: 'fri-ex6-set2', targetReps: 10 },
@@ -329,7 +330,7 @@ export const weeklyPlan: WeeklyPlan = [
         ],
       },
       {
-        id: 'fri-ex7', name: 'Plank', unit: 's', isCore: true,
+        id: 'fri-ex7', name: 'Plank', unit: 's', isCore: true, targetWeight: 'bodyweight',
         sets: [
           { id: 'fri-ex7-set1', targetReps: 45, unit: 's' },
           { id: 'fri-ex7-set2', targetReps: 45, unit: 's' },
@@ -379,7 +380,7 @@ export const weeklyPlan: WeeklyPlan = [
     title: 'Active Recovery',
     exercises: [
       {
-        id: 'sun-ex1', name: 'Walking', isRecovery: true, isActivity: true,
+        id: 'sun-ex1', name: 'Walking', isRecovery: true, isActivity: true, targetWeight: 'bodyweight',
         sets: [{ id: 'sun-ex1-set1', targetReps: '1 hour, 10,000 Steps' }],
       },
       {
@@ -414,4 +415,5 @@ export const getWorkoutByDay = (dayId: string) => {
   return weeklyPlan.find(day => day.id.toLowerCase() === dayId.toLowerCase());
 };
 
+// getDays is not actively used by the modified sidebar, but kept in case it's needed elsewhere.
 export const getDays = () => weeklyPlan.map(day => ({ id: day.id, dayName: day.dayName, title: day.title }));

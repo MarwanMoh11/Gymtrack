@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CalendarCheck, Dumbbell, CalendarDays, Settings, PanelLeft, TrendingUp } from 'lucide-react';
+import { CalendarCheck, Dumbbell, Settings, PanelLeft, TrendingUp, LayoutGrid } from 'lucide-react';
 import {
   Sidebar,
   SidebarHeader,
@@ -11,7 +11,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarFooter,
+  // SidebarFooter, // Keep if settings or other footers are planned
   SidebarInset,
   SidebarTrigger,
   useSidebar,
@@ -19,17 +19,18 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Logo } from '@/components/icons/logo';
-import { getDays } from '@/data/workout-data';
+// import { getDays } from '@/data/workout-data'; // No longer needed for direct day links
 import { Separator } from '@/components/ui/separator';
 
-const workoutNavItems = getDays().map(day => ({
-  href: `/workout/${day.id}`,
-  icon: CalendarDays,
-  label: day.dayName,
-  subLabel: day.title,
-}));
+// Comment out or remove workoutNavItems if individual day links are no longer desired
+// const workoutNavItems = getDays().map(day => ({
+//   href: `/workout/${day.id}`,
+//   icon: CalendarDays, // Or a more generic icon if it becomes a "Full Plan" link
+//   label: day.dayName,
+//   subLabel: day.title,
+// }));
 
-const mainNavItems = [
+const mainDashboardNavItems = [
   {
     href: '/dashboard/progressive-overload',
     icon: TrendingUp,
@@ -44,6 +45,15 @@ const todayNavItem = {
   label: "Today's Session",
   subLabel: 'Log your current workout',
 };
+
+// Optional: Link to a page that might list all workout days, if needed later
+// const fullPlanNavItem = {
+//   href: '/workout-plan', // Example: a new page to list all days
+//   icon: LayoutGrid,
+//   label: 'Full Workout Plan',
+//   subLabel: 'View all days',
+// };
+
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -92,14 +102,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SidebarMenu>
 
             {/* Separator before other navigation sections */}
-            {(mainNavItems.length > 0 || workoutNavItems.length > 0) && (
+            {(mainDashboardNavItems.length > 0) && (
                 <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
             )}
 
             {/* Main Navigation Items (e.g., Progress Dashboard) */}
-            {mainNavItems.length > 0 && (
+            {mainDashboardNavItems.length > 0 && (
               <SidebarMenu className="p-2 lg:p-4">
-                {mainNavItems.map((item) => (
+                {mainDashboardNavItems.map((item) => (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       asChild
@@ -122,12 +132,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarMenu>
             )}
             
-            {/* Separator before Daily Workouts if both mainNav and workoutNav exist */}
-            {mainNavItems.length > 0 && workoutNavItems.length > 0 && (
+            {/* Removed Daily Workouts Section or repurpose for a "Full Plan" link if desired later
+            
+            {workoutNavItems.length > 0 && mainDashboardNavItems.length > 0 && (
                  <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
             )}
 
-            {/* Daily Workouts Section */}
             {workoutNavItems.length > 0 && (
               <>
                 <SidebarHeader className="px-2 lg:px-4 pt-2 pb-1 group-data-[collapsible=icon]:hidden">
@@ -135,31 +145,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </SidebarHeader>
                 <SidebarMenu className="p-2 lg:p-4">
                   {workoutNavItems.map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={pathname === item.href}
-                        variant="default"
-                        size="lg"
-                        className="justify-start"
-                        tooltip={item.label}
-                      >
-                        <Link href={item.href} onClick={handleLinkClick}>
-                          <item.icon />
-                          <div className="flex flex-col items-start">
-                            <span>{item.label}</span>
-                            <span className="text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">{item.subLabel}</span>
-                          </div>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    // ...
                   ))}
                 </SidebarMenu>
               </>
             )}
+            */}
           </ScrollArea>
         </SidebarContent>
-        {/* <SidebarFooter className="p-4">
+        {/* 
+        <SidebarFooter className="p-4">
           <SidebarMenuButton
             variant="default"
             size="default"
@@ -169,7 +164,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Settings />
             <span>Settings</span>
           </SidebarMenuButton>
-        </SidebarFooter> */}
+        </SidebarFooter>
+        */}
       </Sidebar>
       <SidebarInset className="flex flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:hidden">

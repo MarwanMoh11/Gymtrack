@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { nextSessionRecommendation, NextSessionRecommendationInput, NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
-import { transformHistoricalDataForAI } from '@/lib/workout-utils';
+import { transformHistoricalDataForAI, parseWeightToNumber } from '@/lib/workout-utils';
+import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 
 interface WorkoutViewProps {
   workoutDay: WorkoutDay;
@@ -29,6 +30,8 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   const [currentDate, setCurrentDate] = useState('');
   const [aiSuggestionsForToday, setAiSuggestionsForToday] = useState<Map<string, NextSessionRecommendationOutput | null>>(new Map());
   const [isLoadingAISuggestions, setIsLoadingAISuggestions] = useState(false);
+  // State to trigger re-render when effective target weights change
+  const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0); 
   const { toast } = useToast();
 
   useEffect(() => {
@@ -71,7 +74,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
     const suggestions = new Map<string, NextSessionRecommendationOutput | null>();
     
     for (const exercise of workoutDay.exercises) {
-      if (!exercise.isWarmup && !exercise.isConditioning && !exercise.isStretch && !exercise.isFoamRoll && !exercise.isActivity && !exercise.isMatch && !exercise.isRecovery) {
+      if (!exercise.isWarmup && !exercise.isConditioning && !exercise.isStretch && !exercise.isFoamRoll && !exercise.isActivity && !exercise.isMatch && !exercise.isRecovery && !exercise.isCore) {
         const recentPerformance = transformHistoricalDataForAI(exercise.id);
         if (recentPerformance.length > 0) {
           try {
@@ -85,10 +88,9 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
           } catch (e) {
             console.error(`AI Suggestion Error for ${exercise.name}:`, e);
             suggestions.set(exercise.id, null);
-            // Potentially show a toast for individual errors, or a summary later
           }
         } else {
-          suggestions.set(exercise.id, null); // No data for suggestion
+          suggestions.set(exercise.id, null); 
         }
       }
     }
@@ -97,8 +99,10 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   }, [workoutDay.exercises, isInitialized, currentDate]);
 
   useEffect(() => {
-    fetchAISuggestionsForToday();
-  }, [fetchAISuggestionsForToday]);
+    if(isInitialized) { // Fetch AI suggestions only after initialization
+       fetchAISuggestionsForToday();
+    }
+  }, [fetchAISuggestionsForToday, isInitialized]);
 
 
   const handleLogSet = (exerciseId: string, setId: string, log: LoggedSetData) => {
@@ -116,6 +120,15 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
     toast({
       title: "Log Cleared",
       description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
+    });
+  };
+
+  const handleUpdateEffectiveTargetWeight = (exerciseId: string, newWeight: string) => {
+    setTargetWeightOverride(exerciseId, newWeight);
+    setEffectiveTargetWeightsKey(prev => prev + 1); // Force re-render to reflect updated target weight
+    toast({
+      title: "Plan Updated",
+      description: `Target weight for ${workoutDay.exercises.find(e => e.id === exerciseId)?.name || 'exercise'} updated to ${newWeight}.`,
     });
   };
   
@@ -163,16 +176,21 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       
       <DayProgress workoutDay={workoutDay} dailyLog={dailyLog} />
 
-      {workoutDay.exercises.map((exercise: Exercise) => (
-        <ExerciseCard
-          key={exercise.id}
-          exercise={exercise}
-          onLogSet={handleLogSet}
-          loggedData={dailyLog[exercise.id]}
-          aiSuggestionForToday={aiSuggestionsForToday.get(exercise.id)}
-          isLoadingAISuggestion={isLoadingAISuggestions && !aiSuggestionsForToday.has(exercise.id)}
-        />
-      ))}
+      {workoutDay.exercises.map((exercise: Exercise) => {
+        const effectiveTargetWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
+        return (
+          <ExerciseCard
+            key={`${exercise.id}-${effectiveTargetWeightsKey}`} // Add key to force re-render on change
+            exercise={exercise}
+            effectiveTargetWeight={effectiveTargetWeight}
+            onLogSet={handleLogSet}
+            loggedData={dailyLog[exercise.id]}
+            aiSuggestionForToday={aiSuggestionsForToday.get(exercise.id)}
+            isLoadingAISuggestion={isLoadingAISuggestions && !aiSuggestionsForToday.has(exercise.id)}
+            onUpdateEffectiveTargetWeight={handleUpdateEffectiveTargetWeight}
+          />
+        );
+      })}
     </div>
   );
 }
