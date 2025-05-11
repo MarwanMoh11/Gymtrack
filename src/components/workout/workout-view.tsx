@@ -1,16 +1,21 @@
+
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { WorkoutDay, DailyLog, LoggedSetData, Exercise } from '@/types/workout';
 import ExerciseCard from './exercise-card';
 import DayProgress from './day-progress';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import { nextSessionRecommendation, NextSessionRecommendationInput, NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
+import { transformHistoricalDataForAI } from '@/lib/workout-utils';
+
+interface WorkoutViewProps {
+  workoutDay: WorkoutDay;
+}
 
 const getCurrentDateString = (): string => {
-  // Ensures that a date is used, avoids issues with server/client mismatch for default date.
-  // This component is client-side, so new Date() is safe here.
   return new Date().toISOString().split('T')[0];
 };
 
@@ -22,10 +27,11 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
+  const [aiSuggestionsForToday, setAiSuggestionsForToday] = useState<Map<string, NextSessionRecommendationOutput | null>>(new Map());
+  const [isLoadingAISuggestions, setIsLoadingAISuggestions] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    // Set current date only on the client side after mount
     setCurrentDate(getCurrentDateString());
   }, []);
 
@@ -41,7 +47,6 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
           localStorage.removeItem(key); 
         }
       } else {
-        // If no log for the current date, ensure dailyLog is empty
         setDailyLog({});
       }
       setIsInitialized(true);
@@ -54,13 +59,47 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       if (Object.keys(dailyLog).length > 0) {
         localStorage.setItem(key, JSON.stringify(dailyLog));
       } else {
-        // If dailyLog is empty, remove the item from localStorage
-        // This prevents storing empty {} objects if a day is visited but no logs are made,
-        // or if logs are cleared.
         localStorage.removeItem(key);
       }
     }
   }, [dailyLog, workoutDay.id, isInitialized, currentDate]);
+
+  const fetchAISuggestionsForToday = useCallback(async () => {
+    if (!isInitialized || !currentDate) return;
+
+    setIsLoadingAISuggestions(true);
+    const suggestions = new Map<string, NextSessionRecommendationOutput | null>();
+    
+    for (const exercise of workoutDay.exercises) {
+      if (!exercise.isWarmup && !exercise.isConditioning && !exercise.isStretch && !exercise.isFoamRoll && !exercise.isActivity && !exercise.isMatch && !exercise.isRecovery) {
+        const recentPerformance = transformHistoricalDataForAI(exercise.id);
+        if (recentPerformance.length > 0) {
+          try {
+            const input: NextSessionRecommendationInput = {
+              exerciseName: exercise.name,
+              recentPerformance,
+              userGoal: 'Progressive overload for strength and hypertrophy',
+            };
+            const suggestion = await nextSessionRecommendation(input);
+            suggestions.set(exercise.id, suggestion);
+          } catch (e) {
+            console.error(`AI Suggestion Error for ${exercise.name}:`, e);
+            suggestions.set(exercise.id, null);
+            // Potentially show a toast for individual errors, or a summary later
+          }
+        } else {
+          suggestions.set(exercise.id, null); // No data for suggestion
+        }
+      }
+    }
+    setAiSuggestionsForToday(suggestions);
+    setIsLoadingAISuggestions(false);
+  }, [workoutDay.exercises, isInitialized, currentDate]);
+
+  useEffect(() => {
+    fetchAISuggestionsForToday();
+  }, [fetchAISuggestionsForToday]);
+
 
   const handleLogSet = (exerciseId: string, setId: string, log: LoggedSetData) => {
     setDailyLog(prevLog => ({
@@ -74,7 +113,6 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
 
   const handleClearDayLog = () => {
     setDailyLog({});
-    // localStorage update will be handled by the useEffect watching dailyLog
     toast({
       title: "Log Cleared",
       description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
@@ -131,6 +169,8 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
           exercise={exercise}
           onLogSet={handleLogSet}
           loggedData={dailyLog[exercise.id]}
+          aiSuggestionForToday={aiSuggestionsForToday.get(exercise.id)}
+          isLoadingAISuggestion={isLoadingAISuggestions && !aiSuggestionsForToday.has(exercise.id)}
         />
       ))}
     </div>

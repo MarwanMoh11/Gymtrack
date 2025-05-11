@@ -1,3 +1,4 @@
+
 // src/components/dashboard/progress-chart.tsx
 'use client';
 
@@ -13,8 +14,8 @@ import {
   DotProps,
 } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useTheme } from 'next-themes'; // To get current theme for colors
-import { useMemo } from 'react';
+import { useTheme } from 'next-themes'; 
+import { useMemo, useEffect, useState } from 'react';
 
 export interface ChartDataPoint {
   date: string; // YYYY-MM-DD
@@ -33,56 +34,84 @@ interface ProgressChartProps {
 const CustomDot = (props: DotProps & { isPR?: boolean; payload?: ChartDataPoint }) => {
   const { cx, cy, stroke, fill, r, isPR, payload } = props;
 
-  if (!cx || !cy) return null;
+  if (cx === undefined || cy === undefined) return null; // Check if cx or cy is undefined
 
   if (isPR && payload?.type === 'actual') {
     return (
-      <svg x={cx - 6} y={cy - 6} width={12} height={12} fill="hsl(var(--primary))" viewBox="0 0 1024 1024">
+      <g> {/* Use <g> to group elements if needed, or directly return SVG elements */}
         <circle cx={cx} cy={cy} r={(r || 3) + 3} fill="hsl(var(--primary) / 0.3)" />
         <circle cx={cx} cy={cy} r={r || 3} stroke="hsl(var(--primary-foreground))" fill="hsl(var(--primary))" strokeWidth={1} className="pr-dot"/>
-      </svg>
+      </g>
     );
   }
-  // Regular dot for actual data or target data
+  // Regular dot for actual data
   if (payload?.type === 'actual') {
      return <circle cx={cx} cy={cy} r={r || 3} stroke={stroke} fill={fill} strokeWidth={1} />;
   }
-  return null; // Don't render dots for target line, or make them different
+  return null; // Don't render dots for target line by default
 };
 
 
 export function ProgressChart({ actualData, targetData, exerciseName }: ProgressChartProps) {
   const { theme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
+
 
   const colors = useMemo(() => {
+    if (typeof window === 'undefined' || !mounted) { // Ensure document is available and component mounted
+        // Provide default/fallback colors for SSR or pre-mount
+        return {
+            foreground: 'hsl(0 0% 100%)',
+            primary: 'hsl(84 100% 53.5%)',
+            mutedForeground: 'hsl(0 0% 65%)',
+            card: 'hsl(240 5% 10%)',
+            border: 'hsl(240 5% 20%)',
+        };
+    }
     const style = getComputedStyle(document.documentElement);
     return {
-      foreground: style.getPropertyValue('--foreground'), // Or a specific text color
-      primary: style.getPropertyValue('--primary'),
-      mutedForeground: style.getPropertyValue('--muted-foreground'),
-      card: style.getPropertyValue('--card'),
-      border: style.getPropertyValue('--border'),
+      foreground: style.getPropertyValue('--foreground').trim(), 
+      primary: style.getPropertyValue('--primary').trim(),
+      mutedForeground: style.getPropertyValue('--muted-foreground').trim(),
+      card: style.getPropertyValue('--card').trim(),
+      border: style.getPropertyValue('--border').trim(),
     };
-  }, [theme]); // Re-calculate if theme changes, though HSL vars should update CSS
+  }, [theme, mounted]);
 
   const combinedData = useMemo(() => {
-    const allDataPoints: { [date: string]: Partial<ChartDataPoint> & { actualWeight?: number; targetWeight?: number; date: string, isPR?: boolean, reps?: string | number } } = {};
+    const allDataPointsMap: { [date: string]: { date: string, actualWeight?: number; targetWeight?: number; isPR?: boolean, reps?: string | number } } = {};
 
     actualData.forEach(p => {
-      if (!allDataPoints[p.date]) allDataPoints[p.date] = { date: p.date };
-      allDataPoints[p.date].actualWeight = p.weight;
-      allDataPoints[p.date].isPR = p.isPR;
-      allDataPoints[p.date].reps = p.reps;
+      if (!allDataPointsMap[p.date]) allDataPointsMap[p.date] = { date: p.date };
+      allDataPointsMap[p.date].actualWeight = p.weight;
+      allDataPointsMap[p.date].isPR = p.isPR;
+      allDataPointsMap[p.date].reps = p.reps;
     });
 
     targetData.forEach(p => {
-      if (!allDataPoints[p.date]) allDataPoints[p.date] = { date: p.date };
-      allDataPoints[p.date].targetWeight = p.weight;
+      if (!allDataPointsMap[p.date]) allDataPointsMap[p.date] = { date: p.date };
+      allDataPointsMap[p.date].targetWeight = p.weight;
     });
     
-    return Object.values(allDataPoints).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return Object.values(allDataPointsMap).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   }, [actualData, targetData]);
+
+  if (!mounted) { // Prevents rendering chart before client-side theme and styles are confirmed
+      return (
+        <Card className="shadow-xl rounded-2xl">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold text-primary">Progress: {exerciseName}</CardTitle>
+            <CardDescription>Loading chart data...</CardDescription>
+          </CardHeader>
+          <CardContent className="h-[400px] flex items-center justify-center">
+            <p className="text-muted-foreground">Initializing chart...</p>
+          </CardContent>
+        </Card>
+      );
+  }
 
   if (actualData.length === 0 && targetData.length === 0) {
     return (
@@ -91,7 +120,7 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
           <CardTitle className="text-2xl font-bold text-primary">Progress: {exerciseName}</CardTitle>
           <CardDescription>No data available to display chart.</CardDescription>
         </CardHeader>
-        <CardContent className="h-64 flex items-center justify-center">
+        <CardContent className="h-[400px] flex items-center justify-center">
           <p className="text-muted-foreground">Log some workouts to see your progress!</p>
         </CardContent>
       </Card>
@@ -99,11 +128,20 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
   }
   
   const yAxisDomain = useMemo(() => {
-    const allWeights = [...actualData.map(p => p.weight), ...targetData.map(p => p.weight)];
-    if (allWeights.length === 0) return [0, 'auto'];
+    const allWeights = [
+        ...actualData.map(p => p.weight), 
+        ...targetData.map(p => p.weight)
+    ].filter(w => typeof w === 'number' && !isNaN(w)); // Ensure only valid numbers
+
+    if (allWeights.length === 0) return [0, 50]; // Default domain if no valid weights
+
     const minWeight = Math.min(...allWeights);
     const maxWeight = Math.max(...allWeights);
-    return [Math.floor(minWeight * 0.9), Math.ceil(maxWeight * 1.1)];
+    
+    const lowerBound = Math.max(0, Math.floor(minWeight * 0.9)); // Ensure lower bound is not negative
+    const upperBound = Math.ceil(maxWeight * 1.1) || 50; // Ensure upper bound has a sensible default
+
+    return [lowerBound, upperBound];
   }, [actualData, targetData]);
 
 
@@ -120,7 +158,7 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
             <XAxis 
               dataKey="date" 
               stroke={`hsl(${colors.mutedForeground})`}
-              tickFormatter={(tick) => new Date(tick).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              tickFormatter={(tick) => new Date(tick).toLocaleDateString(navigator.language, { month: 'short', day: 'numeric' })}
               padding={{ left: 10, right: 10 }}
             />
             <YAxis 
@@ -143,7 +181,7 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
                 if (originalPoint?.type === 'actual' && props.payload.reps) {
                   displayValue += ` for ${props.payload.reps} reps`;
                 }
-                if (originalPoint?.isPR) {
+                if (props.payload.isPR) { // check directly from payload for tooltip accuracy
                   displayValue += " (PR!)";
                 }
                 return [displayValue, name === 'actualWeight' ? 'Logged Weight' : 'Target Weight'];
@@ -156,8 +194,9 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
               name="Logged Weight"
               stroke={`hsl(${colors.primary})`}
               strokeWidth={2.5}
-              dot={(props) => <CustomDot {...props} isPR={props.payload.isPR} payload={props.payload as ChartDataPoint} />}
+              dot={(props: DotProps & {payload?: ChartDataPoint}) => <CustomDot {...props} isPR={props.payload?.isPR} payload={props.payload} />}
               activeDot={{ r: 6, strokeWidth: 1, fill: `hsl(${colors.primary})` }}
+              connectNulls={false} // Do not connect nulls for actual data
             />
             <Line
               type="monotone"
@@ -169,6 +208,7 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
               dot={false}
               activeDot={{ r: 5 }}
               opacity={0.7}
+              connectNulls={false} // Do not connect nulls for target data
             />
           </LineChart>
         </ResponsiveContainer>
