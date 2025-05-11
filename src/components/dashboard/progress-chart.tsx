@@ -11,7 +11,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  DotProps,
+  type DotProps,
 } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTheme } from 'next-themes'; 
@@ -159,7 +159,7 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
             <XAxis 
               dataKey="date" 
               stroke={`hsl(${colors.mutedForeground})`}
-              tickFormatter={(tick) => new Date(tick).toLocaleDateString(navigator.language, { month: 'short', day: 'numeric' })}
+              tickFormatter={(tick) => new Date(tick).toLocaleDateString(typeof navigator !== 'undefined' ? navigator.language : 'en-US', { month: 'short', day: 'numeric' })}
               padding={{ left: 10, right: 10 }}
             />
             <YAxis 
@@ -177,12 +177,13 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
               labelStyle={{ color: `hsl(${colors.foreground})`, fontWeight: 'bold' }}
               itemStyle={{ color: `hsl(${colors.foreground})` }}
               formatter={(value, name, props) => {
-                const originalPoint = actualData.find(p => p.date === props.payload.date && p.weight === value) || targetData.find(p => p.date === props.payload.date && p.weight === value);
+                // The payload here is an item from `combinedData`
+                const pointPayload = props.payload as { date: string, actualWeight?: number; targetWeight?: number; isPR?: boolean, reps?: string | number };
                 let displayValue = `${value} kg`;
-                if (originalPoint?.type === 'actual' && props.payload.reps) {
-                  displayValue += ` for ${props.payload.reps} reps`;
+                if (name === 'actualWeight' && pointPayload.reps) {
+                  displayValue += ` for ${pointPayload.reps} reps`;
                 }
-                if (props.payload.isPR) { // check directly from payload for tooltip accuracy
+                if (pointPayload.isPR && name === 'actualWeight') {
                   displayValue += " (PR!)";
                 }
                 return [displayValue, name === 'actualWeight' ? 'Logged Weight' : 'Target Weight'];
@@ -195,7 +196,13 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
               name="Logged Weight"
               stroke={`hsl(${colors.primary})`}
               strokeWidth={2.5}
-              dot={(props: DotProps & {payload?: ChartDataPoint}) => <CustomDot {...props} isPR={props.payload?.isPR} payload={props.payload} />}
+              dot={(dotElementProps: DotProps) => {
+                // Ensure payload is correctly typed based on combinedData structure
+                const itemPayload = dotElementProps.payload as (ChartDataPoint & { actualWeight?: number, targetWeight?: number });
+                const { key, ...restOfDotElementProps } = dotElementProps; // Destructure key
+                // Pass necessary props to CustomDot. isPR comes from the itemPayload.
+                return <CustomDot {...restOfDotElementProps} payload={itemPayload} isPR={itemPayload?.isPR} />;
+              }}
               activeDot={{ r: 6, strokeWidth: 1, fill: `hsl(${colors.primary})` }}
               connectNulls={false} // Do not connect nulls for actual data
             />
