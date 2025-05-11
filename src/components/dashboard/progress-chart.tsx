@@ -99,6 +99,24 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
 
   }, [actualData, targetData]);
 
+  const yAxisDomain = useMemo(() => {
+    const allWeights = [
+        ...actualData.map(p => p.weight), 
+        ...targetData.map(p => p.weight)
+    ].filter(w => typeof w === 'number' && !isNaN(w)); // Ensure only valid numbers
+
+    if (allWeights.length === 0) return [0, 50]; // Default domain if no valid weights
+
+    const minWeight = Math.min(...allWeights);
+    const maxWeight = Math.max(...allWeights);
+    
+    const lowerBound = Math.max(0, Math.floor(minWeight * 0.9)); // Ensure lower bound is not negative
+    const upperBound = Math.ceil(maxWeight * 1.1) || 50; // Ensure upper bound has a sensible default
+
+    return [lowerBound, upperBound];
+  }, [actualData, targetData]);
+
+
   if (!mounted) { // Prevents rendering chart before client-side theme and styles are confirmed
       return (
         <Card className="shadow-xl rounded-2xl">
@@ -127,23 +145,6 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
     );
   }
   
-  const yAxisDomain = useMemo(() => {
-    const allWeights = [
-        ...actualData.map(p => p.weight), 
-        ...targetData.map(p => p.weight)
-    ].filter(w => typeof w === 'number' && !isNaN(w)); // Ensure only valid numbers
-
-    if (allWeights.length === 0) return [0, 50]; // Default domain if no valid weights
-
-    const minWeight = Math.min(...allWeights);
-    const maxWeight = Math.max(...allWeights);
-    
-    const lowerBound = Math.max(0, Math.floor(minWeight * 0.9)); // Ensure lower bound is not negative
-    const upperBound = Math.ceil(maxWeight * 1.1) || 50; // Ensure upper bound has a sensible default
-
-    return [lowerBound, upperBound];
-  }, [actualData, targetData]);
-
 
   return (
     <Card className="shadow-xl rounded-2xl">
@@ -216,3 +217,4 @@ export function ProgressChart({ actualData, targetData, exerciseName }: Progress
     </Card>
   );
 }
+
