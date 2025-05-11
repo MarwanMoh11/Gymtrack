@@ -1,8 +1,9 @@
+
 'use client';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Dumbbell, CalendarDays, Settings, PanelLeft, TrendingUp } from 'lucide-react';
+import { CalendarCheck, Dumbbell, CalendarDays, Settings, PanelLeft, TrendingUp } from 'lucide-react';
 import {
   Sidebar,
   SidebarHeader,
@@ -37,6 +38,13 @@ const mainNavItems = [
   }
 ];
 
+const todayNavItem = {
+  href: '/dashboard/today',
+  icon: CalendarCheck,
+  label: "Today's Session",
+  subLabel: 'Log your current workout',
+};
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { open, isMobile, setOpenMobile } = useSidebar();
@@ -61,54 +69,94 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Separator className="bg-sidebar-border group-data-[collapsible=icon]:hidden" />
         <SidebarContent asChild>
           <ScrollArea className="h-full">
+            {/* Today's Session Link - Placed at the top */}
             <SidebarMenu className="p-2 lg:p-4">
-              {mainNavItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
-                    variant="default"
-                    size="lg"
-                    className="justify-start"
-                    tooltip={item.label}
-                  >
-                    <Link href={item.href} onClick={handleLinkClick}>
-                      <item.icon />
-                      <div className="flex flex-col items-start">
-                        <span>{item.label}</span>
-                         {item.subLabel && <span className="text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">{item.subLabel}</span>}
-                      </div>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              <SidebarMenuItem key={todayNavItem.href}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname === todayNavItem.href}
+                  variant="default"
+                  size="lg"
+                  className="justify-start"
+                  tooltip={todayNavItem.label}
+                >
+                  <Link href={todayNavItem.href} onClick={handleLinkClick}>
+                    <todayNavItem.icon />
+                    <div className="flex flex-col items-start">
+                      <span>{todayNavItem.label}</span>
+                      {todayNavItem.subLabel && <span className="text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">{todayNavItem.subLabel}</span>}
+                    </div>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
-            <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
-             <SidebarHeader className="px-2 lg:px-4 pt-2 pb-1 group-data-[collapsible=icon]:hidden">
-              <span className="text-xs font-medium uppercase text-sidebar-foreground/70">Daily Workouts</span>
-            </SidebarHeader>
-            <SidebarMenu className="p-2 lg:p-4">
-              {workoutNavItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname === item.href}
-                    variant="default"
-                    size="lg"
-                    className="justify-start"
-                    tooltip={item.label}
-                  >
-                    <Link href={item.href} onClick={handleLinkClick}>
-                      <item.icon />
-                      <div className="flex flex-col items-start">
-                        <span>{item.label}</span>
-                        <span className="text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">{item.subLabel}</span>
-                      </div>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+
+            {/* Separator before other navigation sections */}
+            {(mainNavItems.length > 0 || workoutNavItems.length > 0) && (
+                <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
+            )}
+
+            {/* Main Navigation Items (e.g., Progress Dashboard) */}
+            {mainNavItems.length > 0 && (
+              <SidebarMenu className="p-2 lg:p-4">
+                {mainNavItems.map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
+                      variant="default"
+                      size="lg"
+                      className="justify-start"
+                      tooltip={item.label}
+                    >
+                      <Link href={item.href} onClick={handleLinkClick}>
+                        <item.icon />
+                        <div className="flex flex-col items-start">
+                          <span>{item.label}</span>
+                          {item.subLabel && <span className="text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">{item.subLabel}</span>}
+                        </div>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            )}
+            
+            {/* Separator before Daily Workouts if both mainNav and workoutNav exist */}
+            {mainNavItems.length > 0 && workoutNavItems.length > 0 && (
+                 <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
+            )}
+
+            {/* Daily Workouts Section */}
+            {workoutNavItems.length > 0 && (
+              <>
+                <SidebarHeader className="px-2 lg:px-4 pt-2 pb-1 group-data-[collapsible=icon]:hidden">
+                  <span className="text-xs font-medium uppercase text-sidebar-foreground/70">Daily Workouts</span>
+                </SidebarHeader>
+                <SidebarMenu className="p-2 lg:p-4">
+                  {workoutNavItems.map((item) => (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={pathname === item.href}
+                        variant="default"
+                        size="lg"
+                        className="justify-start"
+                        tooltip={item.label}
+                      >
+                        <Link href={item.href} onClick={handleLinkClick}>
+                          <item.icon />
+                          <div className="flex flex-col items-start">
+                            <span>{item.label}</span>
+                            <span className="text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">{item.subLabel}</span>
+                          </div>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </>
+            )}
           </ScrollArea>
         </SidebarContent>
         {/* <SidebarFooter className="p-4">
