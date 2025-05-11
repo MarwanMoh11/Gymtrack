@@ -21,6 +21,7 @@ export type Exercise = {
   isActivity?: boolean; // General category for non-lifting activities
   isStretch?: boolean;
   isFoamRoll?: boolean;
+  isRecovery?: boolean; // Added for Sunday's activities
   unit?: 'reps' | 's' | 'min'; // Default unit for exercise if not specified per set
 };
 

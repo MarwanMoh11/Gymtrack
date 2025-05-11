@@ -8,42 +8,59 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardDescription, CardHeader, CardTitle } from '../ui/card';
 
-interface WorkoutViewProps {
-  workoutDay: WorkoutDay;
-}
+const getCurrentDateString = (): string => {
+  // Ensures that a date is used, avoids issues with server/client mismatch for default date.
+  // This component is client-side, so new Date() is safe here.
+  return new Date().toISOString().split('T')[0];
+};
 
-function getLocalStorageKey(dayId: string): string {
-  // For simplicity, not including date. Data will persist for the day across sessions.
-  return `gymtrack_log_${dayId}`;
+function getLocalStorageKey(dayId: string, date: string): string {
+  return `gymtrack_log_${dayId}_${date}`;
 }
 
 export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isInitialized, setIsInitialized] = useState(false);
+  const [currentDate, setCurrentDate] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const key = getLocalStorageKey(workoutDay.id);
+    // Set current date only on the client side after mount
+    setCurrentDate(getCurrentDateString());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && currentDate) {
+      const key = getLocalStorageKey(workoutDay.id, currentDate);
       const storedLog = localStorage.getItem(key);
       if (storedLog) {
         try {
           setDailyLog(JSON.parse(storedLog));
         } catch (error) {
           console.error("Failed to parse stored log:", error);
-          localStorage.removeItem(key); // Clear corrupted data
+          localStorage.removeItem(key); 
         }
+      } else {
+        // If no log for the current date, ensure dailyLog is empty
+        setDailyLog({});
       }
       setIsInitialized(true);
     }
-  }, [workoutDay.id]);
+  }, [workoutDay.id, currentDate]);
 
   useEffect(() => {
-    if (isInitialized && typeof window !== 'undefined') {
-      const key = getLocalStorageKey(workoutDay.id);
-      localStorage.setItem(key, JSON.stringify(dailyLog));
+    if (isInitialized && typeof window !== 'undefined' && currentDate) {
+      const key = getLocalStorageKey(workoutDay.id, currentDate);
+      if (Object.keys(dailyLog).length > 0) {
+        localStorage.setItem(key, JSON.stringify(dailyLog));
+      } else {
+        // If dailyLog is empty, remove the item from localStorage
+        // This prevents storing empty {} objects if a day is visited but no logs are made,
+        // or if logs are cleared.
+        localStorage.removeItem(key);
+      }
     }
-  }, [dailyLog, workoutDay.id, isInitialized]);
+  }, [dailyLog, workoutDay.id, isInitialized, currentDate]);
 
   const handleLogSet = (exerciseId: string, setId: string, log: LoggedSetData) => {
     setDailyLog(prevLog => ({
@@ -57,18 +74,14 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
 
   const handleClearDayLog = () => {
     setDailyLog({});
-    if (typeof window !== 'undefined') {
-      const key = getLocalStorageKey(workoutDay.id);
-      localStorage.removeItem(key);
-    }
+    // localStorage update will be handled by the useEffect watching dailyLog
     toast({
       title: "Log Cleared",
-      description: `Log for ${workoutDay.dayName} has been cleared.`,
+      description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
     });
   };
   
-  if (!isInitialized && typeof window !== 'undefined') {
-     // Basic loading state to avoid flash of unstyled/empty content before localStorage is read
+  if (!isInitialized || !currentDate) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="animate-pulse">
@@ -91,17 +104,16 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
     );
   }
 
-
   return (
     <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8">
-      <Card className="mb-8 bg-card shadow-sm border-none">
+      <Card className="mb-8 bg-card shadow-lg border-none">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
             <div>
               <CardTitle className="text-3xl font-bold text-primary mb-1">{workoutDay.dayName}</CardTitle>
-              <CardDescription className="text-lg text-muted-foreground">{workoutDay.title}</CardDescription>
+              <CardDescription className="text-lg text-muted-foreground">{workoutDay.title} - {currentDate}</CardDescription>
             </div>
-             <Button variant="outline" onClick={handleClearDayLog} size="sm" className="mt-2 sm:mt-0">
+             <Button variant="outline" onClick={handleClearDayLog} size="sm" className="mt-2 sm:mt-0 rounded-full">
               Clear Today's Log
             </Button>
           </div>

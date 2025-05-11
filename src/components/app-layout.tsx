@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Dumbbell, CalendarDays, Settings, PanelLeft } from 'lucide-react';
+import { Dumbbell, CalendarDays, Settings, PanelLeft, TrendingUp } from 'lucide-react';
 import {
   Sidebar,
   SidebarHeader,
@@ -21,12 +21,21 @@ import { Logo } from '@/components/icons/logo';
 import { getDays } from '@/data/workout-data';
 import { Separator } from '@/components/ui/separator';
 
-const navItems = getDays().map(day => ({
+const workoutNavItems = getDays().map(day => ({
   href: `/workout/${day.id}`,
   icon: CalendarDays,
   label: day.dayName,
   subLabel: day.title,
 }));
+
+const mainNavItems = [
+  {
+    href: '/dashboard/progressive-overload',
+    icon: TrendingUp,
+    label: 'Progress Dashboard',
+    subLabel: 'Track your gains',
+  }
+];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -53,7 +62,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <SidebarContent asChild>
           <ScrollArea className="h-full">
             <SidebarMenu className="p-2 lg:p-4">
-              {navItems.map((item) => (
+              {mainNavItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
+                    variant="default"
+                    size="lg"
+                    className="justify-start"
+                    tooltip={item.label}
+                  >
+                    <Link href={item.href} onClick={handleLinkClick}>
+                      <item.icon />
+                      <div className="flex flex-col items-start">
+                        <span>{item.label}</span>
+                         {item.subLabel && <span className="text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">{item.subLabel}</span>}
+                      </div>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+            <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
+             <SidebarHeader className="px-2 lg:px-4 pt-2 pb-1 group-data-[collapsible=icon]:hidden">
+              <span className="text-xs font-medium uppercase text-sidebar-foreground/70">Daily Workouts</span>
+            </SidebarHeader>
+            <SidebarMenu className="p-2 lg:p-4">
+              {workoutNavItems.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     asChild
@@ -101,7 +136,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <h1 className="text-lg font-semibold">GymTrack</h1>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 bg-background text-foreground">
           {children}
         </main>
       </SidebarInset>
