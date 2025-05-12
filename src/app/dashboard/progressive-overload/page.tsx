@@ -97,22 +97,12 @@ export default function ProgressiveOverloadDashboardPage() {
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const { toast } = useToast();
 
-  // Initial setup: get logged days, calculate streaks, fetch initial coaching tip
-  useEffect(() => {
-    setIsClient(true);
-    const days = getLoggedDays();
-    setLoggedDays(days);
-    const calculatedStreaks = calculateStreaks(days);
-    setStreaks(calculatedStreaks);
-    fetchCoachingTip(calculatedStreaks); // Fetch tip after streaks are calculated
-  }, []); // Run once on mount
-
   // Fetch general coaching tip
-  const fetchCoachingTip = useCallback(async (currentStreaks?: { current: number; longest: number }) => {
+   const fetchCoachingTip = useCallback(async (currentStreaks?: { current: number; longest: number }) => {
     if (!isClient || typeof window === 'undefined') return;
 
     setIsLoadingCoachingTip(true);
-    setCoachingTip(null);
+    setCoachingTip(null); // Clear previous tip
 
     try {
       const recentLogs = summarizeRecentLogs(); // Get summarized logs
@@ -134,7 +124,20 @@ export default function ProgressiveOverloadDashboardPage() {
     }
   }, [isClient, streaks, toast]); // Depends on streaks state if not provided
 
-  // Refresh logged days, streaks, and fetch a new tip
+
+  // Initial setup: get logged days, calculate streaks, fetch initial coaching tip
+  useEffect(() => {
+    setIsClient(true);
+    const days = getLoggedDays();
+    setLoggedDays(days);
+    const calculatedStreaks = calculateStreaks(days);
+    setStreaks(calculatedStreaks);
+    fetchCoachingTip(calculatedStreaks); // Fetch tip after streaks are calculated
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
+
+  // Refresh dashboard data (e.g., after logging a workout - though logging happens elsewhere)
+  // This can be called if needed, but isn't directly triggered by this page now
   const refreshDashboardData = useCallback(() => {
       const days = getLoggedDays();
       setLoggedDays(days);
@@ -209,17 +212,16 @@ export default function ProgressiveOverloadDashboardPage() {
             {/* Exercise Select Removed */}
         </div>
 
+        {/* Updated Layout: Calendar takes more space, Tip card on the side */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Calendar Section (Larger) */}
-          <div className="lg:col-span-2 space-y-8">
-             {/* Streak Card Removed */}
-
-             <Card className="shadow-lg rounded-2xl">
-              <CardHeader>
-                <div className="flex justify-between items-center flex-wrap gap-2">
+          {/* Calendar Section */}
+          <div className="lg:col-span-2">
+             <Card className="shadow-lg rounded-2xl h-full flex flex-col"> {/* Make card fill height */}
+              <CardHeader className="flex-shrink-0"> {/* Prevent header shrinking */}
+                <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
                     <CardTitle className="text-xl font-semibold flex items-center">
                       <CalendarDays className="mr-2 h-5 w-5 text-primary" />
-                      Logged Workouts Calendar
+                      Workout Log Calendar
                     </CardTitle>
                     {/* Integrated Streak Display */}
                     <div className="flex items-center gap-3 text-sm">
@@ -233,12 +235,13 @@ export default function ProgressiveOverloadDashboardPage() {
                 </div>
                 <CardDescription>Click a highlighted day to view the logged workout.</CardDescription>
               </CardHeader>
-              <CardContent className="flex justify-center p-2 sm:p-4"> {/* Adjusted padding */}
+              {/* Make Calendar fill remaining space */}
+              <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4"> 
                 <Calendar
                   mode="single"
                   selected={selectedDate}
                   onSelect={handleDateSelect}
-                  className="rounded-md border p-0 w-full" // Make calendar fill container width
+                  className="rounded-md border p-0 w-full h-full" // Make calendar fill container
                    modifiers={{
                     logged: loggedDays,
                   }}
@@ -256,15 +259,29 @@ export default function ProgressiveOverloadDashboardPage() {
                     }
                   }}
                   disabled={{ after: new Date() }} // Disable future dates
-                  // Attempt to make calendar cells larger 
+                  // Adjust cell sizes for better fit
                   classNames={{
-                      day: "h-10 w-10 sm:h-12 sm:w-12 text-base", // Increase day cell size & font
-                      head_cell: "w-10 sm:w-12", // Adjust header cell width
-                      // Customize month navigation buttons if needed
-                      // nav_button: "h-8 w-8", 
+                      root: "w-full h-full flex flex-col", // Ensure root takes full space
+                      months: "flex-grow flex flex-col", // Allow months to grow
+                      month: "flex-grow flex flex-col", // Allow month to grow
+                      table: "flex-grow", // Allow table to grow
+                      caption: "h-10", // Fixed height for caption
+                      head_row: "flex justify-around",
+                      head_cell: "w-full text-muted-foreground rounded-md font-normal text-[0.8rem] flex-1 text-center",
+                      row: "flex w-full mt-2 justify-around",
+                      cell: "h-auto aspect-square p-0 relative flex items-center justify-center flex-1", // Square cells that fill space
+                      day: "h-full w-full aspect-square text-sm font-normal aria-selected:opacity-100 rounded-md hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", // Day fills cell
+                      day_selected: "bg-primary text-primary-foreground hover:bg-primary focus:bg-primary",
+                      day_today: "bg-accent text-accent-foreground",
+                      day_outside: "day-outside text-muted-foreground opacity-50",
+                      day_disabled: "text-muted-foreground opacity-50",
+                      day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                      day_hidden: "invisible",
                   }}
                   // Ensure it displays the current month by default, or the month of the selected date
                   month={selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1) : new Date()} 
+                  numberOfMonths={1} // Ensure only one month is shown for better space management
+                  fixedWeeks // Optional: keep grid consistent height
                 />
               </CardContent>
             </Card>
@@ -275,7 +292,7 @@ export default function ProgressiveOverloadDashboardPage() {
              <CoachingTipCard
                 tip={coachingTip?.tip}
                 isLoading={isLoadingCoachingTip}
-                onRefresh={refreshDashboardData}
+                // onRefresh prop is removed as the button is gone
              />
           </div>
         </div>
@@ -306,3 +323,4 @@ export default function ProgressiveOverloadDashboardPage() {
     </div>
   );
 }
+

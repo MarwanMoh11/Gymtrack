@@ -1,17 +1,18 @@
+
 // src/components/dashboard/coaching-tip-card.tsx
 'use client';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Loader2, Lightbulb, RefreshCw } from 'lucide-react';
+// import { Button } from '@/components/ui/button'; // Button no longer needed
+import { Loader2, Lightbulb } from 'lucide-react'; // RefreshCw no longer needed
 
 interface CoachingTipCardProps {
   tip: string | undefined | null;
   isLoading: boolean;
-  onRefresh: () => void;
+  // onRefresh: () => void; // onRefresh prop is removed
 }
 
-export default function CoachingTipCard({ tip, isLoading, onRefresh }: CoachingTipCardProps) {
+export default function CoachingTipCard({ tip, isLoading }: CoachingTipCardProps) {
   return (
     <Card className="shadow-xl rounded-2xl">
       <CardHeader>
@@ -20,10 +21,11 @@ export default function CoachingTipCard({ tip, isLoading, onRefresh }: CoachingT
              <Lightbulb className="mr-2 h-5 w-5" />
              AI Coach Tip
           </CardTitle>
-          <Button variant="ghost" size="icon" onClick={onRefresh} disabled={isLoading} className="rounded-full text-primary hover:bg-primary/10">
+          {/* Refresh Button Removed */}
+          {/* <Button variant="ghost" size="icon" onClick={onRefresh} disabled={isLoading} className="rounded-full text-primary hover:bg-primary/10">
             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCw className="h-5 w-5" />}
             <span className="sr-only">Refresh Tip</span>
-          </Button>
+          </Button> */}
         </div>
         <CardDescription>General advice based on your recent activity.</CardDescription>
       </CardHeader>
@@ -43,10 +45,11 @@ export default function CoachingTipCard({ tip, isLoading, onRefresh }: CoachingT
           <div className="text-center py-8">
              <Lightbulb className="mx-auto h-10 w-10 text-muted-foreground/50 mb-3" />
             <p className="text-muted-foreground">No coaching tip available right now.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">Log some workouts or click refresh.</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">Log some workouts to get started.</p>
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
+
