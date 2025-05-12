@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -95,12 +96,12 @@ function Calendar({
             if (dropdownProps.name === 'months') {
               selectItems = dropdownProps.options.map((option) => ({
                 label: option.label,
-                value: String(option.value?.getMonth()),
+                value: String(option.value?.getMonth()), // Use getMonth() for month value
               }));
             } else if (dropdownProps.name === 'years') {
               selectItems = dropdownProps.options.map((option) => ({
                 label: option.label,
-                value: String(option.value?.getFullYear()),
+                value: String(option.value?.getFullYear()), // Use getFullYear() for year value
               }));
             }
           } else {
