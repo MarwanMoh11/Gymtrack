@@ -8,72 +8,78 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Wand2, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
-import { transformHistoricalDataForAI } from '@/lib/workout-utils'; // Import from new location
+import { transformHistoricalDataForAI } from '@/lib/workout-utils'; 
 
 interface NextUpWidgetProps {
-  exerciseId: string | undefined; // Allow undefined
+  exerciseId: string | undefined;
   exerciseName: string;
-  aiSuggestion: NextSessionRecommendationOutput | null; // Accept suggestion as prop
-  onRefreshNeeded: () => void; // Callback to request parent to refresh data (and AI suggestion)
+  aiSuggestion: NextSessionRecommendationOutput | null;
+  onRefreshNeeded: () => void; 
+  isLoading: boolean; // Receive loading state from parent
 }
 
-export function NextUpWidget({ exerciseId, exerciseName, aiSuggestion, onRefreshNeeded }: NextUpWidgetProps) {
-  const [isLoading, setIsLoading] = useState(false); // For the refresh button's own loading state
+export function NextUpWidget({ exerciseId, exerciseName, aiSuggestion, onRefreshNeeded, isLoading }: NextUpWidgetProps) {
+  const [isRefreshing, setIsRefreshing] = useState(false); // Local state for refresh button animation
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // When aiSuggestion prop changes, update local states
-    if (aiSuggestion) {
-      setError(null);
-    } else if (exerciseId && !aiSuggestion && !isLoading) {
-      // If an exercise is selected, but no suggestion is provided (e.g. AI fetch failed at parent)
-      // Check if we should show a specific message for this widget
-      const recentPerformance = transformHistoricalDataForAI(exerciseId);
-      if(recentPerformance.length === 0) {
-        setError(`Not enough recent logged data for ${exerciseName} to generate a recommendation.`);
-      } else {
-        setError(null); // Parent might be handling the error display
-      }
+    // Update error message based on suggestion and loading state
+    if (!isLoading && exerciseId) {
+        if (aiSuggestion) {
+            setError(null); // Clear error if suggestion is present
+        } else {
+            // Check if there's data to potentially generate a suggestion
+            const recentPerformance = transformHistoricalDataForAI(exerciseId);
+            if (recentPerformance.length === 0) {
+                setError(`Not enough recent logged data for ${exerciseName} to generate a recommendation.`);
+            } else {
+                 // No suggestion, but data exists - could be AI error or just no progression needed
+                 setError(null); // Let the component show the 'no suggestion/prompt refresh' message instead of an error
+            }
+        }
     } else if (!exerciseId) {
-      setError(null); // Clear error if no exercise is selected
+        setError(null); // Clear error if no exercise selected
+    }
+    // Reset refresh button state if loading finishes
+    if (!isLoading) {
+        setIsRefreshing(false);
     }
   }, [aiSuggestion, exerciseId, exerciseName, isLoading]);
 
 
   const handleRefresh = async () => {
-    setIsLoading(true);
+    setIsRefreshing(true); // Show spinner on button
     setError(null);
-    onRefreshNeeded(); // Ask parent to refresh data and AI suggestion
-    // A small delay to allow parent to fetch and update prop
-    setTimeout(() => setIsLoading(false), 1500); 
+    onRefreshNeeded(); // Ask parent to refresh AI suggestion
+    // Parent now controls the main isLoading state, isRefreshing is just for the button visual
   };
   
   return (
     <Card className="shadow-xl rounded-2xl">
       <CardHeader>
         <div className="flex justify-between items-center">
-          <CardTitle className="text-2xl font-bold text-primary">Next Up: {exerciseName || 'Select Exercise'}</CardTitle>
-          <Button variant="ghost" size="icon" onClick={handleRefresh} disabled={isLoading || !exerciseId} className="rounded-full text-primary hover:bg-primary/10">
-            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCw className="h-5 w-5" />}
+          <CardTitle className="text-xl font-bold text-primary">AI Insight: {exerciseName || 'Select Exercise'}</CardTitle>
+          <Button variant="ghost" size="icon" onClick={handleRefresh} disabled={isLoading || isRefreshing || !exerciseId} className="rounded-full text-primary hover:bg-primary/10">
+            {isLoading || isRefreshing ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCw className="h-5 w-5" />}
             <span className="sr-only">Refresh Recommendation</span>
           </Button>
         </div>
-        <CardDescription>AI-powered suggestion for your next session.</CardDescription>
+        <CardDescription>AI suggestion for your next session with this exercise.</CardDescription>
       </CardHeader>
       <CardContent>
-        {isLoading && ( // This isLoading is local to the refresh button click
+        {isLoading && ( // Show main loading indicator from parent
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin text-primary mr-3" />
-            <span className="text-muted-foreground">Refreshing recommendation...</span>
+            <span className="text-muted-foreground">Loading AI suggestion...</span>
           </div>
         )}
-        {error && !isLoading && exerciseId && ( // Only show error if an exercise IS selected
+        {error && !isLoading && exerciseId && ( 
           <Alert variant="destructive">
             <AlertTitle>Info</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        {!isLoading && !error && aiSuggestion && exerciseId && ( // Show suggestion only if an exercise is selected
+        {!isLoading && !error && aiSuggestion && exerciseId && ( 
           <div className="space-y-3">
             <div>
               <h4 className="font-semibold text-lg">Suggested Weight:</h4>
@@ -89,18 +95,22 @@ export function NextUpWidget({ exerciseId, exerciseName, aiSuggestion, onRefresh
             </div>
           </div>
         )}
-        {!isLoading && !error && !aiSuggestion && exerciseId && ( // Show prompt to refresh if exercise selected but no suggestion/error
+        {!isLoading && !error && !aiSuggestion && exerciseId && ( 
           <div className="text-center py-8">
-            <p className="text-muted-foreground">Click the <Wand2 className="inline h-4 w-4 text-primary" /> refresh button to get/update the recommendation for {exerciseName}.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">Ensure you have logged recent sessions for this exercise.</p>
+            <Wand2 className="mx-auto h-10 w-10 text-muted-foreground/50 mb-3" />
+            <p className="text-muted-foreground">No specific suggestion from AI for the next session.</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">This might mean maintaining current weight/reps is advised, or there isn't enough recent data. Click refresh to try again.</p>
+             
           </div>
         )}
-         {!isLoading && !error && !exerciseId && ( // Show prompt to select exercise if none is selected
+         {!isLoading && !exerciseId && ( // Show prompt to select exercise if none is selected
           <div className="text-center py-8">
-            <p className="text-muted-foreground">Please select an exercise above to get a recommendation.</p>
+             <Activity className="mx-auto h-10 w-10 text-muted-foreground/50 mb-3" />
+            <p className="text-muted-foreground">Select an exercise above to get AI insights.</p>
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
+
