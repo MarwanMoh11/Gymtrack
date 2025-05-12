@@ -14,6 +14,8 @@ import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import PastWorkoutLogView from '@/components/dashboard/past-workout-log-view';
 import CoachingTipCard from '@/components/dashboard/coaching-tip-card';
+import { cn } from "@/lib/utils"; // Import cn utility
+import { buttonVariants } from "@/components/ui/button"; // Import buttonVariants
 
 const getLoggedDays = (): Date[] => {
   if (typeof window === 'undefined') return [];
@@ -398,3 +400,4 @@ export default function ProgressiveOverloadDashboardPage() {
     </div>
   );
 }
+
