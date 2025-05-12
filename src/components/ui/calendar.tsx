@@ -5,7 +5,7 @@ import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { DayPicker, DropdownProps } from "react-day-picker" // Import DropdownProps
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select' // Import Select components
-import { ScrollArea } from "./scroll-area"; // Import ScrollArea
+// Removed ScrollArea import as SelectContent handles scrolling
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
@@ -90,18 +90,19 @@ function Calendar({
           const toMonth = toDate ? toDate.getMonth() : undefined;
           const toYear = toDate ? toDate.getFullYear() : undefined;
           let selectItems: { label: string; value: string }[] = [];
-
-          // *** FIX: Check if options array exists before mapping ***
+ 
           if (dropdownProps.options && Array.isArray(dropdownProps.options)) {
             if (dropdownProps.name === 'months') {
               selectItems = dropdownProps.options.map((option) => ({
                 label: option.label,
-                value: String(option.value?.getMonth()), // Use getMonth() for month value
+                // react-day-picker option.value for months is the number 0-11
+                value: String(option.value),
               }));
             } else if (dropdownProps.name === 'years') {
               selectItems = dropdownProps.options.map((option) => ({
                 label: option.label,
-                value: String(option.value?.getFullYear()), // Use getFullYear() for year value
+                // react-day-picker option.value for years is the year number
+                value: String(option.value),
               }));
             }
           } else {
@@ -149,17 +150,16 @@ function Calendar({
               >
                 <SelectValue>{caption}</SelectValue>
               </SelectTrigger>
-              <SelectContent>
-                 <ScrollArea className={cn(
-                    "h-80", // Fixed height for scrollable area
-                    dropdownProps.name === 'years' ? 'w-[4.5rem]' : 'w-[8rem]'
-                  )}>
+              {/* Let SelectContent handle its own scrolling */}
+              <SelectContent className={cn(
+                  // Ensure max height for long lists
+                  "max-h-80"
+              )}>
                     {selectItems.map((item) => (
                     <SelectItem key={item.value} value={item.value} className="text-xs">
                         {item.label}
                     </SelectItem>
                     ))}
-                 </ScrollArea>
               </SelectContent>
             </Select>
           );
