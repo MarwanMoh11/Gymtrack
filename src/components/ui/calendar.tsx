@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -82,16 +83,17 @@ function Calendar({
           const { fromDate, toDate, currentMonth } = dropdownProps; // currentMonth is important
           let selectItems: { label: string; value: string }[] = [];
  
+          // More robust handling of options from react-day-picker
           if (dropdownProps.options && Array.isArray(dropdownProps.options)) {
-            selectItems = dropdownProps.options
-              .filter(option => typeof option.value === 'number' && option.label !== undefined) 
-              .map((option) => ({
-                label: option.label!, // Assert label is defined after filter
-                value: String(option.value),
-              }));
+             selectItems = dropdownProps.options.map((option) => {
+                // Ensure label exists and value is a number before mapping
+                const label = option.label ?? '';
+                // react-day-picker option values are numbers (month index or year)
+                const value = typeof option.value === 'number' ? String(option.value) : '';
+                return { label, value };
+            }).filter(item => item.label !== '' && item.value !== ''); // Filter out invalid items
           } else {
-             // This case should ideally not happen if react-day-picker is working correctly
-             // console.warn("Dropdown options missing or not an array for:", dropdownProps.name, dropdownProps.options);
+             // console.warn("Dropdown options missing or not an array for:", dropdownProps.name); // Cannot add console logs
           }
 
           // Determine the caption for the SelectTrigger
@@ -99,18 +101,28 @@ function Calendar({
           const displayedCaption = dropdownProps.caption || 
             (dropdownProps.name === 'months' ? "Select Month" : "Select Year");
 
+          // Ensure dropdownProps.value is converted to string for the Select component
+          const selectValue = dropdownProps.value !== undefined ? String(dropdownProps.value) : undefined;
+
           return (
             <Select
-              value={dropdownProps.value !== undefined ? String(dropdownProps.value) : undefined}
+              value={selectValue} // Use the stringified value
               onValueChange={(newValue) => {
-                if (dropdownProps.onChange && currentMonth) {
-                    const newDate = new Date(currentMonth);
-                    if (dropdownProps.name === 'months') {
-                        newDate.setMonth(parseInt(newValue, 10));
-                    } else if (dropdownProps.name === 'years') {
-                        newDate.setFullYear(parseInt(newValue, 10));
+                // newValue is the string representation of the number (month index or year)
+                if (dropdownProps.onChange && currentMonth && newValue !== undefined) {
+                    const newDate = new Date(currentMonth); // Base modification on current displayed month/year
+                    const numericValue = parseInt(newValue, 10);
+                    if (!isNaN(numericValue)) {
+                        if (dropdownProps.name === 'months') {
+                            // Ensure month index is valid (0-11)
+                            if (numericValue >= 0 && numericValue <= 11) {
+                                newDate.setMonth(numericValue);
+                            }
+                        } else if (dropdownProps.name === 'years') {
+                            newDate.setFullYear(numericValue);
+                        }
+                        dropdownProps.onChange(newDate); // Call the original onChange with the new date
                     }
-                    dropdownProps.onChange(newDate);
                 }
               }}
             >
@@ -120,9 +132,11 @@ function Calendar({
                    'h-7 w-auto px-2 py-0.5 text-xs font-medium data-[state=open]:bg-accent data-[state=open]:text-accent-foreground',
                    dropdownProps.name === 'years' ? 'w-[5.5rem]' : 'w-[8rem]' // Adjusted year width slightly
                 )}
+                aria-label={dropdownProps.name === 'months' ? 'Select month' : 'Select year'} // Improve accessibility
               >
-                <SelectValue placeholder={dropdownProps.name === 'months' ? "Select Month" : "Select Year"}>
-                    {displayedCaption}
+                {/* Ensure SelectValue has a child, even if it's just the placeholder */}
+                <SelectValue placeholder={displayedCaption}>
+                   {displayedCaption}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent 
@@ -131,10 +145,11 @@ function Calendar({
                   // Add a min-height to prevent complete collapse if content is unexpectedly empty
                   selectItems.length === 0 ? "min-h-[40px] flex items-center justify-center" : "" 
                 )}
+                // position="popper" // Position content relative to trigger
               >
                 {selectItems.length > 0 ? (
                     selectItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value} className="text-xs">
+                    <SelectItem key={`${dropdownProps.name}-${item.value}`} value={item.value} className="text-xs">
                         {item.label}
                     </SelectItem>
                     ))
@@ -155,3 +170,6 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
+
+
+    
