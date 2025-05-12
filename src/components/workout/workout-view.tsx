@@ -8,8 +8,8 @@ import DayProgress from './day-progress';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { nextSessionRecommendation, NextSessionRecommendationInput, NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
-import { transformHistoricalDataForAI } from '@/lib/workout-utils';
+// Removed AI imports: nextSessionRecommendation, NextSessionRecommendationInput, NextSessionRecommendationOutput
+// Removed AI related utility: transformHistoricalDataForAI
 import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading'; // Import loading component
 
@@ -29,10 +29,8 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
-  const [aiSuggestionsForToday, setAiSuggestionsForToday] = useState<Map<string, NextSessionRecommendationOutput | null>>(new Map());
-  const [isLoadingAISuggestions, setIsLoadingAISuggestions] = useState(false);
-  // State to trigger re-render when effective target weights change via user settings
-  const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0); 
+  // Removed AI State: aiSuggestionsForToday, isLoadingAISuggestions
+  const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0);
   const { toast } = useToast();
 
   // Initialize date and load log from localStorage
@@ -48,7 +46,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
           setDailyLog(JSON.parse(storedLog));
         } catch (error) {
           console.error("Failed to parse stored log:", error);
-          localStorage.removeItem(key); 
+          localStorage.removeItem(key);
           setDailyLog({});
         }
       } else {
@@ -75,48 +73,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
     }
   }, [dailyLog, workoutDay.id, isInitialized, currentDate]);
 
-  // Fetch AI suggestions for today's workout
-  const fetchAISuggestionsForToday = useCallback(async () => {
-    if (!isInitialized || !currentDate || typeof window === 'undefined') return; // Need localstorage access
-
-    setIsLoadingAISuggestions(true);
-    const suggestions = new Map<string, NextSessionRecommendationOutput | null>();
-    
-    for (const exercise of workoutDay.exercises) {
-      // Only fetch for main lifts, not accessories/activities
-      if (!exercise.isWarmup && !exercise.isConditioning && !exercise.isStretch && !exercise.isFoamRoll && !exercise.isActivity && !exercise.isMatch && !exercise.isRecovery && !exercise.isCore) {
-        const recentPerformance = transformHistoricalDataForAI(exercise.id); // Needs localStorage
-        if (recentPerformance.length > 0) {
-          try {
-            const input: NextSessionRecommendationInput = {
-              exerciseName: exercise.name,
-              recentPerformance,
-              userGoal: 'Progressive overload for strength and hypertrophy',
-            };
-            const suggestion = await nextSessionRecommendation(input);
-            suggestions.set(exercise.id, suggestion);
-          } catch (e) {
-            console.error(`AI Suggestion Error for ${exercise.name}:`, e);
-            suggestions.set(exercise.id, null); // Store null on error
-          }
-        } else {
-          suggestions.set(exercise.id, null); // Store null if no history
-        }
-      } else {
-        suggestions.set(exercise.id, null); // No suggestion needed for these types
-      }
-    }
-    setAiSuggestionsForToday(suggestions);
-    setIsLoadingAISuggestions(false);
-  }, [workoutDay.exercises, isInitialized, currentDate]);
-
-  // Trigger AI fetch after initialization
-  useEffect(() => {
-    if(isInitialized && currentDate) { 
-       fetchAISuggestionsForToday();
-    }
-  }, [fetchAISuggestionsForToday, isInitialized, currentDate]);
-
+  // Removed fetchAISuggestionsForToday function and related useEffect
 
   // Handle logging a single set
   const handleLogSet = useCallback((exerciseId: string, setId: string, log: LoggedSetData) => {
@@ -125,12 +82,15 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
             ...(prevLog[exerciseId] || {}),
             [setId]: log,
         };
-        // If all sets are now completed, remove the entry if empty, otherwise update
-        const isEmpty = Object.values(newExerciseLog).every(l => !l.isCompleted && !l.reps && !l.weight);
+        // Check if this exercise log is now effectively empty (only contains non-completed sets)
+        const isEmpty = Object.values(newExerciseLog).every(l => !l.isCompleted);
+        
         if (isEmpty) {
+             // Remove the exercise entry entirely if all its sets are marked incomplete
             const { [exerciseId]: _, ...restLog } = prevLog;
             return restLog;
         } else {
+            // Otherwise, update the exercise log
             return {
                 ...prevLog,
                 [exerciseId]: newExerciseLog,
@@ -171,11 +131,11 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
         const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseId);
 
         exerciseDefinition?.sets.forEach(setDef => {
-            // Reset reps to '8' and mark as incomplete
-            updatedExerciseLog[setDef.id] = { 
-                ...exerciseLog[setDef.id], // Keep original weight if logged, but it will be overwritten on next log
-                reps: '8', 
-                isCompleted: false 
+             // Keep the weight if previously logged, but reset reps and mark incomplete
+            updatedExerciseLog[setDef.id] = {
+                weight: exerciseLog[setDef.id]?.weight, // Keep existing logged weight if any
+                reps: '', // Set reps to empty string for placeholder
+                isCompleted: false
             };
         });
 
@@ -194,7 +154,6 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
 
   // Show loading state until initialized
   if (!isInitialized) {
-    // Use the dedicated loading component if available, otherwise simple text
     return typeof LoadingWorkoutPage === 'function' ? <LoadingWorkoutPage /> : <div>Loading workout...</div>;
   }
 
@@ -216,13 +175,12 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
           )}
         </CardHeader>
       </Card>
-      
+
       <DayProgress workoutDay={workoutDay} dailyLog={dailyLog} />
 
       {workoutDay.exercises.map((exercise: Exercise) => {
-        // Get the potentially overridden target weight for display and logging
         const effectiveTargetWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
-        
+
         return (
           <ExerciseCard
             key={`${exercise.id}-${effectiveTargetWeightsKey}`} // Add key to force re-render on target weight changes
@@ -230,8 +188,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
             effectiveTargetWeight={effectiveTargetWeight} // Pass down the effective weight
             onLogSet={handleLogSet}
             loggedData={dailyLog[exercise.id]}
-            aiSuggestionForToday={aiSuggestionsForToday.get(exercise.id)}
-            isLoadingAISuggestion={isLoadingAISuggestions && !aiSuggestionsForToday.has(exercise.id)}
+            // Removed AI suggestion props
             onUpdateEffectiveTargetWeight={handleUpdateEffectiveTargetWeight}
             triggerRepReset={triggerRepReset} // Pass down the reset function
           />
