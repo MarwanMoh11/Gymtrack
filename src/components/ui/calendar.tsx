@@ -1,11 +1,9 @@
-
 "use client"
 
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DayPicker, DropdownProps } from "react-day-picker" // Import DropdownProps
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select' // Import Select components
-// Removed ScrollArea import as SelectContent handles scrolling
+import { DayPicker, DropdownProps } from "react-day-picker" 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select' 
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
@@ -21,14 +19,14 @@ function Calendar({
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
-      className={cn("p-3 h-full flex flex-col", className)} // Added h-full flex flex-col
+      className={cn("p-3 h-full flex flex-col", className)} 
       classNames={{
-        root: cn("flex flex-col flex-grow", classNames?.root), // Ensure root takes space
-        months: cn("flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0 flex-grow", classNames?.months), // flex-grow added
-        month: cn("space-y-4 flex flex-col flex-grow", classNames?.month), // flex-grow added
-        caption: cn("flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", classNames?.caption), // Adjusted height for dropdowns
-        caption_label: cn("text-sm font-medium hidden", classNames?.caption_label), // Hide label when dropdowns are visible
-        caption_dropdowns: cn("flex gap-1", classNames?.caption_dropdowns), // Style dropdown container
+        root: cn("flex flex-col flex-grow", classNames?.root), 
+        months: cn("flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0 flex-grow", classNames?.months), 
+        month: cn("space-y-4 flex flex-col flex-grow", classNames?.month), 
+        caption: cn("flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", classNames?.caption), 
+        caption_label: cn("text-sm font-medium hidden", classNames?.caption_label), 
+        caption_dropdowns: cn("flex gap-1", classNames?.caption_dropdowns), 
         nav: cn("space-x-1 flex items-center", classNames?.nav),
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -37,24 +35,22 @@ function Calendar({
         ),
         nav_button_previous: cn("absolute left-1", classNames?.nav_button_previous),
         nav_button_next: cn("absolute right-1", classNames?.nav_button_next),
-        table: cn("w-full border-collapse space-y-1 flex-grow", classNames?.table), // flex-grow added
+        table: cn("w-full border-collapse space-y-1 flex-grow", classNames?.table), 
         head_row: cn("flex", classNames?.head_row),
         head_cell: cn(
           "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
           classNames?.head_cell
         ),
         row: cn("flex w-full mt-2", classNames?.row),
-        // Adjusted cell for aspect ratio and flex centering
         cell: cn(
           "flex-1 p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-          "aspect-square flex items-center justify-center", // Ensure square cells and center content
+          "aspect-square flex items-center justify-center", 
           classNames?.cell
         ),
-        // Adjusted day to fill cell and handle hover/focus
         day: cn(
            buttonVariants({ variant: "ghost" }),
-           "h-full w-full aspect-square p-0 font-normal aria-selected:opacity-100 rounded-md", // Fill cell, make square, ensure rounded
-           "hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", // Hover/focus styling
+           "h-full w-full aspect-square p-0 font-normal aria-selected:opacity-100 rounded-md", 
+           "hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", 
           classNames?.day
         ),
         day_range_end: cn("day-range-end", classNames?.day_range_end),
@@ -73,71 +69,48 @@ function Calendar({
           classNames?.day_range_middle
         ),
         day_hidden: cn("invisible", classNames?.day_hidden),
-        dropdown: "rdp-dropdown bg-card", // Style dropdown container
-        dropdown_icon: "ml-2", // Style dropdown icon
-        dropdown_year: "rdp-dropdown_year ml-2", // Style year dropdown container
-        dropdown_month: "rdp-dropdown_month", // Style month dropdown container
-        ...classNames, // Spread remaining custom classNames
+        dropdown: "rdp-dropdown bg-card", 
+        dropdown_icon: "ml-2", 
+        dropdown_year: "rdp-dropdown_year ml-2", 
+        dropdown_month: "rdp-dropdown_month", 
+        ...classNames, 
       }}
       components={{
         IconLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" {...props} />,
         IconRight: ({ ...props }) => <ChevronRight className="h-4 w-4" {...props} />,
-        // Use shadcn Select for dropdowns
         Dropdown: (dropdownProps: DropdownProps) => {
-          const { fromDate, toDate } = dropdownProps;
-          const fromMonth = fromDate ? fromDate.getMonth() : undefined;
-          const fromYear = fromDate ? fromDate.getFullYear() : undefined;
-          const toMonth = toDate ? toDate.getMonth() : undefined;
-          const toYear = toDate ? toDate.getFullYear() : undefined;
+          const { fromDate, toDate, currentMonth } = dropdownProps; // currentMonth is important
           let selectItems: { label: string; value: string }[] = [];
  
           if (dropdownProps.options && Array.isArray(dropdownProps.options)) {
-            if (dropdownProps.name === 'months') {
-              selectItems = dropdownProps.options.map((option) => ({
-                label: option.label,
-                // react-day-picker option.value for months is the number 0-11
+            selectItems = dropdownProps.options
+              .filter(option => typeof option.value === 'number' && option.label !== undefined) 
+              .map((option) => ({
+                label: option.label!, // Assert label is defined after filter
                 value: String(option.value),
               }));
-            } else if (dropdownProps.name === 'years') {
-              selectItems = dropdownProps.options.map((option) => ({
-                label: option.label,
-                // react-day-picker option.value for years is the year number
-                value: String(option.value),
-              }));
-            }
           } else {
-             // Handle case where options are missing (e.g., initial render)
-             console.warn("Dropdown options missing for:", dropdownProps.name);
+             // This case should ideally not happen if react-day-picker is working correctly
+             // console.warn("Dropdown options missing or not an array for:", dropdownProps.name, dropdownProps.options);
           }
 
-           const caption =
-            dropdownProps.caption ??
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            (dropdownProps.name === 'months'
-              ? // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                (dropdownProps.locale?.months && dropdownProps.value !== undefined ? dropdownProps.locale.months[dropdownProps.value] : '')
-              : dropdownProps.value);
+          // Determine the caption for the SelectTrigger
+          // dropdownProps.caption is provided by react-day-picker and is usually correct
+          const displayedCaption = dropdownProps.caption || 
+            (dropdownProps.name === 'months' ? "Select Month" : "Select Year");
 
           return (
             <Select
-              value={String(dropdownProps.value)}
+              value={dropdownProps.value !== undefined ? String(dropdownProps.value) : undefined}
               onValueChange={(newValue) => {
-                if (dropdownProps.name === 'months') {
-                   dropdownProps.onChange?.(
-                    new Date(
-                      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                      dropdownProps.currentMonth!.getFullYear(),
-                      parseInt(newValue, 10)
-                    )
-                  );
-                } else if (dropdownProps.name === 'years') {
-                  dropdownProps.onChange?.(
-                    new Date(
-                      parseInt(newValue, 10),
-                      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                      dropdownProps.currentMonth!.getMonth()
-                    )
-                  );
+                if (dropdownProps.onChange && currentMonth) {
+                    const newDate = new Date(currentMonth);
+                    if (dropdownProps.name === 'months') {
+                        newDate.setMonth(parseInt(newValue, 10));
+                    } else if (dropdownProps.name === 'years') {
+                        newDate.setFullYear(parseInt(newValue, 10));
+                    }
+                    dropdownProps.onChange(newDate);
                 }
               }}
             >
@@ -145,21 +118,31 @@ function Calendar({
                 className={cn(
                    buttonVariants({ variant: 'outline' }),
                    'h-7 w-auto px-2 py-0.5 text-xs font-medium data-[state=open]:bg-accent data-[state=open]:text-accent-foreground',
-                   dropdownProps.name === 'years' ? 'w-[4.5rem]' : 'w-[8rem]' // Adjust width as needed
+                   dropdownProps.name === 'years' ? 'w-[5.5rem]' : 'w-[8rem]' // Adjusted year width slightly
                 )}
               >
-                <SelectValue>{caption}</SelectValue>
+                <SelectValue placeholder={dropdownProps.name === 'months' ? "Select Month" : "Select Year"}>
+                    {displayedCaption}
+                </SelectValue>
               </SelectTrigger>
-              {/* Let SelectContent handle its own scrolling */}
-              <SelectContent className={cn(
-                  // Ensure max height for long lists
-                  "max-h-80"
-              )}>
-                    {selectItems.map((item) => (
+              <SelectContent 
+                className={cn(
+                  "max-h-80", // Ensure max height for long lists
+                  // Add a min-height to prevent complete collapse if content is unexpectedly empty
+                  selectItems.length === 0 ? "min-h-[40px] flex items-center justify-center" : "" 
+                )}
+              >
+                {selectItems.length > 0 ? (
+                    selectItems.map((item) => (
                     <SelectItem key={item.value} value={item.value} className="text-xs">
                         {item.label}
                     </SelectItem>
-                    ))}
+                    ))
+                ) : (
+                    <div className="p-2 text-xs text-muted-foreground text-center">
+                        No options
+                    </div>
+                )}
               </SelectContent>
             </Select>
           );
@@ -172,4 +155,3 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
-
