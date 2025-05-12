@@ -3,13 +3,11 @@
 'use client';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-// import { Button } from '@/components/ui/button'; // Button no longer needed
-import { Loader2, Lightbulb } from 'lucide-react'; // RefreshCw no longer needed
+import { Loader2, Lightbulb } from 'lucide-react';
 
 interface CoachingTipCardProps {
   tip: string | undefined | null;
   isLoading: boolean;
-  // onRefresh: () => void; // onRefresh prop is removed
 }
 
 export default function CoachingTipCard({ tip, isLoading }: CoachingTipCardProps) {
@@ -22,10 +20,6 @@ export default function CoachingTipCard({ tip, isLoading }: CoachingTipCardProps
              AI Coach Tip
           </CardTitle>
           {/* Refresh Button Removed */}
-          {/* <Button variant="ghost" size="icon" onClick={onRefresh} disabled={isLoading} className="rounded-full text-primary hover:bg-primary/10">
-            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCw className="h-5 w-5" />}
-            <span className="sr-only">Refresh Tip</span>
-          </Button> */}
         </div>
         <CardDescription>General advice based on your recent activity.</CardDescription>
       </CardHeader>
@@ -36,20 +30,13 @@ export default function CoachingTipCard({ tip, isLoading }: CoachingTipCardProps
             <span className="text-muted-foreground">Fetching coaching insights...</span>
           </div>
         )}
-        {!isLoading && tip && (
+        {!isLoading && ( // Always try to display the tip when not loading
           <blockquote className="text-center text-sm italic text-foreground/90 border-l-4 border-primary pl-4 py-2">
-             "{tip}"
+             "{tip || 'Log your workouts to get personalized tips!'}" {/* Provide a default inline fallback just in case */}
           </blockquote>
         )}
-        {!isLoading && !tip && (
-          <div className="text-center py-8">
-             <Lightbulb className="mx-auto h-10 w-10 text-muted-foreground/50 mb-3" />
-            <p className="text-muted-foreground">No coaching tip available right now.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">Log some workouts to get started.</p>
-          </div>
-        )}
+        {/* Removed the explicit placeholder section for !isLoading && !tip */}
       </CardContent>
     </Card>
   );
 }
-

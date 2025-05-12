@@ -7,7 +7,7 @@ import { getWorkoutByDay } from '@/data/workout-data';
 import type { DailyLog, WorkoutDay } from '@/types/workout';
 import { History, Loader2, CalendarDays, Flame, Lightbulb } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading';
-import { calculateStreaks } from '@/lib/workout-utils';
+import { calculateStreaks, summarizeRecentLogs } from '@/lib/workout-utils'; // Added summarizeRecentLogs import
 import { getCoachingTip, CoachingTipsOutput } from '@/ai/flows/coaching-tips-flow'; // Removed CoachingTipsInput
 import { useToast } from '@/hooks/use-toast';
 import { Calendar } from '@/components/ui/calendar';
@@ -84,7 +84,7 @@ function getLocalStorageKey(dayId: string, date: Date): string {
 
 export default function ProgressiveOverloadDashboardPage() {
   const [coachingTip, setCoachingTip] = useState<CoachingTipsOutput | null>(null);
-  const [isLoadingCoachingTip, setIsLoadingCoachingTip] = useState(false);
+  const [isLoadingCoachingTip, setIsLoadingCoachingTip] = useState(true); // Start loading true
   const [isClient, setIsClient] = useState(false);
   const [loggedDays, setLoggedDays] = useState<Date[]>([]);
   const [streaks, setStreaks] = useState<{ current: number; longest: number }>({ current: 0, longest: 0 });
@@ -100,21 +100,34 @@ export default function ProgressiveOverloadDashboardPage() {
     if (!isClient || typeof window === 'undefined') return;
 
     setIsLoadingCoachingTip(true);
-    setCoachingTip(null); // Clear previous tip
+    // Don't clear previous tip immediately, let the loading state handle display
+    // setCoachingTip(null);
 
     try {
       const streaksToUse = currentStreaks || streaks; // Use provided streaks or current state
-      // Fetch logs internally within getCoachingTip now
-      const tipResult = await getCoachingTip(streaksToUse);
-      setCoachingTip(tipResult);
+      const tipResult = await getCoachingTip(streaksToUse); // getCoachingTip now handles internal fetch and fallbacks
+
+      // Ensure we set a valid tip object, even if the tip string itself might be a fallback
+      if (tipResult && tipResult.tip) {
+          setCoachingTip(tipResult);
+      } else {
+          // This case should be rare now due to improved flow, but good to have
+          console.warn("getCoachingTip returned unexpected result, using fallback.");
+          setCoachingTip({ tip: "Keep logging your workouts consistently!" });
+      }
+
     } catch (e) {
-      console.error('Coaching Tip Error:', e);
-      toast({ variant: "destructive", title: "AI Coach Error", description: "Could not fetch coaching tip." });
-      setCoachingTip({ tip: "Could not fetch tip. Keep logging consistently!" }); // Set a fallback tip on error
+      // Error case is already handled within getCoachingTip's catch block which returns a fallback tip
+      console.error('Error occurred during fetchCoachingTip:', e);
+      // If getCoachingTip itself throws an error (before the internal try/catch), display error here
+      if (!coachingTip?.tip) { // Check if a tip wasn't already set by a fallback
+          setCoachingTip({ tip: "Could not fetch coaching tip due to an error." });
+          toast({ variant: "destructive", title: "AI Coach Error", description: "Could not fetch coaching tip." });
+      }
     } finally {
       setIsLoadingCoachingTip(false);
     }
-  }, [isClient, streaks, toast]); // Depends on streaks state if not provided
+   }, [isClient, streaks, toast, coachingTip?.tip]); // Add coachingTip.tip to dependencies
 
 
   // Initial setup: get logged days, calculate streaks, fetch initial coaching tip
@@ -122,25 +135,27 @@ export default function ProgressiveOverloadDashboardPage() {
     setIsClient(true);
     if (typeof window !== 'undefined') {
       const today = new Date();
-      setDisplayMonth(new Date(today.getFullYear(), today.getMonth(), 1)); // Initialize displayMonth
+      setDisplayMonth(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))); // Initialize displayMonth
       const days = getLoggedDays();
       setLoggedDays(days);
       const calculatedStreaks = calculateStreaks(days);
       setStreaks(calculatedStreaks);
-      fetchCoachingTip(calculatedStreaks); // Fetch tip immediately after streaks are calculated
+      fetchCoachingTip(calculatedStreaks); // Fetch tip immediately
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount
 
 
-  // Refresh dashboard data (e.g., after logging a workout - though logging happens elsewhere)
-  // This can be called if needed, but isn't directly triggered by this page now
+  // Refresh dashboard data (re-calculate streaks, re-fetch tip)
+  // Can be triggered manually or after specific actions if needed
   const refreshDashboardData = useCallback(() => {
-      const days = getLoggedDays();
-      setLoggedDays(days);
-      const calculatedStreaks = calculateStreaks(days);
-      setStreaks(calculatedStreaks);
-      fetchCoachingTip(calculatedStreaks); // Fetch tip with updated streaks
+      if (typeof window !== 'undefined') {
+          const days = getLoggedDays();
+          setLoggedDays(days);
+          const calculatedStreaks = calculateStreaks(days);
+          setStreaks(calculatedStreaks);
+          fetchCoachingTip(calculatedStreaks); // Fetch tip with updated streaks
+      }
   }, [fetchCoachingTip]);
 
   // Handle selecting a date on the calendar
@@ -250,7 +265,10 @@ export default function ProgressiveOverloadDashboardPage() {
      // Ensure month is a valid Date object
      if (month instanceof Date && !isNaN(month.getTime())) {
         // Set display month to the first day of the selected month in UTC
-        setDisplayMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1)));
+        // Get UTC components to avoid timezone shifts during navigation
+        const year = month.getUTCFullYear();
+        const monthIndex = month.getUTCMonth();
+        setDisplayMonth(new Date(Date.UTC(year, monthIndex, 1)));
      } else {
          console.error("Invalid date received for month change:", month);
          // Optionally reset to current month or show an error
@@ -313,10 +331,6 @@ export default function ProgressiveOverloadDashboardPage() {
                         borderRadius: 'var(--radius)',
                         position: 'relative', // Needed for pseudo-element
                     },
-                    // Add a small dot indicator instead of full background
-                    // logged: {
-                    //    // No background change, just add a dot
-                    // },
                     selected: {
                          backgroundColor: 'hsl(var(--primary))',
                          color: 'hsl(var(--primary-foreground))',
@@ -327,11 +341,10 @@ export default function ProgressiveOverloadDashboardPage() {
                  disabled={{ after: new Date() }} // Disable future dates
                  classNames={{
                     root: "w-full flex flex-col", // Full width, flex column
-                    // months: "flex-grow flex flex-col",
                     month: "flex flex-col space-y-2 flex-grow", // Allow month to grow
-                    // caption: "flex justify-center pt-1 relative items-center h-12 flex-shrink-0", // Standard caption
-                    // nav_button_previous: "absolute left-1",
-                    // nav_button_next: "absolute right-1",
+                    caption: "flex justify-center pt-1 relative items-center h-12 flex-shrink-0", // Standard caption
+                    nav_button_previous: "absolute left-1",
+                    nav_button_next: "absolute right-1",
                     table: "w-full border-collapse flex-grow flex flex-col", // Full width, flex column
                     head_row: "flex justify-around", // Distribute head cells
                     head_cell: "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem] text-center", // Equal width
@@ -354,8 +367,6 @@ export default function ProgressiveOverloadDashboardPage() {
                     day_disabled: "text-muted-foreground opacity-50",
                     day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
                     day_hidden: "invisible",
-                     // Dot indicator style (if using instead of background)
-                    // day_logged: "relative before:content-[''] before:absolute before:bottom-1 before:left-1/2 before:-translate-x-1/2 before:w-1.5 before:h-1.5 before:rounded-full before:bg-primary",
                  }}
                 numberOfMonths={1}
                 fixedWeeks // Keep fixed weeks for consistent height
@@ -400,4 +411,3 @@ export default function ProgressiveOverloadDashboardPage() {
     </div>
   );
 }
-

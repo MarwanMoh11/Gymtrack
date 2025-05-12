@@ -28,7 +28,7 @@ const CoachingTipsInputSchema = z.object({
 export type CoachingTipsInput = z.infer<typeof CoachingTipsInputSchema>;
 
 const CoachingTipsOutputSchema = z.object({
-  tip: z.string().describe('A concise, actionable coaching tip based on recent activity and goals. Should be encouraging and offer general advice like considering deloads, intensity changes, or praising consistency. Should always provide a tip, even if data is minimal.'),
+  tip: z.string().describe('A concise, actionable coaching tip based on recent activity and goals. Should be encouraging and offer general advice like considering deloads, intensity changes, or praising consistency. **Must always provide a tip**, even if data is minimal or empty.'),
 });
 export type CoachingTipsOutput = z.infer<typeof CoachingTipsOutputSchema>;
 
@@ -42,7 +42,19 @@ export async function getCoachingTip(streakData: { current: number; longest: num
     userGoal: userGoal || 'General strength and hypertrophy with progressive overload.', // Use provided or default goal
   };
 
-  return coachingTipsFlow(inputToSend);
+  try {
+      const result = await coachingTipsFlow(inputToSend);
+      // Ensure we have a non-empty tip, otherwise return a fallback
+      if (!result || !result.tip?.trim()) {
+          console.warn("AI returned empty tip, providing default motivational tip.");
+          return { tip: "Log your first workout to start tracking your progress!" };
+      }
+      return result;
+  } catch (error) {
+      console.error("Error in coachingTipsFlow:", error);
+      // Provide a fallback tip on error
+      return { tip: "Keep logging your workouts consistently to track your progress!" };
+  }
 }
 
 
@@ -68,7 +80,7 @@ Recent Workout Summary (last 2-4 weeks - includes days where logging started but
 Based on this information:
 1.  Acknowledge their consistency or lack thereof, using the streak data and log frequency/completion. Logs with 0 completed sets indicate an attempt was made but maybe not finished or fully logged.
 2.  Look for patterns: Are they consistently logging workouts (even incomplete ones)? Are the number of *completed* sets/exercises consistent when they *do* complete workouts?
-3.  Provide *one* concise, actionable, and encouraging coaching tip. **Always provide a tip.**
+3.  Provide *one* concise, actionable, and encouraging coaching tip. **Crucially, you MUST ALWAYS provide a tip in the 'tip' field.** Do not leave it empty or null.
 4.  Tips should be *general* guidance. Examples:
     - If consistency is good (high streak, frequent logs with completed sets): Praise it, suggest maintaining focus or considering a small intensity increase if appropriate.
     - If consistency is poor (low/zero streak, infrequent logs): Encourage getting back on track, suggest starting small, maybe logging just one exercise.
@@ -77,9 +89,9 @@ Based on this information:
     - Consider suggesting a deload *only if* there's a long streak combined with high activity. Avoid specific weight/rep advice.
 5.  Keep the tone positive and motivating.
 6.  Do not ask questions. Provide a direct tip.
-7.  If there's very little data (e.g., no recent logs, zero streaks): Provide a general motivational message like "Log your next workout to start tracking progress!" or "Let's get started! Log even one set today to build momentum.".
+7.  **If there is absolutely no data (no recent logs, zero streaks):** Provide a general motivational message like "Let's get started! Log your first workout today to begin tracking your progress." or "Log your next workout to start tracking progress and get personalized tips!". **Ensure this tip is still provided in the 'tip' field.**
 
-Example Output:
+Example Output (Always include the 'tip'):
 {
   "tip": "Amazing consistency with a {{streakData.current}}-day streak! Keep that momentum going this week."
 }
@@ -90,16 +102,17 @@ Example Output:
   "tip": "Looks like you missed a few sessions recently. Try scheduling your workouts to stay on track!"
 }
 {
-  "tip": "No recent workouts logged. Let's get back into it! Even a short session helps build momentum."
+  "tip": "Let's get started! Log even one set today to build momentum."
 }
 
 Output only the JSON object containing the tip.
 `,
 });
 
+// Define the flow but keep it internal, the exported function handles error/empty checks
 const coachingTipsFlow = ai.defineFlow(
   {
-    name: 'coachingTipsFlow',
+    name: 'coachingTipsFlowInternal', // Renamed to avoid confusion
     inputSchema: CoachingTipsInputSchema,
     outputSchema: CoachingTipsOutputSchema,
   },
@@ -113,11 +126,14 @@ const coachingTipsFlow = ai.defineFlow(
     }
 
     const {output} = await prompt(input);
-    if (!output || !output.tip) {
-        // Fallback tip if AI fails or returns empty tip
-        console.error("AI failed to generate a valid tip, providing fallback.");
-        return { tip: "Keep logging your workouts consistently to track your progress!" };
+
+    // The actual fallback logic is now handled in the exported `getCoachingTip` wrapper
+    if (!output) {
+        // This case should ideally be rare if the prompt works, but good to handle
+        console.error("AI prompt failed to return any output structure.");
+        throw new Error("AI failed to generate a response structure.");
     }
+    // Return the raw output, even if the tip might be empty (handled by caller)
     return output;
   }
 );
