@@ -7,11 +7,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Loader2, Wand2, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import type { NextSessionRecommendationOutput, NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
+import type { NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
 import { transformHistoricalDataForAI } from '@/lib/workout-utils'; // Import from new location
 
 interface NextUpWidgetProps {
-  exerciseId: string | null;
+  exerciseId: string | undefined; // Allow undefined
   exerciseName: string;
   aiSuggestion: NextSessionRecommendationOutput | null; // Accept suggestion as prop
   onRefreshNeeded: () => void; // Callback to request parent to refresh data (and AI suggestion)
@@ -34,6 +34,8 @@ export function NextUpWidget({ exerciseId, exerciseName, aiSuggestion, onRefresh
       } else {
         setError(null); // Parent might be handling the error display
       }
+    } else if (!exerciseId) {
+      setError(null); // Clear error if no exercise is selected
     }
   }, [aiSuggestion, exerciseId, exerciseName, isLoading]);
 
@@ -65,13 +67,13 @@ export function NextUpWidget({ exerciseId, exerciseName, aiSuggestion, onRefresh
             <span className="text-muted-foreground">Refreshing recommendation...</span>
           </div>
         )}
-        {error && !isLoading && (
+        {error && !isLoading && exerciseId && ( // Only show error if an exercise IS selected
           <Alert variant="destructive">
             <AlertTitle>Info</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        {!isLoading && !error && aiSuggestion && (
+        {!isLoading && !error && aiSuggestion && exerciseId && ( // Show suggestion only if an exercise is selected
           <div className="space-y-3">
             <div>
               <h4 className="font-semibold text-lg">Suggested Weight:</h4>
@@ -87,15 +89,15 @@ export function NextUpWidget({ exerciseId, exerciseName, aiSuggestion, onRefresh
             </div>
           </div>
         )}
-        {!isLoading && !error && !aiSuggestion && exerciseId && (
+        {!isLoading && !error && !aiSuggestion && exerciseId && ( // Show prompt to refresh if exercise selected but no suggestion/error
           <div className="text-center py-8">
             <p className="text-muted-foreground">Click the <Wand2 className="inline h-4 w-4 text-primary" /> refresh button to get/update the recommendation for {exerciseName}.</p>
             <p className="text-xs text-muted-foreground/70 mt-1">Ensure you have logged recent sessions for this exercise.</p>
           </div>
         )}
-         {!isLoading && !error && !aiSuggestion && !exerciseId && (
+         {!isLoading && !error && !exerciseId && ( // Show prompt to select exercise if none is selected
           <div className="text-center py-8">
-            <p className="text-muted-foreground">Please select an exercise to get a recommendation.</p>
+            <p className="text-muted-foreground">Please select an exercise above to get a recommendation.</p>
           </div>
         )}
       </CardContent>

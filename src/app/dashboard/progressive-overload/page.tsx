@@ -8,11 +8,12 @@ import { ProgressChart, type ChartDataPoint } from '@/components/dashboard/progr
 import { NextUpWidget } from '@/components/dashboard/next-up-widget';
 import { weeklyPlan } from '@/data/workout-data';
 import type { DailyLog, LoggedSetData, Exercise as ExerciseType } from '@/types/workout';
-import { LineChart as LucideLineChart, History, Loader2 } from 'lucide-react';
+import { LineChart as LucideLineChart, History, Loader2, CalendarDays } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading'; // Use the dedicated loading component
 import { getAllExercises, parseWeightToNumber, transformHistoricalDataForAI } from '@/lib/workout-utils';
 import { nextSessionRecommendation, NextSessionRecommendationInput, NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
 import { useToast } from '@/hooks/use-toast';
+import { Calendar } from '@/components/ui/calendar';
 
 const getHistoricalDataForExercise = (exerciseId: string, exerciseName?: string): ChartDataPoint[] => {
   if (typeof window === 'undefined') return [];
@@ -74,6 +75,23 @@ const getHistoricalDataForExercise = (exerciseId: string, exerciseName?: string)
   });
 };
 
+const getLoggedDays = (): Date[] => {
+  if (typeof window === 'undefined') return [];
+  const loggedDates = new Set<string>();
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key) continue;
+    const match = key.match(/^gymtrack_log_[a-zA-Z0-9-]+_(\d{4}-\d{2}-\d{2})$/);
+    if (match) {
+      loggedDates.add(match[1]);
+    }
+  }
+  // Convert string dates to Date objects, handling potential timezone issues
+  return Array.from(loggedDates).map(dateStr => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day); // Use UTC or local time consistently
+  });
+}
 
 export default function ProgressiveOverloadDashboardPage() {
   const [allExercises, setAllExercises] = useState<Array<{ id: string; name: string }>>([]);
@@ -82,18 +100,20 @@ export default function ProgressiveOverloadDashboardPage() {
   const [aiNextSessionSuggestion, setAiNextSessionSuggestion] = useState<NextSessionRecommendationOutput | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
+  const [loggedDays, setLoggedDays] = useState<Date[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
     setIsClient(true);
     const exercises = getAllExercises();
     setAllExercises(exercises);
+    setLoggedDays(getLoggedDays());
     if (exercises.length > 0 && !selectedExerciseId) {
       setSelectedExerciseId(exercises[0].id);
     } else if (exercises.length === 0) {
       setIsLoading(false);
     }
-  }, []); // Run once on mount, selectedExerciseId dependency removed to avoid loop with fetchData
+  }, []); // Run once on mount
 
 
   const selectedExercise = useMemo(() => {
@@ -109,6 +129,7 @@ export default function ProgressiveOverloadDashboardPage() {
 
       const historicalData = getHistoricalDataForExercise(selectedExerciseId, selectedExerciseName);
       setChartData(historicalData);
+      setLoggedDays(getLoggedDays()); // Refresh logged days as well
 
       if (historicalData.length > 0) {
         const recentPerformanceForAI = transformHistoricalDataForAI(selectedExerciseId);
@@ -126,7 +147,11 @@ export default function ProgressiveOverloadDashboardPage() {
             toast({ variant: "destructive", title: "AI Error", description: "Could not fetch AI suggestion for target line." });
             setAiNextSessionSuggestion(null);
           }
+        } else {
+           setAiNextSessionSuggestion(null); // Clear suggestion if no recent data for AI
         }
+      } else {
+         setAiNextSessionSuggestion(null); // Clear suggestion if no historical data
       }
       setIsLoading(false);
     } else if (!selectedExerciseId && isClient) {
@@ -165,11 +190,13 @@ export default function ProgressiveOverloadDashboardPage() {
         }
         
         // Project further 11 weeks (total 12 including the AI point or first week)
-        const weeklyIncrement = aiNextSessionSuggestion ? Math.max(0.5, (parseWeightToNumber(aiNextSessionSuggestion.suggestedWeight) - lastActualPoint.weight) / 1) : 0.5; // Default or AI guided
+        // Use a minimum increment or AI suggested increment
+        const weeklyIncrement = aiNextSessionSuggestion ? Math.max(0.5, (parseWeightToNumber(aiNextSessionSuggestion.suggestedWeight, selectedExerciseName) - lastActualPoint.weight)) : 0.5;
         
         for (let i = 0; i < 11; i++) {
             lastDate = new Date(lastDate.getTime() + oneWeekMillis);
-            currentTargetWeight += weeklyIncrement > 0 ? weeklyIncrement : 0.5; // ensure some progression if AI suggests maintenance
+            // Ensure some minimal progression even if AI suggests maintenance or small decrease
+            currentTargetWeight += Math.max(0.25, weeklyIncrement); 
             simulatedTarget.push({ date: lastDate.toISOString().split('T')[0], weight: parseFloat(currentTargetWeight.toFixed(1)), type: 'target' });
         }
 
@@ -205,7 +232,7 @@ export default function ProgressiveOverloadDashboardPage() {
       <header className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h1 className="text-3xl font-bold text-primary flex items-center">
           <LucideLineChart className="mr-3 h-8 w-8" />
-          Progressive Overload Dashboard
+          Progress Dashboard
         </h1>
         {allExercises.length > 0 ? (
             <Select value={selectedExerciseId} onValueChange={setSelectedExerciseId}>
@@ -228,20 +255,53 @@ export default function ProgressiveOverloadDashboardPage() {
       {isLoading && selectedExerciseId && <LoadingProgressiveOverloadDashboard />}
 
       {!isLoading && selectedExerciseId && (
-        <>
-          <ProgressChart 
-            actualData={chartData} 
-            targetData={targetProgressionData} 
-            exerciseName={selectedExerciseName} 
-          />
-          <NextUpWidget 
-            exerciseId={selectedExerciseId} 
-            exerciseName={selectedExerciseName}
-            aiSuggestion={aiNextSessionSuggestion} // Pass down the fetched suggestion
-            onRefreshNeeded={fetchDashboardData} // Allow widget to trigger a data refresh if needed
-          />
-        </>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-8">
+            <ProgressChart 
+              actualData={chartData} 
+              targetData={targetProgressionData} 
+              exerciseName={selectedExerciseName} 
+            />
+            <NextUpWidget 
+              exerciseId={selectedExerciseId} 
+              exerciseName={selectedExerciseName}
+              aiSuggestion={aiNextSessionSuggestion} // Pass down the fetched suggestion
+              onRefreshNeeded={fetchDashboardData} // Allow widget to trigger a data refresh if needed
+            />
+          </div>
+          <div className="lg:col-span-1">
+             <Card className="shadow-lg rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-xl font-semibold flex items-center">
+                  <CalendarDays className="mr-2 h-5 w-5 text-primary" />
+                  Logged Days
+                </CardTitle>
+                <CardDescription>Calendar view of your logged workout days.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex justify-center">
+                <Calendar
+                  mode="multiple" // Show multiple selections (logged days)
+                  selected={loggedDays}
+                  className="rounded-md border"
+                   modifiers={{
+                    logged: loggedDays, // Custom modifier for logged days
+                  }}
+                  modifiersStyles={{
+                    logged: { 
+                      backgroundColor: 'hsl(var(--primary) / 0.3)', // Highlight logged days
+                      borderRadius: 'var(--radius)'
+                    } 
+                  }}
+                  disabled={{ after: new Date() }} // Disable future dates
+                  // Add more props like onSelect if interaction is needed
+                />
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       )}
+
+      {/* Placeholder cards when no exercise is selected or data is loading */}
       {!selectedExerciseId && !isLoading && allExercises.length > 0 && (
         <Card className="shadow-lg rounded-2xl">
             <CardHeader>

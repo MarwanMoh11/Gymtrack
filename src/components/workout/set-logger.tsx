@@ -36,9 +36,14 @@ export default function SetLogger({
   
   // State for the reps input
   const [currentReps, setCurrentReps] = useState<string>(() => {
+    // Initialize with previous set's logged reps if editing and no current log exists
+    if (isEditingInitially && loggedSetData?.reps === undefined && previousLoggedReps !== undefined) {
+      return String(previousLoggedReps);
+    }
+    // Otherwise, use the logged reps for this set if available
     if (loggedSetData?.reps !== undefined) return String(loggedSetData.reps);
-    if (previousLoggedReps !== undefined) return String(previousLoggedReps);
-    return ''; // Start empty if no prior data
+    // Fallback to empty
+    return ''; 
   });
 
   // State for editing mode
@@ -47,10 +52,15 @@ export default function SetLogger({
   // Effect to update editing state if isEditingInitially changes (e.g., after weight reset)
   useEffect(() => {
     setIsEditing(isEditingInitially);
-    if (isEditingInitially && loggedSetData?.reps !== undefined) {
-        setCurrentReps(String(loggedSetData.reps)); // Ensure input reflects reset value
-    } else if (isEditingInitially) {
-        setCurrentReps(previousLoggedReps !== undefined ? String(previousLoggedReps) : '');
+    if (isEditingInitially) {
+       // If forced into editing, reset input based on priority: logged -> previous -> empty
+       if (loggedSetData?.reps !== undefined) {
+          setCurrentReps(String(loggedSetData.reps));
+       } else if (previousLoggedReps !== undefined) {
+          setCurrentReps(String(previousLoggedReps));
+       } else {
+          setCurrentReps('');
+       }
     }
   }, [isEditingInitially, loggedSetData?.reps, previousLoggedReps]);
 
@@ -132,11 +142,7 @@ export default function SetLogger({
           {/* Show logged reps and the weight used for the whole exercise during this set */}
           <span className="text-primary font-semibold flex items-center">
             Logged: {loggedSetData.reps || 'N/A'} {unitLabel}
-            {loggedSetData.weight && (
-                <span className='ml-2 flex items-center text-xs text-muted-foreground'>
-                    <Dumbbell className='h-3 w-3 mr-1'/> ({loggedSetData.weight})
-                </span>
-            )}
+            {/* Weight display removed from here */}
             </span>
         </div>
         <Button variant="ghost" size="icon" onClick={handleEdit} className="h-8 w-8">
@@ -167,7 +173,7 @@ export default function SetLogger({
               type="number" // Use number type for better mobile input
               inputMode="numeric" // Hint for numeric keyboard
               pattern="[0-9]*" // Pattern for numeric input
-              placeholder={`${setData.targetReps}`}
+              placeholder={`${previousLoggedReps !== undefined ? previousLoggedReps : setData.targetReps}`} // Hint previous reps or target
               value={currentReps}
               onChange={(e) => setCurrentReps(e.target.value.replace(/[^0-9]/g, ''))} // Allow only numbers
               className="h-9 text-sm text-center appearance-none w-16" // Adjust width as needed
@@ -185,12 +191,7 @@ export default function SetLogger({
           <span className="sr-only sm:not-sr-only sm:ml-1">Log</span>
         </Button>
       </div>
-      {/* Display target weight hint if applicable */}
-      {(effectiveTargetWeight || setData.targetWeight) && unitLabel === 'reps' && (
-          <p className='text-xs text-muted-foreground text-right mt-1 pr-12 sm:pr-16'>
-             Weight: {effectiveTargetWeight || setData.targetWeight}
-          </p>
-      )}
+      {/* Target weight hint removed from here */}
     </div>
   );
 }
