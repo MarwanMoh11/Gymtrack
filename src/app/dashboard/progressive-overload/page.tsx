@@ -3,12 +3,12 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { weeklyPlan, getWorkoutByDay } from '@/data/workout-data';
+import { getWorkoutByDay } from '@/data/workout-data';
 import type { DailyLog, WorkoutDay } from '@/types/workout';
 import { History, Loader2, CalendarDays, Flame, Lightbulb } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading';
-import { calculateStreaks, summarizeRecentLogs } from '@/lib/workout-utils';
-import { getCoachingTip, CoachingTipsInput, CoachingTipsOutput } from '@/ai/flows/coaching-tips-flow';
+import { calculateStreaks } from '@/lib/workout-utils';
+import { getCoachingTip, CoachingTipsOutput } from '@/ai/flows/coaching-tips-flow'; // Removed CoachingTipsInput
 import { useToast } from '@/hooks/use-toast';
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -101,15 +101,9 @@ export default function ProgressiveOverloadDashboardPage() {
     setCoachingTip(null); // Clear previous tip
 
     try {
-      const recentLogs = summarizeRecentLogs(); // Get summarized logs
       const streaksToUse = currentStreaks || streaks; // Use provided streaks or current state
-
-      const input: CoachingTipsInput = {
-        recentLogs: recentLogs,
-        streakData: streaksToUse,
-        // userGoal: "Optional user goal here", // Can be added later if needed
-      };
-      const tipResult = await getCoachingTip(input);
+      // Fetch logs internally within getCoachingTip now
+      const tipResult = await getCoachingTip(streaksToUse);
       setCoachingTip(tipResult);
     } catch (e) {
       console.error('Coaching Tip Error:', e);
@@ -124,15 +118,18 @@ export default function ProgressiveOverloadDashboardPage() {
   // Initial setup: get logged days, calculate streaks, fetch initial coaching tip
   useEffect(() => {
     setIsClient(true);
-    const today = new Date();
-    setDisplayMonth(new Date(today.getFullYear(), today.getMonth(), 1)); // Initialize displayMonth
-    const days = getLoggedDays();
-    setLoggedDays(days);
-    const calculatedStreaks = calculateStreaks(days);
-    setStreaks(calculatedStreaks);
-    fetchCoachingTip(calculatedStreaks); // Fetch tip after streaks are calculated
+    if (typeof window !== 'undefined') {
+      const today = new Date();
+      setDisplayMonth(new Date(today.getFullYear(), today.getMonth(), 1)); // Initialize displayMonth
+      const days = getLoggedDays();
+      setLoggedDays(days);
+      const calculatedStreaks = calculateStreaks(days);
+      setStreaks(calculatedStreaks);
+      fetchCoachingTip(calculatedStreaks); // Fetch tip immediately after streaks are calculated
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount
+
 
   // Refresh dashboard data (e.g., after logging a workout - though logging happens elsewhere)
   // This can be called if needed, but isn't directly triggered by this page now
@@ -150,7 +147,8 @@ export default function ProgressiveOverloadDashboardPage() {
 
     // Normalize selected date to UTC start of day for comparison
     const selectedDateUTC = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    setDisplayMonth(new Date(Date.UTC(date.getFullYear(), date.getMonth(), 1))); // Update display month
+    // No need to update displayMonth on select, only on navigation
+    // setDisplayMonth(new Date(Date.UTC(date.getFullYear(), date.getMonth(), 1)));
 
     const dateStr = formatDateLocal(selectedDateUTC); // Use the UTC date for formatting
     const isLogged = loggedDays.some(d => formatDateLocal(d) === dateStr);
@@ -197,23 +195,47 @@ export default function ProgressiveOverloadDashboardPage() {
     } else {
          // This path handles days that have logs but no matching workout plan (e.g., plan changed)
          // Still try to load the log if it exists, even without a plan structure
-         const key = `gymtrack_log_unknown_${dateStr}`; // Attempt a generic key or find based on date
-         const storedLog = localStorage.getItem(key) // This part needs refinement - how are logs stored without workoutDay.id?
-            || Object.keys(localStorage).find(k => k.endsWith(`_${dateStr}`)); // Brute-force find by date if needed
-
-         if (storedLog && localStorage.getItem(storedLog)) {
-             try {
-                setSelectedDateLog(JSON.parse(localStorage.getItem(storedLog)!));
-                setIsLogModalOpen(true);
-                 toast({ variant: "default", title: "Log Found (No Plan)", description: "Showing raw log data as no current plan matches this day." });
-             } catch (error) {
-                 console.error("Failed to parse stored log for selected date without plan:", error);
-                 toast({ variant: "destructive", title: "Error", description: "Could not load the log data." });
-                 setSelectedDateLog(null);
-                 setIsLogModalOpen(false);
+         // Attempt to find ANY log key ending with the date string
+         let foundKey = null;
+         try {
+             for (let i = 0; i < localStorage.length; i++) {
+                 const k = localStorage.key(i);
+                 if (k && k.startsWith('gymtrack_log_') && k.endsWith(`_${dateStr}`)) {
+                     foundKey = k;
+                     break;
+                 }
              }
+         } catch (error) {
+              console.error("Error accessing localStorage keys:", error);
+              toast({ variant: "destructive", title: "Storage Error", description: "Could not access log data." });
+              setSelectedDateLog(null);
+              setIsLogModalOpen(false);
+              return; // Exit if localStorage cannot be accessed
+         }
+
+
+         if (foundKey) {
+             const storedLog = localStorage.getItem(foundKey);
+             if (storedLog) {
+                 try {
+                    setSelectedDateLog(JSON.parse(storedLog));
+                    setIsLogModalOpen(true);
+                    toast({ variant: "default", title: "Log Found (No Plan)", description: "Showing raw log data as no current plan matches this day." });
+                 } catch (error) {
+                     console.error("Failed to parse stored log for selected date without plan:", error);
+                     toast({ variant: "destructive", title: "Error", description: "Could not load the log data." });
+                     setSelectedDateLog(null);
+                     setIsLogModalOpen(false);
+                 }
+            } else {
+                 // Key exists but value is missing/null
+                toast({ variant: "default", title: "Log Data Missing", description: "Log data seems missing for this logged day." });
+                setSelectedDateLog(null);
+                setIsLogModalOpen(false);
+            }
          } else {
-             toast({ variant: "default", title: "Rest Day / No Plan", description: "No workout plan found for this day." });
+             // No log key found for this date at all (shouldn't happen if isLogged was true, but safeguard)
+             toast({ variant: "default", title: "Rest Day / No Log Found", description: "No workout log found for this day." });
              setSelectedDateLog(null);
              setIsLogModalOpen(false);
          }
@@ -223,7 +245,16 @@ export default function ProgressiveOverloadDashboardPage() {
 
   // Handle month change in the calendar navigation
    const handleMonthChange = (month: Date) => {
-    setDisplayMonth(month);
+     // Ensure month is a valid Date object
+     if (month instanceof Date && !isNaN(month.getTime())) {
+        // Set display month to the first day of the selected month in UTC
+        setDisplayMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1)));
+     } else {
+         console.error("Invalid date received for month change:", month);
+         // Optionally reset to current month or show an error
+         const today = new Date();
+         setDisplayMonth(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)));
+     }
    };
 
 
@@ -261,58 +292,72 @@ export default function ProgressiveOverloadDashboardPage() {
               </div>
               <CardDescription>Click a highlighted day to view the logged workout. Use arrows to navigate months.</CardDescription>
             </CardHeader>
-            <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4">
+            {/* Ensure CardContent allows Calendar to grow */}
+            <CardContent className="flex-grow flex items-center justify-center p-1 sm:p-2">
               <Calendar
                 mode="single"
                 selected={selectedDate}
                 onSelect={handleDateSelect}
                 month={displayMonth} // Control displayed month
                 onMonthChange={handleMonthChange} // Handle navigation
-                // Removed dropdown related props: captionLayout, fromYear, toYear
-                className="rounded-md border p-0 w-full h-auto aspect-[4/3] max-h-[600px]"
+                className="rounded-md border p-0 w-full max-w-full h-auto" // Adjusted for full width and auto height
                  modifiers={{
                   logged: loggedDays,
-                }}
-                modifiersStyles={{
-                  logged: {
-                    backgroundColor: 'hsl(var(--primary) / 0.3)',
-                    color: 'hsl(var(--primary-foreground))',
-                    fontWeight: 'bold',
-                    borderRadius: 'var(--radius)'
-                  },
-                  selected: {
-                     backgroundColor: 'hsl(var(--primary))',
-                     color: 'hsl(var(--primary-foreground))',
-                     borderRadius: 'var(--radius)'
-                  }
-                }}
-                disabled={{ after: new Date() }} // Disable future dates
-                classNames={{
-                    root: "w-full h-full flex flex-col",
-                    months: "flex-grow flex flex-col",
-                    month: "flex-grow flex flex-col",
-                    table: "flex-grow",
-                    caption: "flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", // Adjusted caption height and gap
-                    caption_label: "text-sm font-medium", // Ensure label is visible
-                    nav: "space-x-1 flex items-center",
-                    nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-                    nav_button_previous: "absolute left-1",
-                    nav_button_next: "absolute right-1",
-                    head_row: "flex justify-around",
-                    head_cell: "w-full text-muted-foreground rounded-md font-normal text-[0.8rem] flex-1 text-center",
-                    row: "flex w-full mt-2 justify-around",
-                    cell: "h-auto aspect-square p-0 relative flex items-center justify-center flex-1",
-                    day: "h-full w-full aspect-square text-sm font-normal aria-selected:opacity-100 rounded-md hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring",
+                 }}
+                 modifiersStyles={{
+                    logged: { // Use a less intense color for logged days
+                        backgroundColor: 'hsl(var(--primary) / 0.2)', // More subtle highlight
+                        color: 'hsl(var(--foreground))', // Ensure text remains readable
+                        borderRadius: 'var(--radius)',
+                        position: 'relative', // Needed for pseudo-element
+                    },
+                    // Add a small dot indicator instead of full background
+                    // logged: {
+                    //    // No background change, just add a dot
+                    // },
+                    selected: {
+                         backgroundColor: 'hsl(var(--primary))',
+                         color: 'hsl(var(--primary-foreground))',
+                         borderRadius: 'var(--radius)',
+                         fontWeight: 'bold',
+                    }
+                 }}
+                 disabled={{ after: new Date() }} // Disable future dates
+                 classNames={{
+                    root: "w-full flex flex-col", // Full width, flex column
+                    // months: "flex-grow flex flex-col",
+                    month: "flex flex-col space-y-2 flex-grow", // Allow month to grow
+                    // caption: "flex justify-center pt-1 relative items-center h-12 flex-shrink-0", // Standard caption
+                    // nav_button_previous: "absolute left-1",
+                    // nav_button_next: "absolute right-1",
+                    table: "w-full border-collapse flex-grow flex flex-col", // Full width, flex column
+                    head_row: "flex justify-around", // Distribute head cells
+                    head_cell: "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem] text-center", // Equal width
+                    tbody: "flex-grow", // Allow body to take space
+                    row: "flex w-full mt-1", // Rows take full width
+                    cell: cn( // Cell styling from original, ensure takes space
+                         "flex-1 p-0 relative text-center text-sm focus-within:relative focus-within:z-20",
+                        "[&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md", // shadcn styles
+                        "h-12 md:h-16 lg:h-20", // Make cells taller
+                         "flex items-center justify-center", // Center content
+                    ),
+                    day: cn( // Day button styling from original
+                         buttonVariants({ variant: "ghost" }),
+                         "h-full w-full p-0 font-normal aria-selected:opacity-100 rounded-md", // Full size, rounded
+                         "hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", // Hover/focus
+                    ),
                     day_selected: "bg-primary text-primary-foreground hover:bg-primary focus:bg-primary",
                     day_today: "bg-accent text-accent-foreground",
                     day_outside: "day-outside text-muted-foreground opacity-50",
                     day_disabled: "text-muted-foreground opacity-50",
                     day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
                     day_hidden: "invisible",
-                    // Removed dropdown styles
-                }}
+                     // Dot indicator style (if using instead of background)
+                    // day_logged: "relative before:content-[''] before:absolute before:bottom-1 before:left-1/2 before:-translate-x-1/2 before:w-1.5 before:h-1.5 before:rounded-full before:bg-primary",
+                 }}
                 numberOfMonths={1}
-                fixedWeeks
+                fixedWeeks // Keep fixed weeks for consistent height
+                showOutsideDays={true} // Show outside days
               />
             </CardContent>
           </Card>
@@ -342,9 +387,7 @@ export default function ProgressiveOverloadDashboardPage() {
                  // Improved feedback: Check if log exists but plan doesn't
                  !selectedWorkoutDay && selectedDateLog ? (
                    // Render log data even without a plan structure if possible
-                   // This requires PastWorkoutLogView to handle missing workoutDay gracefully
                    <PastWorkoutLogView workoutDay={null} dailyLog={selectedDateLog} />
-                   // <p className="text-muted-foreground text-center mt-8">No current workout plan matches this day, but a log was found.</p>
                  ) : (
                     <p className="text-muted-foreground text-center mt-8">Log details could not be loaded.</p>
                  )
