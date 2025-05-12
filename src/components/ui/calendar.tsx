@@ -3,7 +3,9 @@
 
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DayPicker } from "react-day-picker"
+import { DayPicker, DropdownProps } from "react-day-picker" // Import DropdownProps
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select' // Import Select components
+import { ScrollArea } from "./scroll-area"; // Import ScrollArea
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
@@ -24,8 +26,9 @@ function Calendar({
         root: cn("flex flex-col flex-grow", classNames?.root), // Ensure root takes space
         months: cn("flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0 flex-grow", classNames?.months), // flex-grow added
         month: cn("space-y-4 flex flex-col flex-grow", classNames?.month), // flex-grow added
-        caption: cn("flex justify-center pt-1 relative items-center h-10 flex-shrink-0", classNames?.caption), // fixed height
-        caption_label: cn("text-sm font-medium", classNames?.caption_label),
+        caption: cn("flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", classNames?.caption), // Adjusted height for dropdowns
+        caption_label: cn("text-sm font-medium hidden", classNames?.caption_label), // Hide label when dropdowns are visible
+        caption_dropdowns: cn("flex gap-1", classNames?.caption_dropdowns), // Style dropdown container
         nav: cn("space-x-1 flex items-center", classNames?.nav),
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -70,11 +73,93 @@ function Calendar({
           classNames?.day_range_middle
         ),
         day_hidden: cn("invisible", classNames?.day_hidden),
+        dropdown: "rdp-dropdown bg-card", // Style dropdown container
+        dropdown_icon: "ml-2", // Style dropdown icon
+        dropdown_year: "rdp-dropdown_year ml-2", // Style year dropdown container
+        dropdown_month: "rdp-dropdown_month", // Style month dropdown container
         ...classNames, // Spread remaining custom classNames
       }}
       components={{
         IconLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" {...props} />,
         IconRight: ({ ...props }) => <ChevronRight className="h-4 w-4" {...props} />,
+        // Use shadcn Select for dropdowns
+        Dropdown: (dropdownProps: DropdownProps) => {
+          const { fromDate, toDate } = dropdownProps;
+          const fromMonth = fromDate ? fromDate.getMonth() : undefined;
+          const fromYear = fromDate ? fromDate.getFullYear() : undefined;
+          const toMonth = toDate ? toDate.getMonth() : undefined;
+          const toYear = toDate ? toDate.getFullYear() : undefined;
+          let selectItems: { label: string; value: string }[] = [];
+
+          if (dropdownProps.name === 'months') {
+            selectItems = dropdownProps.options.map((option) => ({
+              label: option.label,
+              value: String(option.value?.getMonth()),
+            }));
+          } else if (dropdownProps.name === 'years') {
+            selectItems = dropdownProps.options.map((option) => ({
+              label: option.label,
+              value: String(option.value?.getFullYear()),
+            }));
+          }
+
+           const caption =
+            dropdownProps.caption ??
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            (dropdownProps.name === 'months'
+              ? // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                dropdownProps.locale!.months![
+                  dropdownProps.value! as number
+                ]
+              : dropdownProps.value);
+
+          return (
+            <Select
+              value={String(dropdownProps.value)}
+              onValueChange={(newValue) => {
+                if (dropdownProps.name === 'months') {
+                   dropdownProps.onChange?.(
+                    new Date(
+                      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                      dropdownProps.currentMonth!.getFullYear(),
+                      parseInt(newValue, 10)
+                    )
+                  );
+                } else if (dropdownProps.name === 'years') {
+                  dropdownProps.onChange?.(
+                    new Date(
+                      parseInt(newValue, 10),
+                      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                      dropdownProps.currentMonth!.getMonth()
+                    )
+                  );
+                }
+              }}
+            >
+              <SelectTrigger
+                className={cn(
+                   buttonVariants({ variant: 'outline' }),
+                   'h-7 w-auto px-2 py-0.5 text-xs font-medium data-[state=open]:bg-accent data-[state=open]:text-accent-foreground',
+                   dropdownProps.name === 'years' ? 'w-[4.5rem]' : 'w-[8rem]' // Adjust width as needed
+                )}
+              >
+                <SelectValue>{caption}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                 <ScrollArea className={cn(
+                    "h-80", // Fixed height for scrollable area
+                    dropdownProps.name === 'years' ? 'w-[4.5rem]' : 'w-[8rem]'
+                  )}>
+                    {selectItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value} className="text-xs">
+                        {item.label}
+                    </SelectItem>
+                    ))}
+                 </ScrollArea>
+              </SelectContent>
+            </Select>
+          );
+        },
       }}
       {...props}
     />

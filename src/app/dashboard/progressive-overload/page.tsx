@@ -2,23 +2,18 @@
 // src/app/dashboard/progressive-overload/page.tsx
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-// Removed Select imports as exercise selection is removed
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-// Removed NextUpWidget import
 import { weeklyPlan, getWorkoutByDay } from '@/data/workout-data';
 import type { DailyLog, WorkoutDay } from '@/types/workout';
-import { History, Loader2, CalendarDays, Flame, Lightbulb } from 'lucide-react'; // Added Lightbulb
+import { History, Loader2, CalendarDays, Flame, Lightbulb } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading';
-// Removed getAllExercises, parseWeightToNumber, transformHistoricalDataForAI, nextSessionRecommendation imports
-import { calculateStreaks, summarizeRecentLogs } from '@/lib/workout-utils'; // Import new log summarizer
-import { getCoachingTip, CoachingTipsInput, CoachingTipsOutput } from '@/ai/flows/coaching-tips-flow'; // Import new coaching tip flow
+import { calculateStreaks, summarizeRecentLogs } from '@/lib/workout-utils';
+import { getCoachingTip, CoachingTipsInput, CoachingTipsOutput } from '@/ai/flows/coaching-tips-flow';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import PastWorkoutLogView from '@/components/dashboard/past-workout-log-view';
-import CoachingTipCard from '@/components/dashboard/coaching-tip-card'; // Import new component
-
-// Removed getHistoricalDataForExercise function
+import CoachingTipCard from '@/components/dashboard/coaching-tip-card';
 
 const getLoggedDays = (): Date[] => {
   if (typeof window === 'undefined') return [];
@@ -86,13 +81,13 @@ function getLocalStorageKey(dayId: string, date: Date): string {
 }
 
 export default function ProgressiveOverloadDashboardPage() {
-  // Removed state related to selectedExerciseId and specific AI suggestions
   const [coachingTip, setCoachingTip] = useState<CoachingTipsOutput | null>(null);
   const [isLoadingCoachingTip, setIsLoadingCoachingTip] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [loggedDays, setLoggedDays] = useState<Date[]>([]);
   const [streaks, setStreaks] = useState<{ current: number; longest: number }>({ current: 0, longest: 0 });
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [displayMonth, setDisplayMonth] = useState<Date>(new Date()); // State for current calendar month
   const [selectedDateLog, setSelectedDateLog] = useState<DailyLog | null>(null);
   const [selectedWorkoutDay, setSelectedWorkoutDay] = useState<WorkoutDay | null>(null);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
@@ -129,6 +124,8 @@ export default function ProgressiveOverloadDashboardPage() {
   // Initial setup: get logged days, calculate streaks, fetch initial coaching tip
   useEffect(() => {
     setIsClient(true);
+    const today = new Date();
+    setDisplayMonth(new Date(today.getFullYear(), today.getMonth(), 1)); // Initialize displayMonth
     const days = getLoggedDays();
     setLoggedDays(days);
     const calculatedStreaks = calculateStreaks(days);
@@ -153,13 +150,18 @@ export default function ProgressiveOverloadDashboardPage() {
 
     // Normalize selected date to UTC start of day for comparison
     const selectedDateUTC = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    setDisplayMonth(new Date(Date.UTC(date.getFullYear(), date.getMonth(), 1))); // Update display month
 
     const dateStr = formatDateLocal(selectedDateUTC); // Use the UTC date for formatting
     const isLogged = loggedDays.some(d => formatDateLocal(d) === dateStr);
 
     if (!isLogged) {
         toast({ variant: "default", title: "No Log", description: "No workout logged on this day." });
-        setSelectedDate(undefined);
+        setSelectedDate(undefined); // Clear selection if no log
+        // Don't open modal if no log exists
+        setIsLogModalOpen(false);
+        setSelectedDateLog(null);
+        setSelectedWorkoutDay(null);
         return;
     }
 
@@ -187,21 +189,49 @@ export default function ProgressiveOverloadDashboardPage() {
             setIsLogModalOpen(false);
             }
         } else {
+            // This case might occur if a day is marked logged but the data is missing/corrupt
             setSelectedDateLog(null);
             setIsLogModalOpen(false);
-            toast({ variant: "default", title: "No Log Found", description: "Log data seems missing for this logged day." });
+            toast({ variant: "default", title: "Log Data Missing", description: "Log data seems missing for this logged day." });
         }
     } else {
-         toast({ variant: "default", title: "Rest Day / No Plan", description: "No specific workout plan found for this day." });
-         setSelectedDateLog(null);
-         setIsLogModalOpen(false);
+         // This path handles days that have logs but no matching workout plan (e.g., plan changed)
+         // Still try to load the log if it exists, even without a plan structure
+         const key = `gymtrack_log_unknown_${dateStr}`; // Attempt a generic key or find based on date
+         const storedLog = localStorage.getItem(key) // This part needs refinement - how are logs stored without workoutDay.id?
+            || Object.keys(localStorage).find(k => k.endsWith(`_${dateStr}`)); // Brute-force find by date if needed
+
+         if (storedLog && localStorage.getItem(storedLog)) {
+             try {
+                setSelectedDateLog(JSON.parse(localStorage.getItem(storedLog)!));
+                setIsLogModalOpen(true);
+                 toast({ variant: "default", title: "Log Found (No Plan)", description: "Showing raw log data as no current plan matches this day." });
+             } catch (error) {
+                 console.error("Failed to parse stored log for selected date without plan:", error);
+                 toast({ variant: "destructive", title: "Error", description: "Could not load the log data." });
+                 setSelectedDateLog(null);
+                 setIsLogModalOpen(false);
+             }
+         } else {
+             toast({ variant: "default", title: "Rest Day / No Plan", description: "No workout plan found for this day." });
+             setSelectedDateLog(null);
+             setIsLogModalOpen(false);
+         }
     }
 
   }, [loggedDays, toast]);
 
+  // Handle month change in the calendar navigation
+   const handleMonthChange = (month: Date) => {
+    setDisplayMonth(month);
+   };
+
+
   if (!isClient) {
     return <LoadingProgressiveOverloadDashboard />;
   }
+
+  const currentYear = new Date().getFullYear();
 
   return (
     <div className="container mx-auto py-8 px-4 md:px-6 space-y-8">
@@ -210,20 +240,18 @@ export default function ProgressiveOverloadDashboardPage() {
               <History className="mr-3 h-8 w-8" />
               Progress & History
             </h1>
-            {/* Exercise Select Removed */}
         </div>
 
         {/* Main Content Area - Calendar First */}
         <div className="space-y-8">
           {/* Calendar Section */}
-          <Card className="shadow-lg rounded-2xl flex flex-col overflow-hidden"> {/* Full width card */}
-            <CardHeader className="flex-shrink-0"> {/* Prevent header shrinking */}
+          <Card className="shadow-lg rounded-2xl flex flex-col overflow-hidden">
+            <CardHeader className="flex-shrink-0">
               <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
                   <CardTitle className="text-xl font-semibold flex items-center">
                     <CalendarDays className="mr-2 h-5 w-5 text-primary" />
                     Workout Log Calendar
                   </CardTitle>
-                  {/* Integrated Streak Display */}
                   <div className="flex items-center gap-3 text-sm">
                        <div className="flex items-center text-primary">
                           <Flame className="h-4 w-4 mr-1"/>
@@ -233,15 +261,19 @@ export default function ProgressiveOverloadDashboardPage() {
                        <span className="text-muted-foreground">Longest: {streaks.longest} days</span>
                   </div>
               </div>
-              <CardDescription>Click a highlighted day to view the logged workout.</CardDescription>
+              <CardDescription>Click a highlighted day to view the logged workout. Use dropdowns to navigate months/years.</CardDescription>
             </CardHeader>
-            {/* Increased Calendar Size Area */}
             <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4">
               <Calendar
                 mode="single"
                 selected={selectedDate}
                 onSelect={handleDateSelect}
-                className="rounded-md border p-0 w-full h-auto aspect-[4/3] max-h-[600px]" // Large aspect ratio, max height
+                month={displayMonth} // Control displayed month
+                onMonthChange={handleMonthChange} // Handle navigation
+                captionLayout="dropdown-buttons" // Enable dropdowns
+                fromYear={currentYear - 5} // Allow navigation 5 years back
+                toYear={currentYear} // Allow navigation up to current year
+                className="rounded-md border p-0 w-full h-auto aspect-[4/3] max-h-[600px]"
                  modifiers={{
                   logged: loggedDays,
                 }}
@@ -259,29 +291,38 @@ export default function ProgressiveOverloadDashboardPage() {
                   }
                 }}
                 disabled={{ after: new Date() }} // Disable future dates
-                // Adjust cell sizes for better fit
                 classNames={{
-                    root: "w-full h-full flex flex-col", // Ensure root takes full space
-                    months: "flex-grow flex flex-col", // Allow months to grow
-                    month: "flex-grow flex flex-col", // Allow month to grow
-                    table: "flex-grow", // Allow table to grow
-                    caption: "h-10", // Fixed height for caption
+                    root: "w-full h-full flex flex-col",
+                    months: "flex-grow flex flex-col",
+                    month: "flex-grow flex flex-col",
+                    table: "flex-grow",
+                    caption: "flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", // Adjusted caption height and gap
+                    caption_label: "hidden", // Hide default label when using dropdowns
+                    nav: "space-x-1 flex items-center",
+                    nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+                    nav_button_previous: "absolute left-1",
+                    nav_button_next: "absolute right-1",
                     head_row: "flex justify-around",
                     head_cell: "w-full text-muted-foreground rounded-md font-normal text-[0.8rem] flex-1 text-center",
                     row: "flex w-full mt-2 justify-around",
-                    cell: "h-auto aspect-square p-0 relative flex items-center justify-center flex-1", // Square cells that fill space
-                    day: "h-full w-full aspect-square text-sm font-normal aria-selected:opacity-100 rounded-md hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", // Day fills cell
+                    cell: "h-auto aspect-square p-0 relative flex items-center justify-center flex-1",
+                    day: "h-full w-full aspect-square text-sm font-normal aria-selected:opacity-100 rounded-md hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring",
                     day_selected: "bg-primary text-primary-foreground hover:bg-primary focus:bg-primary",
                     day_today: "bg-accent text-accent-foreground",
                     day_outside: "day-outside text-muted-foreground opacity-50",
                     day_disabled: "text-muted-foreground opacity-50",
                     day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
                     day_hidden: "invisible",
+                    // Add dropdown styles if needed, often handled by Radix UI Select within DayPicker
+                     caption_dropdowns: "flex gap-1", // Style container for dropdowns
+                     dropdown_month: "relative", // Example, adjust as needed
+                     dropdown_year: "relative", // Example, adjust as needed
+                     dropdown: "absolute", // Default dropdown style if needed
                 }}
                 // Ensure it displays the current month by default, or the month of the selected date
-                month={selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1) : new Date()}
-                numberOfMonths={1} // Ensure only one month is shown for better space management
-                fixedWeeks // Optional: keep grid consistent height
+                // month={selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1) : new Date()} // Replaced by displayMonth state
+                numberOfMonths={1}
+                fixedWeeks
               />
             </CardContent>
           </Card>
@@ -290,7 +331,7 @@ export default function ProgressiveOverloadDashboardPage() {
           <CoachingTipCard
               tip={coachingTip?.tip}
               isLoading={isLoadingCoachingTip}
-              // onRefresh prop is removed as the button is gone
+              // Removed onRefresh as button is removed
            />
         </div>
 
@@ -308,9 +349,12 @@ export default function ProgressiveOverloadDashboardPage() {
               {selectedWorkoutDay && selectedDateLog ? (
                  <PastWorkoutLogView workoutDay={selectedWorkoutDay} dailyLog={selectedDateLog} />
               ) : (
-                 // Provide specific feedback if no workout structure found
+                 // Improved feedback: Check if log exists but plan doesn't
                  !selectedWorkoutDay && selectedDateLog ? (
-                    <p className="text-muted-foreground text-center mt-8">No workout plan structure found for this day, but a log exists.</p>
+                   // Render log data even without a plan structure if possible
+                   // This requires PastWorkoutLogView to handle missing workoutDay gracefully
+                   <PastWorkoutLogView workoutDay={null} dailyLog={selectedDateLog} />
+                   // <p className="text-muted-foreground text-center mt-8">No current workout plan matches this day, but a log was found.</p>
                  ) : (
                     <p className="text-muted-foreground text-center mt-8">Log details could not be loaded.</p>
                  )
