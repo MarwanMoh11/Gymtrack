@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Wand2, RefreshCw } from 'lucide-react';
+import { Loader2, Wand2, RefreshCw, Activity } from 'lucide-react'; // Added Activity import
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
 import { transformHistoricalDataForAI } from '@/lib/workout-utils'; 
@@ -25,17 +25,15 @@ export function NextUpWidget({ exerciseId, exerciseName, aiSuggestion, onRefresh
   useEffect(() => {
     // Update error message based on suggestion and loading state
     if (!isLoading && exerciseId) {
+        const recentPerformance = transformHistoricalDataForAI(exerciseId);
         if (aiSuggestion) {
             setError(null); // Clear error if suggestion is present
+        } else if (recentPerformance.length === 0) {
+            // No suggestion because no data
+            setError(`Not enough recent logged data for ${exerciseName} to generate a recommendation.`);
         } else {
-            // Check if there's data to potentially generate a suggestion
-            const recentPerformance = transformHistoricalDataForAI(exerciseId);
-            if (recentPerformance.length === 0) {
-                setError(`Not enough recent logged data for ${exerciseName} to generate a recommendation.`);
-            } else {
-                 // No suggestion, but data exists - could be AI error or just no progression needed
-                 setError(null); // Let the component show the 'no suggestion/prompt refresh' message instead of an error
-            }
+            // No suggestion, but data exists - could be AI error or just no progression needed
+            setError(null); // Let the component show the 'no suggestion/prompt refresh' message instead of an error
         }
     } else if (!exerciseId) {
         setError(null); // Clear error if no exercise selected
