@@ -58,6 +58,7 @@ const getLoggedDays = (): Date[] => {
   return Array.from(loggedDates)
     .filter(dateStr => typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) // Ensure it's the correct format
     .map(dateStr => {
+       if (!dateStr) return null; // Skip if dateStr is unexpectedly null or undefined
       const [year, month, day] = dateStr.split('-').map(Number);
       // Add another check for parsing results
       if (isNaN(year) || isNaN(month) || isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) {
@@ -149,7 +150,7 @@ export default function ProgressiveOverloadDashboardPage() {
   // Handle selecting a date on the calendar
   const handleDateSelect = useCallback((date: Date | undefined) => {
     if (!date || typeof window === 'undefined') return;
-    
+
     // Normalize selected date to UTC start of day for comparison
     const selectedDateUTC = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
 
@@ -161,11 +162,11 @@ export default function ProgressiveOverloadDashboardPage() {
         setSelectedDate(undefined);
         return;
     }
-    
+
     setSelectedDate(selectedDateUTC); // Store the UTC normalized date
 
     // Use getUTCDay() for consistency as we are working with UTC dates
-    const dayIndex = selectedDateUTC.getUTCDay(); 
+    const dayIndex = selectedDateUTC.getUTCDay();
     const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
     const dayId = daysOfWeek[dayIndex];
     const workoutForDay = getWorkoutByDay(dayId);
@@ -173,7 +174,7 @@ export default function ProgressiveOverloadDashboardPage() {
 
     if (workoutForDay) {
         // Use the selected UTC date to generate the key
-        const key = getLocalStorageKey(workoutForDay.id, selectedDateUTC); 
+        const key = getLocalStorageKey(workoutForDay.id, selectedDateUTC);
         const storedLog = localStorage.getItem(key);
         if (storedLog) {
             try {
@@ -212,92 +213,89 @@ export default function ProgressiveOverloadDashboardPage() {
             {/* Exercise Select Removed */}
         </div>
 
-        {/* Updated Layout: Calendar takes more space, Tip card on the side */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Main Content Area - Calendar First */}
+        <div className="space-y-8">
           {/* Calendar Section */}
-          <div className="lg:col-span-2">
-             <Card className="shadow-lg rounded-2xl h-full flex flex-col"> {/* Make card fill height */}
-              <CardHeader className="flex-shrink-0"> {/* Prevent header shrinking */}
-                <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
-                    <CardTitle className="text-xl font-semibold flex items-center">
-                      <CalendarDays className="mr-2 h-5 w-5 text-primary" />
-                      Workout Log Calendar
-                    </CardTitle>
-                    {/* Integrated Streak Display */}
-                    <div className="flex items-center gap-3 text-sm">
-                         <div className="flex items-center text-primary">
-                            <Flame className="h-4 w-4 mr-1"/>
-                            <span>{streaks.current} Day Streak</span>
-                         </div>
-                         <span className="text-muted-foreground">|</span>
-                         <span className="text-muted-foreground">Longest: {streaks.longest} days</span>
-                    </div>
-                </div>
-                <CardDescription>Click a highlighted day to view the logged workout.</CardDescription>
-              </CardHeader>
-              {/* Make Calendar fill remaining space */}
-              <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4"> 
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={handleDateSelect}
-                  className="rounded-md border p-0 w-full h-full" // Make calendar fill container
-                   modifiers={{
-                    logged: loggedDays,
-                  }}
-                  modifiersStyles={{
-                    logged: {
-                      backgroundColor: 'hsl(var(--primary) / 0.3)',
-                      color: 'hsl(var(--primary-foreground))',
-                      fontWeight: 'bold',
-                      borderRadius: 'var(--radius)'
-                    },
-                    selected: {
-                       backgroundColor: 'hsl(var(--primary))',
-                       color: 'hsl(var(--primary-foreground))',
-                       borderRadius: 'var(--radius)'
-                    }
-                  }}
-                  disabled={{ after: new Date() }} // Disable future dates
-                  // Adjust cell sizes for better fit
-                  classNames={{
-                      root: "w-full h-full flex flex-col", // Ensure root takes full space
-                      months: "flex-grow flex flex-col", // Allow months to grow
-                      month: "flex-grow flex flex-col", // Allow month to grow
-                      table: "flex-grow", // Allow table to grow
-                      caption: "h-10", // Fixed height for caption
-                      head_row: "flex justify-around",
-                      head_cell: "w-full text-muted-foreground rounded-md font-normal text-[0.8rem] flex-1 text-center",
-                      row: "flex w-full mt-2 justify-around",
-                      cell: "h-auto aspect-square p-0 relative flex items-center justify-center flex-1", // Square cells that fill space
-                      day: "h-full w-full aspect-square text-sm font-normal aria-selected:opacity-100 rounded-md hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", // Day fills cell
-                      day_selected: "bg-primary text-primary-foreground hover:bg-primary focus:bg-primary",
-                      day_today: "bg-accent text-accent-foreground",
-                      day_outside: "day-outside text-muted-foreground opacity-50",
-                      day_disabled: "text-muted-foreground opacity-50",
-                      day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
-                      day_hidden: "invisible",
-                  }}
-                  // Ensure it displays the current month by default, or the month of the selected date
-                  month={selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1) : new Date()} 
-                  numberOfMonths={1} // Ensure only one month is shown for better space management
-                  fixedWeeks // Optional: keep grid consistent height
-                />
-              </CardContent>
-            </Card>
-          </div>
+          <Card className="shadow-lg rounded-2xl flex flex-col overflow-hidden"> {/* Full width card */}
+            <CardHeader className="flex-shrink-0"> {/* Prevent header shrinking */}
+              <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
+                  <CardTitle className="text-xl font-semibold flex items-center">
+                    <CalendarDays className="mr-2 h-5 w-5 text-primary" />
+                    Workout Log Calendar
+                  </CardTitle>
+                  {/* Integrated Streak Display */}
+                  <div className="flex items-center gap-3 text-sm">
+                       <div className="flex items-center text-primary">
+                          <Flame className="h-4 w-4 mr-1"/>
+                          <span>{streaks.current} Day Streak</span>
+                       </div>
+                       <span className="text-muted-foreground">|</span>
+                       <span className="text-muted-foreground">Longest: {streaks.longest} days</span>
+                  </div>
+              </div>
+              <CardDescription>Click a highlighted day to view the logged workout.</CardDescription>
+            </CardHeader>
+            {/* Increased Calendar Size Area */}
+            <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={handleDateSelect}
+                className="rounded-md border p-0 w-full h-auto aspect-[4/3] max-h-[600px]" // Large aspect ratio, max height
+                 modifiers={{
+                  logged: loggedDays,
+                }}
+                modifiersStyles={{
+                  logged: {
+                    backgroundColor: 'hsl(var(--primary) / 0.3)',
+                    color: 'hsl(var(--primary-foreground))',
+                    fontWeight: 'bold',
+                    borderRadius: 'var(--radius)'
+                  },
+                  selected: {
+                     backgroundColor: 'hsl(var(--primary))',
+                     color: 'hsl(var(--primary-foreground))',
+                     borderRadius: 'var(--radius)'
+                  }
+                }}
+                disabled={{ after: new Date() }} // Disable future dates
+                // Adjust cell sizes for better fit
+                classNames={{
+                    root: "w-full h-full flex flex-col", // Ensure root takes full space
+                    months: "flex-grow flex flex-col", // Allow months to grow
+                    month: "flex-grow flex flex-col", // Allow month to grow
+                    table: "flex-grow", // Allow table to grow
+                    caption: "h-10", // Fixed height for caption
+                    head_row: "flex justify-around",
+                    head_cell: "w-full text-muted-foreground rounded-md font-normal text-[0.8rem] flex-1 text-center",
+                    row: "flex w-full mt-2 justify-around",
+                    cell: "h-auto aspect-square p-0 relative flex items-center justify-center flex-1", // Square cells that fill space
+                    day: "h-full w-full aspect-square text-sm font-normal aria-selected:opacity-100 rounded-md hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", // Day fills cell
+                    day_selected: "bg-primary text-primary-foreground hover:bg-primary focus:bg-primary",
+                    day_today: "bg-accent text-accent-foreground",
+                    day_outside: "day-outside text-muted-foreground opacity-50",
+                    day_disabled: "text-muted-foreground opacity-50",
+                    day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                    day_hidden: "invisible",
+                }}
+                // Ensure it displays the current month by default, or the month of the selected date
+                month={selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1) : new Date()}
+                numberOfMonths={1} // Ensure only one month is shown for better space management
+                fixedWeeks // Optional: keep grid consistent height
+              />
+            </CardContent>
+          </Card>
 
-          {/* AI Coaching Tip Section */}
-          <div className="lg:col-span-1">
-             <CoachingTipCard
-                tip={coachingTip?.tip}
-                isLoading={isLoadingCoachingTip}
-                // onRefresh prop is removed as the button is gone
-             />
-          </div>
+          {/* AI Coaching Tip Section - Placed Below Calendar */}
+          <CoachingTipCard
+              tip={coachingTip?.tip}
+              isLoading={isLoadingCoachingTip}
+              // onRefresh prop is removed as the button is gone
+           />
         </div>
 
-      {/* Modal to display past workout log */}
+
+        {/* Modal to display past workout log */}
         <Dialog open={isLogModalOpen} onOpenChange={setIsLogModalOpen}>
           <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
             <DialogHeader>
@@ -323,4 +321,3 @@ export default function ProgressiveOverloadDashboardPage() {
     </div>
   );
 }
-
