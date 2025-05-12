@@ -83,7 +83,7 @@ function getLocalStorageKey(dayId: string, date: Date): string {
 }
 
 export default function ProgressiveOverloadDashboardPage() {
-  const [coachingTip, setCoachingTip] = useState<CoachingTipsOutput | null>(null);
+  const [coachingTip, setCoachingTip] = useState<CoachingTipsOutput | null>(null); // Initial state null
   const [isLoadingCoachingTip, setIsLoadingCoachingTip] = useState(true); // Start loading true
   const [isClient, setIsClient] = useState(false);
   const [loggedDays, setLoggedDays] = useState<Date[]>([]);
@@ -101,33 +101,30 @@ export default function ProgressiveOverloadDashboardPage() {
 
     setIsLoadingCoachingTip(true);
     // Don't clear previous tip immediately, let the loading state handle display
-    // setCoachingTip(null);
+    // setCoachingTip(null); // Keep existing tip while loading if desired, or set to null for loader
 
     try {
       const streaksToUse = currentStreaks || streaks; // Use provided streaks or current state
       const tipResult = await getCoachingTip(streaksToUse); // getCoachingTip now handles internal fetch and fallbacks
 
       // Ensure we set a valid tip object, even if the tip string itself might be a fallback
-      if (tipResult && tipResult.tip) {
-          setCoachingTip(tipResult);
-      } else {
-          // This case should be rare now due to improved flow, but good to have
-          console.warn("getCoachingTip returned unexpected result, using fallback.");
-          setCoachingTip({ tip: "Keep logging your workouts consistently!" });
-      }
+      // The getCoachingTip function should always return a valid object now
+      setCoachingTip(tipResult);
 
     } catch (e) {
-      // Error case is already handled within getCoachingTip's catch block which returns a fallback tip
-      console.error('Error occurred during fetchCoachingTip:', e);
-      // If getCoachingTip itself throws an error (before the internal try/catch), display error here
-      if (!coachingTip?.tip) { // Check if a tip wasn't already set by a fallback
-          setCoachingTip({ tip: "Could not fetch coaching tip due to an error." });
-          toast({ variant: "destructive", title: "AI Coach Error", description: "Could not fetch coaching tip." });
+      // This catch block is now less likely to be hit due to error handling inside getCoachingTip
+      // but kept as a safeguard.
+      console.error('Error occurred during fetchCoachingTip wrapper:', e);
+      // Ensure a fallback tip is set even if the wrapper itself fails.
+      if (!coachingTip?.tip) {
+        setCoachingTip({ tip: "Could not fetch coaching tip due to an unexpected error." });
+        toast({ variant: "destructive", title: "AI Coach Error", description: "Could not fetch coaching tip." });
       }
     } finally {
       setIsLoadingCoachingTip(false);
     }
-   }, [isClient, streaks, toast, coachingTip?.tip]); // Add coachingTip.tip to dependencies
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [isClient, streaks, toast]); // Removed coachingTip.tip dependency to avoid potential loop
 
 
   // Initial setup: get logged days, calculate streaks, fetch initial coaching tip
