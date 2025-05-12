@@ -3,8 +3,7 @@
 
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DayPicker, DropdownProps } from "react-day-picker" 
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select' 
+import { DayPicker } from "react-day-picker" // Removed DropdownProps import
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
@@ -20,14 +19,14 @@ function Calendar({
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
-      className={cn("p-3 h-full flex flex-col", className)} 
+      className={cn("p-3 h-full flex flex-col", className)}
       classNames={{
-        root: cn("flex flex-col flex-grow", classNames?.root), 
-        months: cn("flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0 flex-grow", classNames?.months), 
-        month: cn("space-y-4 flex flex-col flex-grow", classNames?.month), 
-        caption: cn("flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", classNames?.caption), 
-        caption_label: cn("text-sm font-medium hidden", classNames?.caption_label), 
-        caption_dropdowns: cn("flex gap-1", classNames?.caption_dropdowns), 
+        root: cn("flex flex-col flex-grow", classNames?.root),
+        months: cn("flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0 flex-grow", classNames?.months),
+        month: cn("space-y-4 flex flex-col flex-grow", classNames?.month),
+        caption: cn("flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", classNames?.caption),
+        caption_label: cn("text-sm font-medium", classNames?.caption_label), // Removed hidden class
+        // caption_dropdowns: cn("flex gap-1", classNames?.caption_dropdowns), // Removed dropdown styles
         nav: cn("space-x-1 flex items-center", classNames?.nav),
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -36,7 +35,7 @@ function Calendar({
         ),
         nav_button_previous: cn("absolute left-1", classNames?.nav_button_previous),
         nav_button_next: cn("absolute right-1", classNames?.nav_button_next),
-        table: cn("w-full border-collapse space-y-1 flex-grow", classNames?.table), 
+        table: cn("w-full border-collapse space-y-1 flex-grow", classNames?.table),
         head_row: cn("flex", classNames?.head_row),
         head_cell: cn(
           "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
@@ -45,13 +44,13 @@ function Calendar({
         row: cn("flex w-full mt-2", classNames?.row),
         cell: cn(
           "flex-1 p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-          "aspect-square flex items-center justify-center", 
+          "aspect-square flex items-center justify-center",
           classNames?.cell
         ),
         day: cn(
            buttonVariants({ variant: "ghost" }),
-           "h-full w-full aspect-square p-0 font-normal aria-selected:opacity-100 rounded-md", 
-           "hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring", 
+           "h-full w-full aspect-square p-0 font-normal aria-selected:opacity-100 rounded-md",
+           "hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring",
           classNames?.day
         ),
         day_range_end: cn("day-range-end", classNames?.day_range_end),
@@ -70,98 +69,13 @@ function Calendar({
           classNames?.day_range_middle
         ),
         day_hidden: cn("invisible", classNames?.day_hidden),
-        dropdown: "rdp-dropdown bg-card", 
-        dropdown_icon: "ml-2", 
-        dropdown_year: "rdp-dropdown_year ml-2", 
-        dropdown_month: "rdp-dropdown_month", 
-        ...classNames, 
+        // Removed dropdown related styles
+        ...classNames,
       }}
       components={{
         IconLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" {...props} />,
         IconRight: ({ ...props }) => <ChevronRight className="h-4 w-4" {...props} />,
-        Dropdown: (dropdownProps: DropdownProps) => {
-          const { fromDate, toDate, currentMonth } = dropdownProps; // currentMonth is important
-          let selectItems: { label: string; value: string }[] = [];
- 
-          // More robust handling of options from react-day-picker
-          if (dropdownProps.options && Array.isArray(dropdownProps.options)) {
-             selectItems = dropdownProps.options.map((option) => {
-                // Ensure label exists and value is a number before mapping
-                const label = option.label ?? '';
-                // react-day-picker option values are numbers (month index or year)
-                const value = typeof option.value === 'number' ? String(option.value) : '';
-                return { label, value };
-            }).filter(item => item.label !== '' && item.value !== ''); // Filter out invalid items
-          } else {
-             // console.warn("Dropdown options missing or not an array for:", dropdownProps.name); // Cannot add console logs
-          }
-
-          // Determine the caption for the SelectTrigger
-          // dropdownProps.caption is provided by react-day-picker and is usually correct
-          const displayedCaption = dropdownProps.caption || 
-            (dropdownProps.name === 'months' ? "Select Month" : "Select Year");
-
-          // Ensure dropdownProps.value is converted to string for the Select component
-          const selectValue = dropdownProps.value !== undefined ? String(dropdownProps.value) : undefined;
-
-          return (
-            <Select
-              value={selectValue} // Use the stringified value
-              onValueChange={(newValue) => {
-                // newValue is the string representation of the number (month index or year)
-                if (dropdownProps.onChange && currentMonth && newValue !== undefined) {
-                    const newDate = new Date(currentMonth); // Base modification on current displayed month/year
-                    const numericValue = parseInt(newValue, 10);
-                    if (!isNaN(numericValue)) {
-                        if (dropdownProps.name === 'months') {
-                            // Ensure month index is valid (0-11)
-                            if (numericValue >= 0 && numericValue <= 11) {
-                                newDate.setMonth(numericValue);
-                            }
-                        } else if (dropdownProps.name === 'years') {
-                            newDate.setFullYear(numericValue);
-                        }
-                        dropdownProps.onChange(newDate); // Call the original onChange with the new date
-                    }
-                }
-              }}
-            >
-              <SelectTrigger
-                className={cn(
-                   buttonVariants({ variant: 'outline' }),
-                   'h-7 w-auto px-2 py-0.5 text-xs font-medium data-[state=open]:bg-accent data-[state=open]:text-accent-foreground',
-                   dropdownProps.name === 'years' ? 'w-[5.5rem]' : 'w-[8rem]' // Adjusted year width slightly
-                )}
-                aria-label={dropdownProps.name === 'months' ? 'Select month' : 'Select year'} // Improve accessibility
-              >
-                {/* Ensure SelectValue has a child, even if it's just the placeholder */}
-                <SelectValue placeholder={displayedCaption}>
-                   {displayedCaption}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent 
-                className={cn(
-                  "max-h-80", // Ensure max height for long lists
-                  // Add a min-height to prevent complete collapse if content is unexpectedly empty
-                  selectItems.length === 0 ? "min-h-[40px] flex items-center justify-center" : "" 
-                )}
-                // position="popper" // Position content relative to trigger
-              >
-                {selectItems.length > 0 ? (
-                    selectItems.map((item) => (
-                    <SelectItem key={`${dropdownProps.name}-${item.value}`} value={item.value} className="text-xs">
-                        {item.label}
-                    </SelectItem>
-                    ))
-                ) : (
-                    <div className="p-2 text-xs text-muted-foreground text-center">
-                        No options
-                    </div>
-                )}
-              </SelectContent>
-            </Select>
-          );
-        },
+        // Dropdown component removed
       }}
       {...props}
     />
@@ -170,6 +84,3 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
-
-
-    

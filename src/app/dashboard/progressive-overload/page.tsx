@@ -231,8 +231,6 @@ export default function ProgressiveOverloadDashboardPage() {
     return <LoadingProgressiveOverloadDashboard />;
   }
 
-  const currentYear = new Date().getFullYear();
-
   return (
     <div className="container mx-auto py-8 px-4 md:px-6 space-y-8">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -261,7 +259,7 @@ export default function ProgressiveOverloadDashboardPage() {
                        <span className="text-muted-foreground">Longest: {streaks.longest} days</span>
                   </div>
               </div>
-              <CardDescription>Click a highlighted day to view the logged workout. Use dropdowns to navigate months/years.</CardDescription>
+              <CardDescription>Click a highlighted day to view the logged workout. Use arrows to navigate months.</CardDescription>
             </CardHeader>
             <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4">
               <Calendar
@@ -270,9 +268,7 @@ export default function ProgressiveOverloadDashboardPage() {
                 onSelect={handleDateSelect}
                 month={displayMonth} // Control displayed month
                 onMonthChange={handleMonthChange} // Handle navigation
-                captionLayout="dropdown-buttons" // Enable dropdowns
-                fromYear={currentYear - 5} // Allow navigation 5 years back
-                toYear={currentYear} // Allow navigation up to current year
+                // Removed dropdown related props: captionLayout, fromYear, toYear
                 className="rounded-md border p-0 w-full h-auto aspect-[4/3] max-h-[600px]"
                  modifiers={{
                   logged: loggedDays,
@@ -297,7 +293,7 @@ export default function ProgressiveOverloadDashboardPage() {
                     month: "flex-grow flex flex-col",
                     table: "flex-grow",
                     caption: "flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", // Adjusted caption height and gap
-                    caption_label: "hidden", // Hide default label when using dropdowns
+                    caption_label: "text-sm font-medium", // Ensure label is visible
                     nav: "space-x-1 flex items-center",
                     nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
                     nav_button_previous: "absolute left-1",
@@ -313,14 +309,8 @@ export default function ProgressiveOverloadDashboardPage() {
                     day_disabled: "text-muted-foreground opacity-50",
                     day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
                     day_hidden: "invisible",
-                    // Add dropdown styles if needed, often handled by Radix UI Select within DayPicker
-                     caption_dropdowns: "flex gap-1", // Style container for dropdowns
-                     dropdown_month: "relative", // Example, adjust as needed
-                     dropdown_year: "relative", // Example, adjust as needed
-                     dropdown: "absolute", // Default dropdown style if needed
+                    // Removed dropdown styles
                 }}
-                // Ensure it displays the current month by default, or the month of the selected date
-                // month={selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1) : new Date()} // Replaced by displayMonth state
                 numberOfMonths={1}
                 fixedWeeks
               />
