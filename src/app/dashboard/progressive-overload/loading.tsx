@@ -35,12 +35,13 @@ export default function LoadingProgressiveOverloadDashboard() {
          {/* AI Coaching Tip Section (Below Calendar) */}
         <Card className="shadow-lg rounded-2xl">
           <CardHeader>
-             <div className="flex justify-between items-center"> {/* Align title */}
+             <div className="flex justify-between items-center"> {/* Align title and add button skeleton */}
                <div className="flex items-center">
                    <Lightbulb className="mr-2 h-6 w-6 text-primary/50 animate-pulse" />
                    <Skeleton className="h-8 w-3/4" /> {/* Coaching Tip Title */}
                </div>
-               {/* Removed Refresh Button Skeleton */}
+               {/* Refresh Button Skeleton */}
+               <Skeleton className="h-8 w-8 rounded-full" /> 
              </div>
              <Skeleton className="h-4 w-1/2 mt-1" /> {/* Coaching Tip Desc */}
           </CardHeader>
@@ -58,3 +59,4 @@ export default function LoadingProgressiveOverloadDashboard() {
     </div>
   );
 }
+

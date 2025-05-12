@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { getWorkoutByDay } from '@/data/workout-data';
 import type { DailyLog, WorkoutDay } from '@/types/workout';
-import { History, Loader2, CalendarDays, Flame, Lightbulb } from 'lucide-react';
+import { History, Loader2, CalendarDays, Flame, Lightbulb, RefreshCw } from 'lucide-react'; // Added RefreshCw for consistency if needed elsewhere
 import LoadingProgressiveOverloadDashboard from './loading';
 import { calculateStreaks, summarizeRecentLogs } from '@/lib/workout-utils'; // Added summarizeRecentLogs import
 import { getCoachingTip, CoachingTipsOutput } from '@/ai/flows/coaching-tips-flow'; // Removed CoachingTipsInput
@@ -84,7 +84,7 @@ function getLocalStorageKey(dayId: string, date: Date): string {
 
 export default function ProgressiveOverloadDashboardPage() {
   const [coachingTip, setCoachingTip] = useState<CoachingTipsOutput | null>(null); // Initial state null
-  const [isLoadingCoachingTip, setIsLoadingCoachingTip] = useState(true); // Start loading true
+  const [isLoadingCoachingTip, setIsLoadingCoachingTip] = useState(false); // Start loading false
   const [isClient, setIsClient] = useState(false);
   const [loggedDays, setLoggedDays] = useState<Date[]>([]);
   const [streaks, setStreaks] = useState<{ current: number; longest: number }>({ current: 0, longest: 0 });
@@ -95,8 +95,8 @@ export default function ProgressiveOverloadDashboardPage() {
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const { toast } = useToast();
 
-  // Fetch general coaching tip
-   const fetchCoachingTip = useCallback(async (currentStreaks?: { current: number; longest: number }) => {
+  // Fetch general coaching tip - now manually triggered
+   const fetchCoachingTip = useCallback(async () => {
     if (!isClient || typeof window === 'undefined') return;
 
     setIsLoadingCoachingTip(true);
@@ -104,30 +104,28 @@ export default function ProgressiveOverloadDashboardPage() {
     // setCoachingTip(null); // Keep existing tip while loading if desired, or set to null for loader
 
     try {
-      const streaksToUse = currentStreaks || streaks; // Use provided streaks or current state
-      const tipResult = await getCoachingTip(streaksToUse); // getCoachingTip now handles internal fetch and fallbacks
+      // Fetch current streaks just before fetching the tip
+      const currentDays = getLoggedDays();
+      const currentStreaks = calculateStreaks(currentDays);
+      setStreaks(currentStreaks); // Update streaks state as well
 
-      // Ensure we set a valid tip object, even if the tip string itself might be a fallback
-      // The getCoachingTip function should always return a valid object now
+      const tipResult = await getCoachingTip(currentStreaks); // getCoachingTip now handles internal fetch and fallbacks
+
       setCoachingTip(tipResult);
 
     } catch (e) {
       // This catch block is now less likely to be hit due to error handling inside getCoachingTip
       // but kept as a safeguard.
       console.error('Error occurred during fetchCoachingTip wrapper:', e);
-      // Ensure a fallback tip is set even if the wrapper itself fails.
-      if (!coachingTip?.tip) {
-        setCoachingTip({ tip: "Could not fetch coaching tip due to an unexpected error." });
-        toast({ variant: "destructive", title: "AI Coach Error", description: "Could not fetch coaching tip." });
-      }
+      setCoachingTip({ tip: "Could not fetch coaching tip due to an unexpected error." }); // Set explicit error tip
+      toast({ variant: "destructive", title: "AI Coach Error", description: "Could not fetch coaching tip." });
     } finally {
       setIsLoadingCoachingTip(false);
     }
-   // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [isClient, streaks, toast]); // Removed coachingTip.tip dependency to avoid potential loop
+   }, [isClient, toast]); // Removed streaks from dependency array as it's fetched inside
 
 
-  // Initial setup: get logged days, calculate streaks, fetch initial coaching tip
+  // Initial setup: get logged days, calculate streaks (but don't fetch tip automatically)
   useEffect(() => {
     setIsClient(true);
     if (typeof window !== 'undefined') {
@@ -137,23 +135,23 @@ export default function ProgressiveOverloadDashboardPage() {
       setLoggedDays(days);
       const calculatedStreaks = calculateStreaks(days);
       setStreaks(calculatedStreaks);
-      fetchCoachingTip(calculatedStreaks); // Fetch tip immediately
+      // fetchCoachingTip(calculatedStreaks); // Removed automatic fetch
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount
 
 
-  // Refresh dashboard data (re-calculate streaks, re-fetch tip)
-  // Can be triggered manually or after specific actions if needed
+  // Refresh dashboard data (re-calculate streaks) - can be triggered manually if needed elsewhere
+  // Note: fetchCoachingTip now handles its own streak calculation
   const refreshDashboardData = useCallback(() => {
       if (typeof window !== 'undefined') {
           const days = getLoggedDays();
           setLoggedDays(days);
           const calculatedStreaks = calculateStreaks(days);
           setStreaks(calculatedStreaks);
-          fetchCoachingTip(calculatedStreaks); // Fetch tip with updated streaks
+          // fetchCoachingTip(); // Trigger fetch if needed after a general refresh
       }
-  }, [fetchCoachingTip]);
+  }, []);
 
   // Handle selecting a date on the calendar
   const handleDateSelect = useCallback((date: Date | undefined) => {
@@ -376,7 +374,7 @@ export default function ProgressiveOverloadDashboardPage() {
           <CoachingTipCard
               tip={coachingTip?.tip}
               isLoading={isLoadingCoachingTip}
-              // Removed onRefresh as button is removed
+              onRefresh={fetchCoachingTip} // Pass the fetch function
            />
         </div>
 
@@ -408,3 +406,4 @@ export default function ProgressiveOverloadDashboardPage() {
     </div>
   );
 }
+

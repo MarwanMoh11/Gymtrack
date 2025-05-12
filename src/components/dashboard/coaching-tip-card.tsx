@@ -3,14 +3,16 @@
 'use client';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Lightbulb } from 'lucide-react';
+import { Button } from '@/components/ui/button'; // Added Button import
+import { Loader2, Lightbulb, RefreshCw } from 'lucide-react'; // Added RefreshCw
 
 interface CoachingTipCardProps {
   tip: string | undefined | null;
   isLoading: boolean;
+  onRefresh: () => void; // Callback to trigger fetching
 }
 
-export default function CoachingTipCard({ tip, isLoading }: CoachingTipCardProps) {
+export default function CoachingTipCard({ tip, isLoading, onRefresh }: CoachingTipCardProps) {
   return (
     <Card className="shadow-xl rounded-2xl">
       <CardHeader>
@@ -19,7 +21,17 @@ export default function CoachingTipCard({ tip, isLoading }: CoachingTipCardProps
              <Lightbulb className="mr-2 h-5 w-5" />
              AI Coach Tip
           </CardTitle>
-          {/* Refresh Button Removed */}
+          {/* Refresh Button */}
+          <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRefresh}
+              disabled={isLoading}
+              aria-label="Refresh coaching tip"
+              className="text-primary hover:bg-primary/10"
+           >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </Button>
         </div>
         <CardDescription>General advice based on your recent activity.</CardDescription>
       </CardHeader>
@@ -30,13 +42,18 @@ export default function CoachingTipCard({ tip, isLoading }: CoachingTipCardProps
             <span className="text-muted-foreground">Fetching coaching insights...</span>
           </div>
         )}
-        {!isLoading && ( // Always try to display the tip when not loading
+        {!isLoading && tip && ( // Display tip if available and not loading
           <blockquote className="text-center text-sm italic text-foreground/90 border-l-4 border-primary pl-4 py-2">
-             "{tip || 'Log your workouts to get personalized tips!'}" {/* Provide a default inline fallback just in case */}
+             "{tip}"
           </blockquote>
         )}
-        {/* Removed the explicit placeholder section for !isLoading && !tip */}
+        {!isLoading && !tip && ( // Display initial prompt or fallback if no tip and not loading
+           <div className="text-center py-8">
+                <p className="text-muted-foreground">Click the refresh button <RefreshCw className="inline h-4 w-4 align-middle"/> to get your coaching tip.</p>
+           </div>
+        )}
       </CardContent>
     </Card>
   );
 }
+
