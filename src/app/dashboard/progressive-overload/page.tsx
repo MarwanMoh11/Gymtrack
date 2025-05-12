@@ -23,36 +23,59 @@ import CoachingTipCard from '@/components/dashboard/coaching-tip-card'; // Impor
 const getLoggedDays = (): Date[] => {
   if (typeof window === 'undefined') return [];
   const loggedDates = new Set<string>();
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key) continue;
-    const match = key.match(/^gymtrack_log_[a-zA-Z0-9-]+_(\d{4}-\d{2}-\d{2})$/);
-    if (match) {
-      const logContent = localStorage.getItem(key);
-      if (logContent && logContent !== '{}') {
-         try {
-           const parsedLog = JSON.parse(logContent);
-           if (Object.values(parsedLog).some((exerciseLog: any) =>
-               Object.values(exerciseLog).some((set: any) => set.isCompleted)
-           )) {
-               loggedDates.add(match[2]);
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('gymtrack_log_')) continue; // Skip irrelevant keys early
+
+      const match = key.match(/^gymtrack_log_[a-zA-Z0-9-]+_(\d{4}-\d{2}-\d{2})$/);
+      if (match && match[1]) { // Ensure match and capturing group exist
+        const dateString = match[1];
+        const logContent = localStorage.getItem(key);
+        if (logContent && logContent !== '{}') {
+           try {
+             const parsedLog = JSON.parse(logContent);
+             // Check if any exercise in the log has at least one completed set
+             if (Object.values(parsedLog).some((exerciseLog: any) =>
+                 typeof exerciseLog === 'object' && exerciseLog !== null && // Check if exerciseLog is an object
+                 Object.values(exerciseLog).some((set: any) => typeof set === 'object' && set !== null && set.isCompleted)
+             )) {
+                 loggedDates.add(dateString); // Add the valid date string
+             }
+           } catch (e) {
+               console.error("Error parsing log content for date check:", key, e);
+               // Optionally remove the corrupted item: localStorage.removeItem(key);
            }
-         } catch (e) {
-             console.error("Error parsing log for date check:", key, e);
-         }
+        }
       }
     }
+  } catch (error) {
+    console.error("Error accessing localStorage:", error);
+    // Handle potential security errors or other localStorage issues
   }
-  return Array.from(loggedDates).map(dateStr => {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(Date.UTC(year, month - 1, day));
-  });
+
+  // Filter out invalid date strings before mapping
+  return Array.from(loggedDates)
+    .filter(dateStr => typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) // Ensure it's the correct format
+    .map(dateStr => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      // Add another check for parsing results
+      if (isNaN(year) || isNaN(month) || isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) {
+         console.error("Failed to parse valid date components from string:", dateStr);
+         return null; // Indicate failure
+      }
+      // Create Date object using UTC to avoid timezone issues
+      return new Date(Date.UTC(year, month - 1, day));
+    })
+    .filter((date): date is Date => date !== null); // Remove null entries from failed parsing
 };
 
+
 const formatDateLocal = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const day = date.getDate().toString().padStart(2, '0');
+  // Use UTC methods to format to avoid timezone shifts affecting the date string
+  const year = date.getUTCFullYear();
+  const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+  const day = date.getUTCDate().toString().padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
@@ -123,8 +146,11 @@ export default function ProgressiveOverloadDashboardPage() {
   // Handle selecting a date on the calendar
   const handleDateSelect = useCallback((date: Date | undefined) => {
     if (!date || typeof window === 'undefined') return;
+    
+    // Normalize selected date to UTC start of day for comparison
+    const selectedDateUTC = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
 
-    const dateStr = formatDateLocal(date);
+    const dateStr = formatDateLocal(selectedDateUTC); // Use the UTC date for formatting
     const isLogged = loggedDays.some(d => formatDateLocal(d) === dateStr);
 
     if (!isLogged) {
@@ -132,17 +158,19 @@ export default function ProgressiveOverloadDashboardPage() {
         setSelectedDate(undefined);
         return;
     }
+    
+    setSelectedDate(selectedDateUTC); // Store the UTC normalized date
 
-    setSelectedDate(date);
-
-    const dayIndex = date.getDay();
+    // Use getUTCDay() for consistency as we are working with UTC dates
+    const dayIndex = selectedDateUTC.getUTCDay(); 
     const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
     const dayId = daysOfWeek[dayIndex];
     const workoutForDay = getWorkoutByDay(dayId);
     setSelectedWorkoutDay(workoutForDay);
 
     if (workoutForDay) {
-        const key = getLocalStorageKey(workoutForDay.id, date);
+        // Use the selected UTC date to generate the key
+        const key = getLocalStorageKey(workoutForDay.id, selectedDateUTC); 
         const storedLog = localStorage.getItem(key);
         if (storedLog) {
             try {
@@ -188,7 +216,7 @@ export default function ProgressiveOverloadDashboardPage() {
 
              <Card className="shadow-lg rounded-2xl">
               <CardHeader>
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center flex-wrap gap-2">
                     <CardTitle className="text-xl font-semibold flex items-center">
                       <CalendarDays className="mr-2 h-5 w-5 text-primary" />
                       Logged Workouts Calendar
@@ -227,15 +255,16 @@ export default function ProgressiveOverloadDashboardPage() {
                        borderRadius: 'var(--radius)'
                     }
                   }}
-                  disabled={{ after: new Date() }}
-                  // Attempt to make calendar cells larger (might need CSS overrides or different approach)
+                  disabled={{ after: new Date() }} // Disable future dates
+                  // Attempt to make calendar cells larger 
                   classNames={{
-                      day: "h-10 w-10 sm:h-12 sm:w-12", // Increase day cell size
+                      day: "h-10 w-10 sm:h-12 sm:w-12 text-base", // Increase day cell size & font
                       head_cell: "w-10 sm:w-12", // Adjust header cell width
-                      // table: "w-full max-w-none", // Allow table to expand
-                      // months: "justify-center",
+                      // Customize month navigation buttons if needed
+                      // nav_button: "h-8 w-8", 
                   }}
-
+                  // Ensure it displays the current month by default, or the month of the selected date
+                  month={selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1) : new Date()} 
                 />
               </CardContent>
             </Card>
@@ -257,7 +286,7 @@ export default function ProgressiveOverloadDashboardPage() {
             <DialogHeader>
               <DialogTitle>Workout Log: {selectedDate ? formatDateLocal(selectedDate) : ''}</DialogTitle>
               <DialogDescription>
-                Showing workout logged on {selectedDate ? selectedDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : ''}.
+                Showing workout logged on {selectedDate ? selectedDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }) : ''}.
               </DialogDescription>
             </DialogHeader>
             <div className="flex-grow overflow-y-auto pr-2 -mr-6 pl-6">

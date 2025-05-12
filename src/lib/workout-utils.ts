@@ -1,8 +1,8 @@
 
-import type { DailyLog, Exercise, WorkoutDay } from '@/types/workout';
+import type { DailyLog, Exercise, WorkoutDay, LoggedExerciseData } from '@/types/workout';
 import { weeklyPlan } from '@/data/workout-data';
 import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
-import type { CoachingTipsInput } from '@/ai/flows/coaching-tips-flow';
+import type { CoachingTipsInput, LogSummarySchema } from '@/ai/flows/coaching-tips-flow'; // Import LogSummarySchema
 
 
 export const getAllExercises = (): Array<{ id: string; name: string }> => {
@@ -71,12 +71,18 @@ export const transformHistoricalDataForAI = (exerciseId: string): NextSessionRec
     const exerciseDefinition = weeklyPlan.flatMap(day => day.exercises).find(ex => ex.id === exerciseId);
 
     const keysToSearch: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('gymtrack_log_')) {
-            keysToSearch.push(key);
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('gymtrack_log_')) {
+                keysToSearch.push(key);
+            }
         }
+    } catch (error) {
+        console.error("Error accessing localStorage keys:", error);
+        return []; // Return empty if localStorage is inaccessible
     }
+
 
     // Sort keys by date ascending
     keysToSearch.sort((a, b) => {
@@ -88,24 +94,26 @@ export const transformHistoricalDataForAI = (exerciseId: string): NextSessionRec
 
     for (const key of keysToSearch) {
         const match = key.match(/_(\d{4}-\d{2}-\d{2})$/);
-        if (match) {
+        if (match && match[1]) { // Ensure match and dateString exist
             const dateStr = match[1];
             try {
                 const dailyLogString = localStorage.getItem(key);
                 if (!dailyLogString) continue;
                 const dailyLog: DailyLog = JSON.parse(dailyLogString);
 
-                if (dailyLog[exerciseId] && exerciseDefinition) {
-                    const exerciseLog = dailyLog[exerciseId];
+                const exerciseLog = dailyLog[exerciseId];
+                if (exerciseLog && exerciseDefinition && typeof exerciseLog === 'object') {
                     const repsPerSet: string[] = [];
                     let sessionWeight: string | undefined;
 
                     exerciseDefinition.sets.forEach(setDef => {
                         const loggedSet = exerciseLog[setDef.id];
-                        if (loggedSet && loggedSet.isCompleted) {
-                            repsPerSet.push(String(loggedSet.reps || setDef.targetReps));
+                        // Check if loggedSet is valid and completed
+                        if (loggedSet && typeof loggedSet === 'object' && loggedSet.isCompleted) {
+                            repsPerSet.push(String(loggedSet.reps ?? setDef.targetReps)); // Use logged or target reps
                             if (sessionWeight === undefined) {
-                                sessionWeight = String(loggedSet.weight || exerciseDefinition.targetWeight || 'bodyweight');
+                                // Use the weight logged with the set, fallback to definition
+                                sessionWeight = String(loggedSet.weight ?? exerciseDefinition.targetWeight ?? 'bodyweight');
                             }
                         }
                     });
@@ -123,14 +131,14 @@ export const transformHistoricalDataForAI = (exerciseId: string): NextSessionRec
             }
         }
     }
+    // Return only the last 8 relevant workout logs for the AI context
     return relevantLogs.slice(-8);
 };
 
 /**
  * Calculates the current and longest workout streaks from a list of dates.
- * Dates should represent logged workout days.
- * Assumes dates are Date objects.
- * @param dates - An array of Date objects representing logged workout days.
+ * Dates should represent logged workout days (UTC normalized Date objects).
+ * @param dates - An array of Date objects representing logged workout days (normalized to UTC midnight).
  * @returns An object with `current` and `longest` streak counts.
  */
 export const calculateStreaks = (dates: Date[]): { current: number; longest: number } => {
@@ -138,45 +146,46 @@ export const calculateStreaks = (dates: Date[]): { current: number; longest: num
     return { current: 0, longest: 0 };
   }
 
-  const sortedDates = dates.map(d => d.getTime()).sort((a, b) => a - b);
+  // Ensure dates are unique UTC timestamps at midnight and sorted
+  const uniqueSortedTimestamps = Array.from(new Set(dates.map(d => d.getTime()))).sort((a, b) => a - b);
 
-  let currentStreak = 1;
-  let longestStreak = 1;
-  const oneDayMillis = 24 * 60 * 60 * 1000;
-
-  for (let i = 1; i < sortedDates.length; i++) {
-    const diff = sortedDates[i] - sortedDates[i - 1];
-
-    if (diff >= oneDayMillis - (3600 * 1000) && diff <= oneDayMillis + (3600 * 1000)) {
-       const date1 = new Date(sortedDates[i-1]);
-       const date2 = new Date(sortedDates[i]);
-       const nextDay = new Date(date1);
-       nextDay.setUTCDate(date1.getUTCDate() + 1);
-
-       if (date2.getUTCFullYear() === nextDay.getUTCFullYear() &&
-           date2.getUTCMonth() === nextDay.getUTCMonth() &&
-           date2.getUTCDate() === nextDay.getUTCDate()) {
-             currentStreak++;
-           } else {
-              longestStreak = Math.max(longestStreak, currentStreak);
-              currentStreak = 1;
-           }
-    } else if (diff > oneDayMillis + (3600 * 1000)) {
-      longestStreak = Math.max(longestStreak, currentStreak);
-      currentStreak = 1;
-    }
+  if (uniqueSortedTimestamps.length === 0) {
+    return { current: 0, longest: 0 };
   }
 
-  longestStreak = Math.max(longestStreak, currentStreak);
+  let currentStreak = 0; // Start at 0, check the last day later
+  let longestStreak = 0;
+  const oneDayMillis = 24 * 60 * 60 * 1000;
 
+  // Iterate through the sorted unique dates
+  for (let i = 0; i < uniqueSortedTimestamps.length; i++) {
+    if (i === 0) {
+      // First date always starts a streak of 1
+      currentStreak = 1;
+    } else {
+      const diff = uniqueSortedTimestamps[i] - uniqueSortedTimestamps[i - 1];
+      // Check if the difference is exactly one day in milliseconds
+      if (diff === oneDayMillis) {
+        currentStreak++;
+      } else {
+        // Gap detected, update longest streak and reset current
+        longestStreak = Math.max(longestStreak, currentStreak);
+        currentStreak = 1; // Start a new streak
+      }
+    }
+    // Update longest streak at each step
+    longestStreak = Math.max(longestStreak, currentStreak);
+  }
+
+
+  // Final check for the current streak relative to today
   const today = new Date();
-  const lastLogDate = new Date(sortedDates[sortedDates.length - 1]);
-  const todayStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-  const yesterdayStart = new Date(todayStart.getTime() - oneDayMillis);
-  const lastLogStart = new Date(Date.UTC(lastLogDate.getUTCFullYear(), lastLogDate.getUTCMonth(), lastLogDate.getUTCDate()));
+  const todayUTCStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const lastLogTimestamp = uniqueSortedTimestamps[uniqueSortedTimestamps.length - 1];
 
-  if (lastLogStart.getTime() < yesterdayStart.getTime()) {
-      currentStreak = 0;
+  // If the last log was not today or yesterday, the current streak is 0
+  if (lastLogTimestamp < todayUTCStart - oneDayMillis) {
+    currentStreak = 0;
   }
 
   return { current: currentStreak, longest: longestStreak };
@@ -188,21 +197,27 @@ export const calculateStreaks = (dates: Date[]): { current: number; longest: num
  * Fetches logs from the last ~4 weeks (28 days).
  * @returns An array of LogSummary objects.
  */
-export const summarizeRecentLogs = (): CoachingTipsInput['recentLogs'] => {
+export const summarizeRecentLogs = (): Array<LogSummarySchema> => { // Explicit return type
   if (typeof window === 'undefined') return [];
 
-  const summaries: CoachingTipsInput['recentLogs'] = [];
+  const summaries: Array<LogSummarySchema> = []; // Explicit type
   const fourWeeksAgo = new Date();
-  fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-  const fourWeeksAgoTimestamp = fourWeeksAgo.getTime();
+  fourWeeksAgo.setUTCDate(fourWeeksAgo.getUTCDate() - 28); // Use UTC dates
+  const fourWeeksAgoTimestamp = Date.UTC(fourWeeksAgo.getUTCFullYear(), fourWeeksAgo.getUTCMonth(), fourWeeksAgo.getUTCDate());
+
 
   const keysToSearch: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith('gymtrack_log_')) {
-      keysToSearch.push(key);
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('gymtrack_log_')) {
+                keysToSearch.push(key);
+            }
+        }
+    } catch (error) {
+        console.error("Error accessing localStorage keys:", error);
+        return []; // Return empty if localStorage is inaccessible
     }
-  }
 
   // Sort keys by date descending to process recent ones first
   keysToSearch.sort((a, b) => {
@@ -214,47 +229,59 @@ export const summarizeRecentLogs = (): CoachingTipsInput['recentLogs'] => {
 
   for (const key of keysToSearch) {
     const match = key.match(/_(\d{4}-\d{2}-\d{2})$/);
-    if (match) {
+    if (match && match[1]) { // Ensure match and dateString exist
       const dateStr = match[1];
-      const logDate = new Date(dateStr);
-      logDate.setUTCHours(0, 0, 0, 0); // Normalize to UTC start of day
+      try {
+         // Create Date object from string parts using UTC
+        const dateParts = dateStr.split('-').map(Number);
+        if (dateParts.length === 3 && !dateParts.some(isNaN)) {
+            const logDateTimestamp = Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]);
 
-      if (logDate.getTime() >= fourWeeksAgoTimestamp) {
-        try {
-          const dailyLogString = localStorage.getItem(key);
-          if (!dailyLogString) continue;
-          const dailyLog: DailyLog = JSON.parse(dailyLogString);
+            if (logDateTimestamp >= fourWeeksAgoTimestamp) {
+                const dailyLogString = localStorage.getItem(key);
+                if (!dailyLogString) continue;
+                const dailyLog: DailyLog = JSON.parse(dailyLogString);
 
-          let exercisesCompleted = 0;
-          let setsCompleted = 0;
+                let exercisesCompleted = 0;
+                let setsCompleted = 0;
 
-          Object.values(dailyLog).forEach((exerciseLog) => {
-            let exerciseHasCompletedSet = false;
-            Object.values(exerciseLog).forEach((setLog) => {
-              if (setLog.isCompleted) {
-                setsCompleted++;
-                exerciseHasCompletedSet = true;
-              }
-            });
-            if (exerciseHasCompletedSet) {
-              exercisesCompleted++;
+                Object.values(dailyLog).forEach((exerciseLog) => {
+                  // Ensure exerciseLog is a valid object before iterating
+                  if (exerciseLog && typeof exerciseLog === 'object') {
+                    let exerciseHasCompletedSet = false;
+                    Object.values(exerciseLog).forEach((setLog) => {
+                      // Ensure setLog is valid and check isCompleted
+                      if (setLog && typeof setLog === 'object' && setLog.isCompleted) {
+                        setsCompleted++;
+                        exerciseHasCompletedSet = true;
+                      }
+                    });
+                    if (exerciseHasCompletedSet) {
+                      exercisesCompleted++;
+                    }
+                  }
+                });
+
+
+                // Only add summary if at least one set was completed
+                if (setsCompleted > 0) {
+                    summaries.push({
+                    date: dateStr,
+                    exercisesCompleted: exercisesCompleted,
+                    setsCompleted: setsCompleted,
+                    });
+                }
+
+            } else {
+                // Stop processing older logs once we go past the 4-week mark
+                break;
             }
-          });
-
-          // Only add summary if at least one set was completed
-          if (setsCompleted > 0) {
-            summaries.push({
-              date: dateStr,
-              exercisesCompleted: exercisesCompleted,
-              setsCompleted: setsCompleted,
-            });
-          }
-        } catch (e) {
-          console.error(`Error processing log summary for key ${key}:`, e);
+        } else {
+             console.error(`Invalid date string format found in key: ${key}`);
         }
-      } else {
-        // Stop processing older logs once we go past the 4-week mark
-        break;
+
+      } catch (e) {
+        console.error(`Error processing log summary for key ${key}:`, e);
       }
     }
   }
