@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -91,16 +90,22 @@ function Calendar({
           const toYear = toDate ? toDate.getFullYear() : undefined;
           let selectItems: { label: string; value: string }[] = [];
 
-          if (dropdownProps.name === 'months') {
-            selectItems = dropdownProps.options.map((option) => ({
-              label: option.label,
-              value: String(option.value?.getMonth()),
-            }));
-          } else if (dropdownProps.name === 'years') {
-            selectItems = dropdownProps.options.map((option) => ({
-              label: option.label,
-              value: String(option.value?.getFullYear()),
-            }));
+          // *** FIX: Check if options array exists before mapping ***
+          if (dropdownProps.options && Array.isArray(dropdownProps.options)) {
+            if (dropdownProps.name === 'months') {
+              selectItems = dropdownProps.options.map((option) => ({
+                label: option.label,
+                value: String(option.value?.getMonth()),
+              }));
+            } else if (dropdownProps.name === 'years') {
+              selectItems = dropdownProps.options.map((option) => ({
+                label: option.label,
+                value: String(option.value?.getFullYear()),
+              }));
+            }
+          } else {
+             // Handle case where options are missing (e.g., initial render)
+             console.warn("Dropdown options missing for:", dropdownProps.name);
           }
 
            const caption =
@@ -108,9 +113,7 @@ function Calendar({
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             (dropdownProps.name === 'months'
               ? // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                dropdownProps.locale!.months![
-                  dropdownProps.value! as number
-                ]
+                (dropdownProps.locale?.months && dropdownProps.value !== undefined ? dropdownProps.locale.months[dropdownProps.value] : '')
               : dropdownProps.value);
 
           return (
