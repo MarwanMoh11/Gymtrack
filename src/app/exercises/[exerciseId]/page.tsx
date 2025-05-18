@@ -5,7 +5,7 @@
 import { use, useState, useEffect, useCallback, useMemo } from 'react'; // Added 'use'
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { getExerciseById as getBaseExerciseById, getWorkoutByDay } from '@/data/workout-data';
+import { getExerciseById as getBaseExerciseById, getWorkoutByDay, getAllExercisesFromPlan } from '@/data/workout-data';
 import type { Exercise as ExerciseType, SetData, LoggedSetData, DailyLog, WorkoutDay, LoggedExerciseData } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,9 +13,10 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, Dumbbell, Wand2, Sparkles, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle } from 'lucide-react'; // Added ArrowUpCircle
+import { ArrowLeft, Dumbbell, Wand2, Sparkles, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle, Pencil } from 'lucide-react'; // Added ArrowUpCircle, Pencil
 import SetLogger from '@/components/workout/set-logger';
 import AIRecommendationModal from '@/components/workout/ai-recommendation-modal';
+import AddExerciseModal from '@/components/workout-plan/add-exercise-modal'; // Import AddExerciseModal
 import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 import { useToast } from '@/hooks/use-toast';
 import LoadingExercisePage from './loading';
@@ -65,14 +66,11 @@ type ExercisePageProps = {
 };
 
 export default function ExerciseDetailPage({ params: paramsFromProps }: ExercisePageProps) {
-  // Use React.use to unwrap the params if Next.js is treating it as a Promise
-  // Cast to 'any' because the prop type { exerciseId: string } itself is not a Promise,
-  // but Next.js runtime behavior suggests it should be treated as one here.
   const resolvedParams = use(paramsFromProps as any);
-  const { exerciseId } = resolvedParams; // Use this resolved exerciseId throughout the component
+  const { exerciseId } = resolvedParams;
 
   const router = useRouter();
-  const searchParams = useSearchParams(); // For query parameters
+  const searchParams = useSearchParams();
   const dayIdFromQuery = searchParams.get('dayId');
   
   const [baseExercise, setBaseExercise] = useState<ExerciseType | null | undefined>(undefined);
@@ -89,6 +87,9 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const [forceSetEditKey, setForceSetEditKey] = useState(0);
   const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
 
+  const [isEditExerciseModalOpen, setIsEditExerciseModalOpen] = useState(false);
+  const [allExercisesForModal, setAllExercisesForModal] = useState<ExerciseType[]>([]);
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -98,6 +99,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
     const fetchedBaseExercise = getBaseExerciseById(exerciseId);
     setBaseExercise(fetchedBaseExercise);
+    setAllExercisesForModal(getAllExercisesFromPlan()); // Fetch all exercises for modal
 
     if (dayIdFromQuery) {
       const fetchedWorkoutDay = getWorkoutByDay(dayIdFromQuery);
@@ -253,6 +255,21 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     toast({ title: "Exercise Unskipped", description: `"${baseExercise?.name}" is no longer skipped.`});
   };
 
+  const handleSaveEditedExercise = (updatedExercise: ExerciseType) => {
+    setExerciseForLogging(updatedExercise);
+    if (baseExercise && baseExercise.id === updatedExercise.id) {
+      setBaseExercise(updatedExercise);
+    }
+    // The actual saving to workout-data.ts or a backend would happen elsewhere (e.g., on the WorkoutPlanPage)
+    // This just updates the current view of this specific exercise instance.
+    toast({
+      title: "Exercise Updated",
+      description: `${updatedExercise.name} details updated for this view. For plan-wide changes, use the 'Full Workout Plan' page.`,
+    });
+    setIsEditExerciseModalOpen(false);
+  };
+
+
   if (!isClient || baseExercise === undefined || (dayIdFromQuery && exerciseForLogging === undefined)) {
     return <LoadingExercisePage />;
   }
@@ -309,10 +326,18 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
       <Card className="shadow-lg rounded-2xl">
         <CardHeader>
-          <CardTitle className="text-2xl font-bold text-primary flex items-center">
-             <Dumbbell className="mr-3 h-7 w-7" />
-             {displayExercise.name}
-          </CardTitle>
+          <div className="flex justify-between items-start">
+            <CardTitle className="text-2xl font-bold text-primary flex items-center">
+               <Dumbbell className="mr-3 h-7 w-7" />
+               {displayExercise.name}
+            </CardTitle>
+            {dayIdFromQuery && exerciseForLogging && ( // Only show edit if it's a planned exercise for the day
+              <Button variant="ghost" size="icon" onClick={() => setIsEditExerciseModalOpen(true)} className="shrink-0">
+                <Pencil className="h-4 w-4" />
+                <span className="sr-only">Edit Exercise Details</span>
+              </Button>
+            )}
+          </div>
           {displayExercise.notes && !isSkipped &&(
             <Badge variant="secondary" className="text-xs mt-1 w-fit">{displayExercise.notes}</Badge>
           )}
@@ -466,6 +491,16 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
             loggedExerciseData={loggedExerciseData}
             isOpen={isAIRecModalOpen}
             onOpenChange={setIsAIRecModalOpen}
+        />
+      )}
+      {exerciseForLogging && dayIdFromQuery && (
+        <AddExerciseModal
+          isOpen={isEditExerciseModalOpen}
+          onOpenChange={setIsEditExerciseModalOpen}
+          onSave={handleSaveEditedExercise}
+          allExercises={allExercisesForModal}
+          dayId={dayIdFromQuery}
+          initialData={exerciseForLogging} // Pass current exercise for editing
         />
       )}
     </div>
