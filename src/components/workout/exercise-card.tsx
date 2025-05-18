@@ -5,11 +5,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles, RotateCcw } from 'lucide-react'; // Added Sparkles, RotateCcw
+import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles, XSquare } from 'lucide-react'; // Added XSquare, removed RotateCcw
 import type { Exercise, LoggedExerciseData, LoggedSetData, SetData } from '@/types/workout';
 import SetLogger from './set-logger';
 import AIRecommendationModal from './ai-recommendation-modal';
-import { getPreviousSetPerformance } from '@/lib/workout-utils'; // Added getPreviousSetPerformance
+import { getPreviousSetPerformance } from '@/lib/workout-utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -65,7 +65,7 @@ interface ExerciseCardProps {
   loggedData?: LoggedExerciseData;
   onUpdateEffectiveTargetWeight: (exerciseId: string, newWeight: string) => void;
   triggerRepReset: (exerciseId: string) => void; // Callback to trigger rep reset in parent
-  onClearExerciseLog: (exerciseId: string) => void; // Callback to clear log for this exercise
+  onSkipExercise: (exerciseId: string) => void; // Changed from onClearExerciseLog
 }
 
 export default function ExerciseCard({
@@ -75,7 +75,7 @@ export default function ExerciseCard({
   loggedData,
   onUpdateEffectiveTargetWeight,
   triggerRepReset,
-  onClearExerciseLog,
+  onSkipExercise, // Changed from onClearExerciseLog
 }: ExerciseCardProps) {
   const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
@@ -96,13 +96,13 @@ export default function ExerciseCard({
       const maxTarget = parseMaxTargetReps(set.targetReps); // Plan's target reps
       const loggedRepsNum = loggedSet?.reps !== undefined ? parseInt(String(loggedSet.reps), 10) : NaN;
 
-      if (maxTarget === null) continue;
+      if (maxTarget === null) continue; // If target is "to failure", can't evaluate for increase here
 
       if (isNaN(loggedRepsNum) || loggedRepsNum < maxTarget) {
-        return false;
+        return false; // Not all reps met or exceeded plan target
       }
     }
-    return true;
+    return true; // All sets completed and reps met or exceeded plan target
   }, [exercise.sets]);
 
 
@@ -123,6 +123,7 @@ export default function ExerciseCard({
     const newLog = { ...log, weight: weightToLog };
     onLogSet(exercise.id, setId, newLog);
 
+    // Immediately update the suggestion state based on the new log
     const nextLogState = {
         ...(loggedData || {}),
         [setId]: newLog
@@ -135,20 +136,21 @@ export default function ExerciseCard({
     const currentWeight = effectiveTargetWeight || exercise.targetWeight || '';
     if (manualTargetWeight !== currentWeight) {
       onUpdateEffectiveTargetWeight(exercise.id, manualTargetWeight);
-      triggerRepReset(exercise.id);
-      setForceSetEditKey(prev => prev + 1);
-      setCanSuggestWeightIncrease(false);
+      // Reset reps when weight changes
+      triggerRepReset(exercise.id); // Call the callback to reset reps in parent
+      setForceSetEditKey(prev => prev + 1); // Force re-render of set loggers
+      setCanSuggestWeightIncrease(false); // Reset suggestion as reps are now reset
     }
     setIsEditingTarget(false);
   };
 
   const handleCancelEdit = () => {
     setIsEditingTarget(false);
-    setManualTargetWeight(effectiveTargetWeight || exercise.targetWeight || '');
+    setManualTargetWeight(effectiveTargetWeight || exercise.targetWeight || ''); // Reset to current effective weight
   };
 
-  const handleClearLogPress = () => {
-    onClearExerciseLog(exercise.id);
+  const handleSkipExercisePress = () => {
+    onSkipExercise(exercise.id); // Call the renamed prop
     // Optionally, reset local UI states if needed, e.g., close editing mode
     setIsEditingTarget(false);
     setCanSuggestWeightIncrease(false); // Re-evaluate this after log clears
@@ -226,24 +228,24 @@ export default function ExerciseCard({
             )}
             <AlertDialog>
                 <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0">
-                        <RotateCcw className="h-4 w-4" />
-                        <span className="sr-only">Clear Log for {exercise.name}</span>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0" aria-label={`Skip ${exercise.name}`}>
+                        <XSquare className="h-4 w-4" />
+                        <span className="sr-only">Skip {exercise.name}</span>
                     </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                    <AlertDialogTitle>Clear Exercise Log?</AlertDialogTitle>
+                    <AlertDialogTitle>Skip Exercise: {exercise.name}?</AlertDialogTitle>
                     <AlertDialogDescription>
-                        This will mark all sets for "{exercise.name}" as incomplete for today.
-                        Your logged reps/weight for individual sets will be kept if you decide to log them again.
-                        Are you sure you want to clear progress for this exercise?
+                        This will mark all sets for "{exercise.name}" as not completed for today, which will affect your workout score.
+                        You can log sets for this exercise later if you change your mind.
+                        Are you sure you want to skip this exercise?
                     </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleClearLogPress} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                        Clear Log
+                    <AlertDialogAction onClick={handleSkipExercisePress} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                        Skip Exercise
                     </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
@@ -301,4 +303,3 @@ export default function ExerciseCard({
     </Card>
   );
 }
-

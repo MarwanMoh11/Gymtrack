@@ -49,7 +49,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
-  const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0);
+  const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0); // Used to force re-render ExerciseCards
   const { toast } = useToast();
 
   // Initialize date and load log from localStorage
@@ -65,17 +65,18 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
           setDailyLog(JSON.parse(storedLog));
         } catch (error) {
           console.error("Failed to parse stored log:", error);
-          localStorage.removeItem(key);
+          localStorage.removeItem(key); // Clear corrupted data
           setDailyLog({});
         }
       } else {
-        setDailyLog({});
+        setDailyLog({}); // No log for today yet
       }
       setIsInitialized(true);
     } else {
-        setIsInitialized(true);
+        // Handle server-side or environment where localStorage is not available
+        setIsInitialized(true); // Still need to set this true to allow rendering
     }
-  }, [workoutDay.id]);
+  }, [workoutDay.id]); // Only re-run if workoutDay.id changes (e.g., navigating to a different day's plan)
 
   // Save log to localStorage whenever it changes
   useEffect(() => {
@@ -84,7 +85,8 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       if (Object.keys(dailyLog).length > 0) {
         localStorage.setItem(key, JSON.stringify(dailyLog));
       } else {
-        if (localStorage.getItem(key)) {
+        // If dailyLog becomes empty, remove its key from localStorage
+        if (localStorage.getItem(key)) { // Check if it exists before removing
             localStorage.removeItem(key);
         }
       }
@@ -98,9 +100,11 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
             ...(prevLog[exerciseId] || {}),
             [setId]: log,
         };
+        // Check if all sets for this exercise are now marked as not completed
         const isEmpty = Object.values(newExerciseLog).every(l => !l.isCompleted);
 
         if (isEmpty) {
+            // If all sets for this exercise are marked incomplete, remove the exercise from the log
             const { [exerciseId]: _, ...restLog } = prevLog;
             return restLog;
         } else {
@@ -118,32 +122,36 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       title: "Log Cleared",
       description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
     });
+    // Force re-render of ExerciseCards so their internal states (like isEditingTarget) can reset
     setEffectiveTargetWeightsKey(prev => prev + 1);
   }, [workoutDay.dayName, currentDate, toast]);
 
   const handleUpdateEffectiveTargetWeight = useCallback((exerciseId: string, newWeight: string) => {
     const exerciseName = workoutDay.exercises.find(e => e.id === exerciseId)?.name || 'exercise';
     setTargetWeightOverride(exerciseId, newWeight);
-    setEffectiveTargetWeightsKey(prev => prev + 1);
+    setEffectiveTargetWeightsKey(prev => prev + 1); // Force re-render to reflect new effective weight
     toast({
       title: "Plan Updated",
-      description: `Target weight for ${exerciseName} updated to ${newWeight}.`,
+      description: `Target weight for ${exerciseName} updated to ${newWeight}. Reps for this exercise have been reset.`,
     });
   }, [toast, workoutDay.exercises]);
 
+  // Callback to reset reps for a specific exercise (e.g., when weight changes)
   const triggerRepReset = useCallback((exerciseId: string) => {
     setDailyLog(prevLog => {
         const exerciseLog = prevLog[exerciseId];
-        if (!exerciseLog) return prevLog;
+        if (!exerciseLog) return prevLog; // No log for this exercise to reset
 
         const updatedExerciseLog: LoggedExerciseData = {};
         const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseId);
 
         exerciseDefinition?.sets.forEach(setDef => {
+            // Keep the existing weight from the log if available, otherwise from plan
+            // Reset reps and mark as incomplete
             updatedExerciseLog[setDef.id] = {
-                weight: exerciseLog[setDef.id]?.weight,
-                reps: '',
-                isCompleted: false
+                weight: exerciseLog[setDef.id]?.weight, // Keep previously logged/derived weight for the set
+                reps: '', // Reset reps
+                isCompleted: false // Mark as not completed
             };
         });
 
@@ -152,52 +160,43 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
             [exerciseId]: updatedExerciseLog,
         };
     });
-     toast({
-        variant: "default",
-        title: "Reps Reset",
-        description: `Logged reps for ${workoutDay.exercises.find(e=>e.id===exerciseId)?.name || 'exercise'} reset due to weight change. Please re-log your sets.`,
-     });
-  }, [workoutDay.exercises, toast]);
+     // Toast message is now handled in onUpdateEffectiveTargetWeight for better context
+  }, [workoutDay.exercises]);
 
-  const handleClearExerciseLog = useCallback((exerciseIdToClear: string) => {
+  const handleSkipExercise = useCallback((exerciseIdToSkip: string) => {
     setDailyLog(prevLog => {
-      const exerciseLog = prevLog[exerciseIdToClear];
-      if (!exerciseLog) return prevLog; // No log to clear for this exercise
+      const exerciseLog = prevLog[exerciseIdToSkip];
+      const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseIdToSkip);
+      if (!exerciseDefinition) return prevLog;
 
       const updatedExerciseLog: LoggedExerciseData = {};
-      const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseIdToClear);
 
-      exerciseDefinition?.sets.forEach(setDef => {
-        // Keep existing logged weight/reps but mark as incomplete
+      exerciseDefinition.sets.forEach(setDef => {
         updatedExerciseLog[setDef.id] = {
-          reps: exerciseLog[setDef.id]?.reps || '', // Keep reps if they were entered
-          weight: exerciseLog[setDef.id]?.weight, // Keep weight
+          reps: exerciseLog?.[setDef.id]?.reps || '', // Keep reps if they were entered
+          weight: exerciseLog?.[setDef.id]?.weight, // Keep weight
           isCompleted: false // Mark as not completed
         };
       });
       
-      // Check if the exercise log is now effectively empty (all sets incomplete and no actual data)
-      // This logic might need refinement based on how "empty" is defined
       const isNowEffectivelyEmpty = Object.values(updatedExerciseLog).every(
         log => !log.isCompleted && (log.reps === '' || log.reps === undefined)
       );
 
       if (isNowEffectivelyEmpty) {
-        // If clearing made it empty, remove the exercise entry from the daily log
-        const { [exerciseIdToClear]: _, ...restLog } = prevLog;
+        const { [exerciseIdToSkip]: _, ...restLog } = prevLog;
         return restLog;
       } else {
-        // Otherwise, update the exercise log with all sets marked incomplete
         return {
           ...prevLog,
-          [exerciseIdToClear]: updatedExerciseLog,
+          [exerciseIdToSkip]: updatedExerciseLog,
         };
       }
     });
     toast({
       variant: "default",
-      title: "Exercise Progress Cleared",
-      description: `Progress for ${workoutDay.exercises.find(e => e.id === exerciseIdToClear)?.name || 'exercise'} has been cleared for today. You can log it again if needed.`,
+      title: "Exercise Skipped",
+      description: `"${workoutDay.exercises.find(e => e.id === exerciseIdToSkip)?.name || 'Exercise'}" has been marked as skipped for today. Your workout score will be affected.`,
     });
   }, [workoutDay.exercises, toast]);
 
@@ -208,6 +207,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   );
 
   if (!isInitialized) {
+    // Ensure LoadingWorkoutPage is a valid component or provide a fallback
     return typeof LoadingWorkoutPage === 'function' ? <LoadingWorkoutPage /> : <div>Loading workout...</div>;
   }
 
@@ -244,17 +244,20 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       </Card>
 
       {workoutDay.exercises.map((exercise: Exercise) => {
+        // This ensures that for each ExerciseCard, we get the latest effective target weight
+        // considering any overrides. The key change (effectiveTargetWeightsKey) forces
+        // re-evaluation if an override is set.
         const effectiveTargetWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
         return (
           <ExerciseCard
-            key={`${exercise.id}-${effectiveTargetWeightsKey}`}
+            key={`${exercise.id}-${effectiveTargetWeightsKey}`} // Add key to ensure re-render on weight override
             exercise={exercise}
             effectiveTargetWeight={effectiveTargetWeight}
             onLogSet={handleLogSet}
             loggedData={dailyLog[exercise.id]}
             onUpdateEffectiveTargetWeight={handleUpdateEffectiveTargetWeight}
             triggerRepReset={triggerRepReset}
-            onClearExerciseLog={handleClearExerciseLog}
+            onSkipExercise={handleSkipExercise} // Changed from onClearExerciseLog
           />
         );
       })}
