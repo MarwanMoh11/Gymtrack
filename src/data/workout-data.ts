@@ -32,7 +32,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'mon-ex3', name: 'Dips', targetWeight: '0 kg (bodyweight)', unit: 'reps',
         description: 'A compound bodyweight exercise that primarily targets the triceps and chest. Performed using parallel bars.',
-        videoUrl: 'https://www.youtube.com/embed/2z8JmcrW-As', // Example video for Dips
+        videoUrl: 'https://www.youtube.com/embed/2z8JmcrW-As',
         muscleGroups: ['Triceps', 'Chest (Lower)', 'Shoulders (Front)'],
         sets: [
           { id: 'mon-ex3-set1', targetReps: 8 },
@@ -42,9 +42,10 @@ export const weeklyPlan: WeeklyPlan = [
       },
       {
         id: 'mon-ex4', name: 'Seated Shoulder Press', targetWeight: '65 kg', unit: 'reps',
-        description: 'An overhead pressing exercise, usually performed with a barbell or dumbbells while seated, targeting the deltoid muscles.',
+        description: 'An overhead pressing exercise, usually performed with a barbell or dumbbells while seated, targeting the deltoid muscles. Can be done with DBs (as in current video) or Barbell.',
         muscleGroups: ['Shoulders (All Heads)', 'Triceps'],
-        videoUrl: 'https://www.youtube.com/embed/qEwKCR5JCog',
+        videoUrl: 'https://www.youtube.com/embed/qEwKCR5JCog', // DB Version
+        // Alt Barbell: https://www.youtube.com/embed/-t7fuZ0KhDA
         sets: [
           { id: 'mon-ex4-set1', targetReps: 12 },
           { id: 'mon-ex4-set2', targetReps: 10 },
@@ -54,7 +55,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'mon-ex5', name: 'Cable Fly (rope)', targetWeight: '2nd stack', unit: 'reps',
         description: 'An isolation exercise for the chest muscles, performed using a cable machine with a rope attachment. Provides constant tension throughout the movement.',
-        videoUrl: 'https://www.youtube.com/embed/Iwe6AmxVf7o', // Example, may need specific rope variant
+        videoUrl: 'https://www.youtube.com/embed/Iwe6AmxVf7o',
         muscleGroups: ['Chest'],
         sets: [
           { id: 'mon-ex5-set1', targetReps: 12 },
@@ -70,7 +71,7 @@ export const weeklyPlan: WeeklyPlan = [
         sets: [
           { id: 'mon-ex6-set1', targetReps: 12 },
           { id: 'mon-ex6-set2', targetReps: 12 },
-          { id: 'mon-ex6-set3', targetReps: '—' }, // Indicates 'to failure' or similar
+          { id: 'mon-ex6-set3', targetReps: '—' },
         ],
       },
       {
@@ -116,7 +117,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'tue-ex2', name: 'Neutral-Grip Pulldown', targetWeight: '11th stack', unit: 'reps', notes: 'Superset A',
         description: 'A variation of the lat pulldown using a neutral (palms facing each other) grip, which can alter muscle emphasis slightly.',
-        videoUrl: 'https://www.youtube.com/embed/0oeEUm3jXyA', // Example video
+        videoUrl: 'https://www.youtube.com/embed/0oeEUm3jXyA',
         muscleGroups: ['Lats', 'Biceps', 'Upper Back'],
         sets: [
           { id: 'tue-ex2-set1', targetReps: 12 },
@@ -138,7 +139,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'tue-ex4', name: 'Half-Kneeling One-Arm Lat Pulldown (each arm)', targetWeight: '5th stack', unit: 'reps',
         description: 'A unilateral (one-arm) lat pulldown variation performed in a half-kneeling stance, which can improve core stability and isolate each side of the back.',
-        videoUrl: 'https://www.youtube.com/embed/LqXk9a_h2H0', // Example video
+        videoUrl: 'https://www.youtube.com/embed/LqXk9a_h2H0',
         muscleGroups: ['Lats', 'Biceps', 'Core'],
         sets: [
           { id: 'tue-ex4-set1', targetReps: 12 },
@@ -244,7 +245,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'wed-ex6', name: 'Glute Machine or DB Hip Thrust', targetWeight: '45 kg', unit: 'reps',
         description: 'Exercises focusing on the gluteal muscles. Hip thrusts are typically performed with a barbell across the hips.',
-        videoUrl: 'https://www.youtube.com/embed/xDmFkJxPzeM', // DB Hip Thrust example
+        videoUrl: 'https://www.youtube.com/embed/xDmFkJxPzeM',
         muscleGroups: ['Glutes', 'Hamstrings'],
         sets: [
           { id: 'wed-ex6-set1', targetReps: 15 },
@@ -255,7 +256,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'wed-ex7', name: 'Calf Raises (Smith or DB)', targetWeight: 'bodyweight or added', unit: 'reps',
         description: 'An isolation exercise for the calf muscles (gastrocnemius and soleus). Can be done standing or seated, with or without weight.',
-        videoUrl: 'https://www.youtube.com/embed/JbyjNymZOt0', // Standing DB Calf Raise
+        videoUrl: 'https://www.youtube.com/embed/JbyjNymZOt0',
         muscleGroups: ['Calves'],
         sets: [
           { id: 'wed-ex7-set1', targetReps: 20 },
@@ -267,6 +268,7 @@ export const weeklyPlan: WeeklyPlan = [
         id: 'wed-ex8', name: 'Core – Ab Wheel Rollouts or Cable Crunches', unit: 'reps', isCore: true,
         description: 'Ab wheel rollouts are a challenging core exercise engaging the entire abdominal wall. Cable crunches are a weighted abdominal exercise.',
         videoUrl: 'https://www.youtube.com/embed/sVsrKCSqYic', // Ab Wheel
+        // Alt Cable Crunches: https://www.youtube.com/embed/Fz8mx4U7g2Y
         muscleGroups: ['Abs', 'Core'],
         sets: [
           { id: 'wed-ex8-set1', targetReps: 15 },
@@ -284,7 +286,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'thu-ex1', name: 'Weighted Chin-Ups', targetWeight: '0', unit: 'reps',
         description: 'A variation of the pull-up with a supinated (underhand) grip, which places more emphasis on the biceps. Can be done with added weight.',
-        videoUrl: 'https://www.youtube.com/embed/ZUndn_jJqM0', // Weighted Chin-up
+        videoUrl: 'https://www.youtube.com/embed/ZUndn_jJqM0',
         muscleGroups: ['Lats', 'Biceps', 'Upper Back'],
         sets: [
           { id: 'thu-ex1-set1', targetReps: 8 },
@@ -317,7 +319,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'thu-ex4', name: 'Overhead Triceps Extension', targetWeight: '6th stack', unit: 'reps',
         description: 'A triceps isolation exercise that can be performed with dumbbells, a barbell, or cables. Focuses on the long head of the triceps.',
-        videoUrl: 'https://www.youtube.com/embed/POTy3A1IeA0', // DB Overhead Extension
+        videoUrl: 'https://www.youtube.com/embed/POTy3A1IeA0',
         muscleGroups: ['Triceps'],
         sets: [
           { id: 'thu-ex4-set1', targetReps: 15 },
@@ -339,7 +341,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'thu-ex6', name: 'DB/Smith Romanian Deadlift', targetWeight: '15 kg', unit: 'reps',
         description: 'A hinge movement that primarily targets the hamstrings and glutes, with secondary involvement of the lower back. Performed with a barbell or dumbbells.',
-        videoUrl: 'https://www.youtube.com/embed/JCXUYuzwNrM', // RDL
+        videoUrl: 'https://www.youtube.com/embed/JCXUYuzwNrM',
         muscleGroups: ['Hamstrings', 'Glutes', 'Lower Back'],
         sets: [
           { id: 'thu-ex6-set1', targetReps: 12 },
@@ -362,7 +364,7 @@ export const weeklyPlan: WeeklyPlan = [
         id: 'thu-ex8', name: 'Conditioning Finisher', isConditioning: true, unit: 'min',
         notes: '10–15 min HIIT (30 s burpees / 30 s rest)',
         description: 'High-Intensity Interval Training (HIIT) to improve cardiovascular fitness and endurance. Example: Burpees for 30 seconds, rest for 30 seconds, repeat.',
-        videoUrl: 'https://www.youtube.com/embed/JZQA08SlJnM', // Burpees
+        videoUrl: 'https://www.youtube.com/embed/JZQA08SlJnM',
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'thu-ex8-set1', targetReps: '10-15 min' }],
       },
@@ -410,7 +412,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'fri-ex4', name: 'Bodyweight/Jump Squats', unit: 'reps', targetWeight: 'bodyweight',
         description: 'A lower body exercise performed using only bodyweight. Jump squats add a plyometric component for explosiveness.',
-        videoUrl: 'https://www.youtube.com/embed/U4s4mEQ5VqU', // Jump Squat
+        videoUrl: 'https://www.youtube.com/embed/U4s4mEQ5VqU',
         muscleGroups: ['Quads', 'Glutes', 'Hamstrings', 'Calves'],
         sets: [
           { id: 'fri-ex4-set1', targetReps: 15 },
@@ -461,6 +463,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'sat-ex1', name: 'Jog + Dynamic Warm-Up', targetWeight: 'bodyweight', isWarmup: true, isActivity: true,
         description: 'Light jogging followed by dynamic movements like leg swings and A-skips to prepare the body for intense activity.',
+        videoUrl: 'https://www.youtube.com/embed/nFo5dK_8g-k',
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [
           { id: 'sat-ex1-set1', targetReps: 'Jog 5 min' },
@@ -471,24 +474,28 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'sat-ex2', name: 'Accelerations', targetWeight: 'bodyweight', isWarmup: true, isActivity: true,
         description: 'Short sprints with increasing speed to prepare for explosive movements during the match.',
+        videoUrl: '', // No specific general video
         muscleGroups: ['Legs', 'Cardio'],
         sets: [{ id: 'sat-ex2-set1', targetReps: '3 × 20 m all‐out' }],
       },
       {
         id: 'sat-ex3', name: 'Football Match', isMatch: true, isActivity: true, targetWeight: 'N/A',
         description: 'Participation in a football (soccer) match.',
+        videoUrl: '', // Not applicable
         muscleGroups: ['Full Body', 'Cardio', 'Agility'],
         sets: [{ id: 'sat-ex3-set1', targetReps: 'Match play (~90 min)' }],
       },
       {
         id: 'sat-ex4', name: 'Cool-Down Jog/Walk', targetWeight: 'bodyweight', isActivity: true,
         description: 'Light jogging or walking to gradually lower heart rate and aid recovery after the match.',
+        videoUrl: '', // Not applicable
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'sat-ex4-set1', targetReps: '10 min easy' }],
       },
       {
         id: 'sat-ex5', name: 'Static Stretch', isStretch: true, isActivity: true, targetWeight: 'N/A',
         description: 'Holding stretches for major muscle groups used during the match to improve flexibility and aid recovery.',
+        videoUrl: 'https://www.youtube.com/embed/Sj_N63D0Zck',
         muscleGroups: ['Quads', 'Hamstrings', 'Calves', 'Glutes', 'Groin'],
         sets: [
           { id: 'sat-ex5-set1', targetReps: 'Quads 30 s ea' },
@@ -506,48 +513,54 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'sun-ex1', name: 'Walking', isRecovery: true, isActivity: true, targetWeight: 'bodyweight',
         description: 'Low-intensity walking to promote blood flow and recovery without stressing the body.',
+        videoUrl: '', // Not applicable
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'sun-ex1-set1', targetReps: '1 hour, 10,000 Steps' }],
       },
       {
         id: 'sun-ex2', name: 'Foam-Roll Quads', targetWeight: 'bodyweight', isFoamRoll: true, isRecovery: true,
         description: 'Using a foam roller to massage and release tension in the quadriceps muscles.',
+        videoUrl: 'https://www.youtube.com/embed/fSHS_rQ02nc',
         muscleGroups: ['Quads'],
         sets: [{ id: 'sun-ex2-set1', targetReps: '2 min' }],
       },
       {
         id: 'sun-ex3', name: 'Foam-Roll Hamstrings', targetWeight: 'bodyweight', isFoamRoll: true, isRecovery: true,
         description: 'Using a foam roller to massage and release tension in the hamstring muscles.',
+        videoUrl: 'https://www.youtube.com/embed/HRxVHeE_23c',
         muscleGroups: ['Hamstrings'],
         sets: [{ id: 'sun-ex3-set1', targetReps: '2 min' }],
       },
       {
         id: 'sun-ex4', name: 'Foam-Roll Lats', targetWeight: 'bodyweight', isFoamRoll: true, isRecovery: true,
         description: 'Using a foam roller to massage and release tension in the latissimus dorsi muscles.',
+        videoUrl: 'https://www.youtube.com/embed/j9a3sC4H8Q0',
         muscleGroups: ['Lats'],
         sets: [{ id: 'sun-ex4-set1', targetReps: '2 min' }],
       },
       {
         id: 'sun-ex5', name: 'PNF Hamstring Stretch', isStretch: true, isRecovery: true, targetWeight: 'N/A',
         description: 'Proprioceptive Neuromuscular Facilitation (PNF) stretching for hamstrings, often involving a contract-relax sequence.',
+        videoUrl: 'https://www.youtube.com/embed/HvzCHEPYi_M',
         muscleGroups: ['Hamstrings'],
         sets: [{ id: 'sun-ex5-set1', targetReps: '2 × 30 s ea leg' }],
       },
       {
         id: 'sun-ex6', name: 'PNF Hip-Flexor Stretch', isStretch: true, isRecovery: true, targetWeight: 'N/A',
         description: 'PNF stretching for hip flexor muscles.',
+        videoUrl: 'https://www.youtube.com/embed/Vdx4fyH00pc',
         muscleGroups: ['Hip Flexors', 'Quads'],
         sets: [{ id: 'sun-ex6-set1', targetReps: '2 × 30 s ea side' }],
       },
       {
         id: 'sun-ex7', name: 'Shoulder Dislocates', targetWeight: 'band', isStretch: true, isRecovery: true,
         description: 'A shoulder mobility exercise using a band or stick, involving a wide circular motion of the arms.',
+        videoUrl: 'https://www.youtube.com/embed/1QE3y_C2YFA',
         muscleGroups: ['Shoulders', 'Chest'],
         sets: [{ id: 'sun-ex7-set1', targetReps: '15 reps' }],
       },
     ],
   },
-  // New "Exercise Library" day for additional exercises for autocomplete
   {
     id: 'exercise-library',
     dayName: 'Exercise Library',
@@ -704,14 +717,14 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'lib-shrugs', name: 'Barbell/Dumbbell Shrugs', targetWeight: 'Heavy', unit: 'reps',
         description: 'Isolation exercise for trapezius muscles. Hold weight and elevate shoulders towards ears.',
-        videoUrl: 'https://www.youtube.com/embed/NAqCVe2mwzM', // DB Shrugs
+        videoUrl: 'https://www.youtube.com/embed/NAqCVe2mwzM',
         muscleGroups: ['Traps (Upper)'],
         sets: [{ id: 'lib-shrug-s1', targetReps: '12-20' }, { id: 'lib-shrug-s2', targetReps: '12-20' }, { id: 'lib-shrug-s3', targetReps: '12-20' }],
       },
       {
         id: 'lib-upright-row', name: 'Upright Row (Barbell/Dumbbell)', targetWeight: 'Moderate', unit: 'reps',
         description: 'Compound exercise for shoulders and traps. Pull weight vertically up towards chin, leading with elbows.',
-        videoUrl: 'https://www.youtube.com/embed/ja33CSF15So', // Barbell
+        videoUrl: 'https://www.youtube.com/embed/ja33CSF15So',
         muscleGroups: ['Shoulders (Lateral, Front)', 'Traps'],
         sets: [{ id: 'lib-ur-s1', targetReps: '10-15' }, { id: 'lib-ur-s2', targetReps: '10-15' }, { id: 'lib-ur-s3', targetReps: '10-15' }],
       },
@@ -832,6 +845,9 @@ export const getWorkoutByDay = (dayId: string) => {
 export const getAllExercisesFromPlan = (): Exercise[] => {
   const allExercisesMap = new Map<string, Exercise>();
   weeklyPlan.forEach(day => {
+    // Do not include exercises from 'exercise-library' in the list of *plannable* exercises shown in UI,
+    // but do include them for autocomplete lookup. The filter for plannable exercises happens where getDays is used.
+    // For getAllExercisesFromPlan, we want everything for autocomplete.
     day.exercises.forEach(exercise => {
       if (!allExercisesMap.has(exercise.id)) {
         allExercisesMap.set(exercise.id, exercise);
@@ -848,13 +864,15 @@ export const getExerciseById = (exerciseId: string): Exercise | undefined => {
       return foundExercise;
     }
   }
-  // If not found in specific days, check the comprehensive list (in case it's an exercise not yet assigned to a day but exists in a general list)
-  // This part would be more relevant if we had a separate master list of exercises.
-  // For now, it just re-iterates, but could be adapted if `getAllExercisesFromPlan` sourced from a different master list.
+  // This fallback is less critical now that getAllExercisesFromPlan sources from weeklyPlan directly,
+  // but kept for robustness.
   const allExercises = getAllExercisesFromPlan();
   return allExercises.find(ex => ex.id === exerciseId);
 };
 
-// getDays is not actively used by the modified sidebar, but kept in case it's needed elsewhere.
-export const getDays = () => weeklyPlan.map(day => ({ id: day.id, dayName: day.dayName, title: day.title }));
+// getDays is used to populate the workout plan page.
+// It should not include the 'exercise-library' pseudo-day.
+export const getDays = () => weeklyPlan.filter(day => day.id !== 'exercise-library').map(day => ({ id: day.id, dayName: day.dayName, title: day.title }));
 
+
+    
