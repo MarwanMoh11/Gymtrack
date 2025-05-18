@@ -3,24 +3,30 @@
 'use client';
 
 import Link from 'next/link';
-import { weeklyPlan as defaultWeeklyPlan, getDays as getDefaultDays } from '@/data/workout-data';
-import type { WorkoutDay } from '@/types/workout';
+import { weeklyPlan as defaultWeeklyPlan, getDays as getDefaultDays, getAllExercisesFromPlan } from '@/data/workout-data';
+import type { WorkoutDay, Exercise, SetData } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowRight, CalendarDays, Edit, Save, XCircle, PlusCircle, Trash2 } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import { ArrowRight, CalendarDays, Edit, Save, XCircle, PlusCircle, Trash2, ArrowUp, ArrowDown, Info } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import AddExerciseModal from '@/components/workout-plan/add-exercise-modal'; // New Modal
 
 export default function WorkoutPlanPage() {
   const [isEditMode, setIsEditMode] = useState(false);
-  const [editablePlan, setEditablePlan] = useState<WorkoutDay[]>(() => JSON.parse(JSON.stringify(defaultWeeklyPlan))); // Deep copy
-  const [initialPlan, setInitialPlan] = useState<WorkoutDay[]>(() => JSON.parse(JSON.stringify(defaultWeeklyPlan))); // For cancel
+  const [editablePlan, setEditablePlan] = useState<WorkoutDay[]>(() => JSON.parse(JSON.stringify(defaultWeeklyPlan)));
+  const [initialPlan, setInitialPlan] = useState<WorkoutDay[]>(() => JSON.parse(JSON.stringify(defaultWeeklyPlan)));
+
+  const [isAddExerciseModalOpen, setIsAddExerciseModalOpen] = useState(false);
+  const [dayIdForNewExercise, setDayIdForNewExercise] = useState<string | null>(null);
+  
+  const allExercisesForAutocomplete = useMemo(() => getAllExercisesFromPlan(), []);
+
 
   const { toast } = useToast();
 
-  // Reset editablePlan if defaultWeeklyPlan changes (e.g. hot-reload of data file)
   useEffect(() => {
     const deepClonedPlan = JSON.parse(JSON.stringify(defaultWeeklyPlan));
     setEditablePlan(deepClonedPlan);
@@ -38,8 +44,7 @@ export default function WorkoutPlanPage() {
 
   const handleSaveChanges = () => {
     console.log("Saving customized plan (client-side):", editablePlan);
-    // In a real app, here you would send editablePlan to your backend/Firestore to save it.
-    setInitialPlan(JSON.parse(JSON.stringify(editablePlan))); // Update initial plan to current saved state
+    setInitialPlan(JSON.parse(JSON.stringify(editablePlan)));
     setIsEditMode(false);
     toast({
       title: "Plan Changes Applied",
@@ -48,7 +53,7 @@ export default function WorkoutPlanPage() {
   };
 
   const handleCancelChanges = () => {
-    setEditablePlan(JSON.parse(JSON.stringify(initialPlan))); // Revert to last saved or default state
+    setEditablePlan(JSON.parse(JSON.stringify(initialPlan)));
     setIsEditMode(false);
     toast({
       title: "Changes Canceled",
@@ -57,17 +62,65 @@ export default function WorkoutPlanPage() {
     });
   };
   
-  // Placeholder for future exercise/set editing logic
   const handleEditExercise = (dayId: string, exerciseId: string) => {
-    toast({ title: "Action Placeholder", description: `Edit exercise ${exerciseId} for day ${dayId}`});
+    toast({ title: "Placeholder", description: `Editing exercise ${exerciseId} for day ${dayId} will be implemented next.`});
+    // Future: Open a modal similar to AddExerciseModal but pre-filled with existing exercise data.
   };
+  
   const handleRemoveExercise = (dayId: string, exerciseId: string) => {
-     toast({ title: "Action Placeholder", description: `Remove exercise ${exerciseId} from day ${dayId}`});
+    setEditablePlan(prevPlan =>
+      prevPlan.map(day => {
+        if (day.id === dayId) {
+          return { ...day, exercises: day.exercises.filter(ex => ex.id !== exerciseId) };
+        }
+        return day;
+      })
+    );
+    toast({ title: "Exercise Removed", description: `Exercise removed from ${dayId}. Save changes to apply.`});
   };
-   const handleAddExercise = (dayId: string) => {
-    toast({ title: "Action Placeholder", description: `Add exercise to day ${dayId}`});
+   
+  const handleAddExerciseClick = (dayId: string) => {
+    setDayIdForNewExercise(dayId);
+    setIsAddExerciseModalOpen(true);
   };
 
+  const handleSaveNewExercise = (dayId: string, newExercise: Exercise) => {
+    setEditablePlan(prevPlan =>
+      prevPlan.map(day => {
+        if (day.id === dayId) {
+          return { ...day, exercises: [...day.exercises, newExercise] };
+        }
+        return day;
+      })
+    );
+    setIsAddExerciseModalOpen(false);
+    setDayIdForNewExercise(null);
+    toast({ title: "Exercise Added", description: `${newExercise.name} added to ${dayId}. Save changes to apply.`});
+  };
+
+  const handleMoveExercise = (dayId: string, exerciseId: string, direction: 'up' | 'down') => {
+    setEditablePlan(prevPlan => {
+      return prevPlan.map(day => {
+        if (day.id === dayId) {
+          const exercises = [...day.exercises];
+          const index = exercises.findIndex(ex => ex.id === exerciseId);
+          if (index === -1) return day;
+
+          if (direction === 'up' && index > 0) {
+            const temp = exercises[index];
+            exercises[index] = exercises[index - 1];
+            exercises[index - 1] = temp;
+          } else if (direction === 'down' && index < exercises.length - 1) {
+            const temp = exercises[index];
+            exercises[index] = exercises[index + 1];
+            exercises[index + 1] = temp;
+          }
+          return { ...day, exercises };
+        }
+        return day;
+      });
+    });
+  };
 
   return (
     <div className="container mx-auto py-8 px-4 md:px-6">
@@ -158,12 +211,24 @@ export default function WorkoutPlanPage() {
                   <p className="text-xs text-muted-foreground italic mb-2 p-2 bg-secondary/30 rounded-md">{day.notes}</p>
                 )}
                 <ul className="space-y-1 text-sm">
-                  {day.exercises.map((ex) => (
+                  {day.exercises.map((ex, index) => (
                     <li key={ex.id} className="text-muted-foreground truncate flex justify-between items-center group hover:bg-secondary/20 p-1 rounded-md">
-                      <span>- {ex.name} <span className="text-xs">({ex.sets.length} sets)</span></span>
+                      <div className="flex items-center gap-1">
+                        <Link href={`/exercises/${ex.id}`} passHref legacyBehavior>
+                            <a className="hover:text-primary flex items-center gap-1" target="_blank" rel="noopener noreferrer">
+                                <span>- {ex.name} <span className="text-xs">({ex.sets.length} sets)</span></span>
+                                <Info className="h-3 w-3 opacity-50 group-hover:opacity-100" />
+                            </a>
+                        </Link>
+                      </div>
                       {isEditMode && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                           {/* Placeholders for exercise editing actions */}
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 items-center">
+                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'up')} disabled={index === 0}>
+                                <ArrowUp className="h-3 w-3" />
+                           </Button>
+                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'down')} disabled={index === day.exercises.length - 1}>
+                                <ArrowDown className="h-3 w-3" />
+                           </Button>
                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleEditExercise(day.id, ex.id)}>
                                 <Edit className="h-3 w-3" />
                            </Button>
@@ -174,16 +239,17 @@ export default function WorkoutPlanPage() {
                       )}
                     </li>
                   ))}
-                  {day.exercises.length === 0 && !isEditMode && (
-                    <li className="text-muted-foreground/70 italic">No exercises for this day.</li>
+                  {day.exercises.length === 0 && (
+                    <li className="text-muted-foreground/70 italic">
+                        {isEditMode ? "No exercises. Click 'Add Exercise' below." : "No exercises for this day."}
+                    </li>
                   )}
                 </ul>
                  {isEditMode && (
                     <div className="mt-3 pt-3 border-t border-border/50">
-                        <Button variant="outline" size="sm" className="w-full" onClick={() => handleAddExercise(day.id)}>
+                        <Button variant="outline" size="sm" className="w-full" onClick={() => handleAddExerciseClick(day.id)}>
                             <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise to {day.dayName}
                         </Button>
-                        {/* More detailed set editing would go here per exercise when an exercise is "expanded" or selected for edit */}
                     </div>
                 )}
               </CardContent>
@@ -200,7 +266,15 @@ export default function WorkoutPlanPage() {
           ))}
         </div>
       )}
+       {isAddExerciseModalOpen && dayIdForNewExercise && (
+        <AddExerciseModal
+          isOpen={isAddExerciseModalOpen}
+          onOpenChange={setIsAddExerciseModalOpen}
+          onSave={(newExercise) => handleSaveNewExercise(dayIdForNewExercise, newExercise)}
+          allExercises={allExercisesForAutocomplete}
+          dayId={dayIdForNewExercise}
+        />
+      )}
     </div>
   );
 }
-

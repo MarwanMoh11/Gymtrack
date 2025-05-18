@@ -12,36 +12,36 @@ export type SetData = {
 export type Exercise = {
   id: string;
   name: string;
-  targetWeight?: string;
+  targetWeight?: string; // Default/base target weight for the exercise plan
   sets: SetData[];
   notes?: string;
-  description?: string; // New: Detailed description of the exercise
-  videoUrl?: string; // New: URL to an instructional video
-  muscleGroups?: string[]; // New: Array of muscle groups targeted
+  description?: string;
+  videoUrl?: string;
+  muscleGroups?: string[];
   isCore?: boolean;
   isConditioning?: boolean;
   isWarmup?: boolean;
   isMatch?: boolean;
-  isActivity?: boolean; // General category for non-lifting activities
+  isActivity?: boolean;
   isStretch?: boolean;
   isFoamRoll?: boolean;
-  isRecovery?: boolean; // Added for Sunday's activities
-  unit?: 'reps' | 's' | 'min'; // Default unit for exercise if not specified per set
+  isRecovery?: boolean;
+  unit?: 'reps' | 's' | 'min';
 };
 
 export type WorkoutDay = {
-  id: string; // e.g., "monday"
-  dayName: string; // e.g., "Monday"
+  id: string;
+  dayName: string;
   title: string;
   exercises: Exercise[];
-  notes?: string; // For overall day notes like circuit instructions
+  notes?: string;
 };
 
 export type WeeklyPlan = WorkoutDay[];
 
 export type LoggedSetData = {
   reps?: string | number;
-  weight?: string;
+  weight?: string; // The actual weight logged for this specific set instance
   isCompleted: boolean;
 };
 
@@ -51,4 +51,12 @@ export type LoggedExerciseData = {
 
 export type DailyLog = {
   [exerciseId: string]: LoggedExerciseData;
+};
+
+// For the AddExerciseModal
+export type NewSetData = {
+  id: string; // temporary client-side ID
+  targetReps: string;
+  targetWeight: string;
+  unit: 'reps' | 's' | 'min';
 };
