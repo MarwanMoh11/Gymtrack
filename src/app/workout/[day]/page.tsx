@@ -34,15 +34,14 @@ export default function WorkoutPage({ params }: WorkoutPageProps) {
     );
   }
 
+  // WorkoutView is now simplified. It will display a list of exercises
+  // that link to their detail pages for logging.
   return <WorkoutView workoutDay={workoutDay} />;
 }
 
-// If daily workout pages are still desired but less prominent,
-// keep generateStaticParams. If they are to be removed entirely,
-// this function and the route structure might change.
 export async function generateStaticParams() {
-  // Use the imported weeklyPlan directly
   return allWorkoutDays.map((day) => ({
     day: day.id,
   }));
 }
+    

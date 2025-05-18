@@ -1,16 +1,25 @@
 
+// src/components/workout/workout-view.tsx
+// This component is being phased out for the main /dashboard/today view.
+// Its core logic is moving to /dashboard/today/page.tsx and /exercises/[exerciseId]/page.tsx.
+// For now, it can remain for the /workout/[day] pages, but those will be inconsistent
+// with the new logging flow until they are also updated.
+
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { WorkoutDay, DailyLog, LoggedSetData, Exercise, LoggedExerciseData } from '@/types/workout';
-import ExerciseCard from './exercise-card';
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link'; // Added import for Link
+import type { WorkoutDay, DailyLog, LoggedSetData, Exercise } from '@/types/workout';
+// ExerciseCard is no longer used here for the primary logging view.
+// import ExerciseCard from './exercise-card'; 
 import DayProgress from './day-progress';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardDescription, CardHeader, CardTitle, CardFooter } from '../ui/card';
-import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
+// Target weight logic might still be relevant if this page is kept for other days.
+// import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading';
-import { CheckSquare } from 'lucide-react';
+import { CheckSquare, AlertTriangle, ArrowRight } from 'lucide-react'; // Added ArrowRight
 
 interface WorkoutViewProps {
   workoutDay: WorkoutDay;
@@ -24,13 +33,12 @@ function getLocalStorageKey(dayId: string, date: string): string {
   return `gymtrack_log_${dayId}_${date}`;
 }
 
-// Helper function to calculate progress, moved outside for reusability if needed
+// Simplified progress calculation, as detailed logging is elsewhere
 const calculateWorkoutProgress = (workoutDay: WorkoutDay, dailyLog: DailyLog) => {
   let totalSets = 0;
   let completedSets = 0;
 
   workoutDay.exercises.forEach(exercise => {
-    // Only count sets for exercises that are not considered "skipped" for totalSets
     const exerciseLog = dailyLog[exercise.id];
     const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
 
@@ -57,10 +65,9 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
-  const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0); // Used to force re-render ExerciseCards
+  // const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0); 
   const { toast } = useToast();
 
-  // Initialize date and load log from localStorage
   useEffect(() => {
     const dateStr = getCurrentDateString();
     setCurrentDate(dateStr);
@@ -73,161 +80,45 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
           setDailyLog(JSON.parse(storedLog));
         } catch (error) {
           console.error("Failed to parse stored log:", error);
-          localStorage.removeItem(key); // Clear corrupted data
+          localStorage.removeItem(key); 
           setDailyLog({});
         }
       } else {
-        setDailyLog({}); // No log for today yet
+        setDailyLog({}); 
       }
       setIsInitialized(true);
     } else {
-        // Handle server-side or environment where localStorage is not available
-        setIsInitialized(true); // Still need to set this true to allow rendering
+        setIsInitialized(true); 
     }
-  }, [workoutDay.id]); // Only re-run if workoutDay.id changes (e.g., navigating to a different day's plan)
+  }, [workoutDay.id]); 
 
-  // Save log to localStorage whenever it changes
-  useEffect(() => {
-    if (isInitialized && typeof window !== 'undefined' && currentDate) {
-      const key = getLocalStorageKey(workoutDay.id, currentDate);
-      if (Object.keys(dailyLog).length > 0) {
-        localStorage.setItem(key, JSON.stringify(dailyLog));
-      } else {
-        // If dailyLog becomes empty, remove its key from localStorage
-        if (localStorage.getItem(key)) { // Check if it exists before removing
-            localStorage.removeItem(key);
-        }
-      }
-    }
-  }, [dailyLog, workoutDay.id, isInitialized, currentDate]);
-
-
-  const handleLogSet = useCallback((exerciseId: string, setId: string, log: LoggedSetData) => {
-    setDailyLog(prevLog => {
-        const newExerciseLog = {
-            ...(prevLog[exerciseId] || {}),
-            [setId]: log,
-        };
-        // Check if all sets for this exercise are now marked as not completed
-        const exerciseDef = workoutDay.exercises.find(e => e.id === exerciseId);
-        const allDefinedSetsMarkedNotCompleted = exerciseDef?.sets.every(setDef => newExerciseLog[setDef.id]?.isCompleted === false);
-
-        if (exerciseDef && exerciseDef.sets.length > 0 && allDefinedSetsMarkedNotCompleted) {
-            // If all defined sets are marked incomplete, keep the exercise log (as it represents a "skipped" state)
-            return {
-                ...prevLog,
-                [exerciseId]: newExerciseLog,
-            };
-        } else if (Object.values(newExerciseLog).every(l => !l.isCompleted && (l.reps === '' || l.reps === undefined ))) {
-             // If all logged sets are incomplete AND have no reps (i.e. cleared/reset)
-            const { [exerciseId]: _, ...restLog } = prevLog;
-            return restLog;
-        }
-        else {
-            return {
-                ...prevLog,
-                [exerciseId]: newExerciseLog,
-            };
-        }
-    });
-  }, [workoutDay.exercises]);
+  // This component no longer directly handles logging sets. 
+  // It only displays progress based on localStorage.
 
   const handleClearDayLog = useCallback(() => {
     setDailyLog({});
+    if (typeof window !== 'undefined') {
+        localStorage.removeItem(getLocalStorageKey(workoutDay.id, currentDate));
+    }
     toast({
       title: "Log Cleared",
       description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
     });
-    // Force re-render of ExerciseCards so their internal states (like isEditingTarget) can reset
-    setEffectiveTargetWeightsKey(prev => prev + 1);
-  }, [workoutDay.dayName, currentDate, toast]);
-
-  const handleUpdateEffectiveTargetWeight = useCallback((exerciseId: string, newWeight: string) => {
-    const exerciseName = workoutDay.exercises.find(e => e.id === exerciseId)?.name || 'exercise';
-    setTargetWeightOverride(exerciseId, newWeight);
-    setEffectiveTargetWeightsKey(prev => prev + 1); // Force re-render to reflect new effective weight
-    toast({
-      title: "Plan Updated",
-      description: `Target weight for ${exerciseName} updated to ${newWeight}. Reps for this exercise have been reset.`,
-    });
-  }, [toast, workoutDay.exercises]);
-
-  // Callback to reset reps for a specific exercise (e.g., when weight changes)
-  const triggerRepReset = useCallback((exerciseId: string) => {
-    setDailyLog(prevLog => {
-        const exerciseLog = prevLog[exerciseId];
-        if (!exerciseLog) return prevLog; // No log for this exercise to reset
-
-        const updatedExerciseLog: LoggedExerciseData = {};
-        const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseId);
-
-        exerciseDefinition?.sets.forEach(setDef => {
-            // Keep the existing weight from the log if available, otherwise from plan
-            // Reset reps and mark as incomplete
-            updatedExerciseLog[setDef.id] = {
-                weight: exerciseLog[setDef.id]?.weight, // Keep previously logged/derived weight for the set
-                reps: '', // Reset reps
-                isCompleted: false // Mark as not completed
-            };
-        });
-
-        return {
-            ...prevLog,
-            [exerciseId]: updatedExerciseLog,
-        };
-    });
-     // Toast message is now handled in onUpdateEffectiveTargetWeight for better context
-  }, [workoutDay.exercises]);
-
-  const handleSkipExercise = useCallback((exerciseIdToSkip: string) => {
-    setDailyLog(prevLog => {
-      const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseIdToSkip);
-      if (!exerciseDefinition || exerciseDefinition.sets.length === 0) return prevLog; // Cannot skip exercises without sets
-
-      const updatedExerciseLog: LoggedExerciseData = { ...(prevLog[exerciseIdToSkip] || {}) };
-
-      exerciseDefinition.sets.forEach(setDef => {
-        updatedExerciseLog[setDef.id] = {
-          reps: prevLog[exerciseIdToSkip]?.[setDef.id]?.reps || '', // Keep reps if they were entered
-          weight: prevLog[exerciseIdToSkip]?.[setDef.id]?.weight, // Keep weight
-          isCompleted: false // Mark as not completed
-        };
-      });
-      
-      return {
-          ...prevLog,
-          [exerciseIdToSkip]: updatedExerciseLog,
-      };
-    });
-    toast({
-      variant: "default",
-      title: "Exercise Skipped",
-      description: `"${workoutDay.exercises.find(e => e.id === exerciseIdToSkip)?.name || 'Exercise'}" has been marked as skipped for today. Your workout score will be affected.`,
-    });
-  }, [workoutDay.exercises, toast]);
-
-  const handleUnskipExercise = useCallback((exerciseIdToUnskip: string) => {
-    setDailyLog(prevLog => {
-      const { [exerciseIdToUnskip]: _, ...restLog } = prevLog;
-      return restLog;
-    });
-    setEffectiveTargetWeightsKey(prev => prev + 1); // Force re-render of ExerciseCards
-    toast({
-      title: "Exercise Unskipped",
-      description: `"${workoutDay.exercises.find(e => e.id === exerciseIdToUnskip)?.name || 'Exercise'}" is no longer skipped. You can now log sets.`,
-    });
-  }, [workoutDay.exercises, toast]);
-
-
-  const { completedSets, totalSets, score } = useMemo(
-    () => calculateWorkoutProgress(workoutDay, dailyLog),
-    [workoutDay, dailyLog]
-  );
+    // setEffectiveTargetWeightsKey(prev => prev + 1);
+  }, [workoutDay.id, workoutDay.dayName, currentDate, toast]);
+  
+  const { completedSets, totalSets, score } = calculateWorkoutProgress(workoutDay, dailyLog);
 
   if (!isInitialized) {
-    // Ensure LoadingWorkoutPage is a valid component or provide a fallback
-    return typeof LoadingWorkoutPage === 'function' ? <LoadingWorkoutPage /> : <div>Loading workout...</div>;
+    return <LoadingWorkoutPage />;
   }
+  
+  const isExerciseCompleted = (exercise: Exercise): boolean => {
+    const exerciseLog = dailyLog[exercise.id];
+    if (!exerciseLog) return false;
+    return exercise.sets.every(set => exerciseLog[set.id]?.isCompleted);
+  };
+
 
   return (
     <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8">
@@ -239,7 +130,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
               <CardDescription className="text-lg text-muted-foreground">{workoutDay.title} - {currentDate}</CardDescription>
             </div>
              <Button variant="outline" onClick={handleClearDayLog} size="sm" className="rounded-full shrink-0">
-              Clear Today's Full Log
+              Clear Full Log
             </Button>
           </div>
           {workoutDay.notes && (
@@ -261,29 +152,48 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
         </CardFooter>
       </Card>
 
-      {workoutDay.exercises.map((exercise: Exercise) => {
-        const effectiveTargetWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
-        const exerciseLog = dailyLog[exercise.id];
-        const isSkipped = exerciseLog && 
-                          exercise.sets.length > 0 && 
-                          exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
-        
-        return (
-          <ExerciseCard
-            key={`${exercise.id}-${effectiveTargetWeightsKey}`} 
-            exercise={exercise}
-            effectiveTargetWeight={effectiveTargetWeight}
-            onLogSet={handleLogSet}
-            loggedData={dailyLog[exercise.id]}
-            onUpdateEffectiveTargetWeight={handleUpdateEffectiveTargetWeight}
-            triggerRepReset={triggerRepReset}
-            onSkipExercise={handleSkipExercise}
-            onUnskipExercise={handleUnskipExercise}
-            isSkipped={isSkipped}
-          />
-        );
-      })}
+       <div className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground mb-3">Exercises for {workoutDay.dayName}:</h2>
+        {workoutDay.exercises.map((exercise) => {
+           const exerciseCompleted = isExerciseCompleted(exercise);
+           const exerciseLog = dailyLog[exercise.id];
+           const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+
+          return (
+            <Card key={exercise.id} className="shadow-md hover:shadow-lg transition-shadow duration-300">
+              <CardHeader className="flex flex-row justify-between items-center pb-3">
+                <div>
+                  <CardTitle className="text-lg font-semibold text-foreground">{exercise.name}</CardTitle>
+                  <CardDescription className="text-xs text-muted-foreground">
+                    {exercise.sets.length} sets
+                    {exercise.targetWeight && ` | Plan: ${exercise.targetWeight}`}
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                    {isSkipped && (
+                        <span className="text-xs text-destructive font-medium">(Skipped)</span>
+                    )}
+                    {exerciseCompleted && !isSkipped && (
+                        <CheckSquare className="h-5 w-5 text-primary" />
+                    )}
+                    <Button asChild variant="ghost" size="sm">
+                        {/* Link to the exercise detail page, passing the current workoutDay.id */}
+                        <Link href={`/exercises/${exercise.id}?dayId=${workoutDay.id}`}>
+                            Log / View <ArrowRight className="ml-2 h-4 w-4" />
+                        </Link>
+                    </Button>
+                </div>
+              </CardHeader>
+              {exercise.notes && (
+                <CardContent className="pb-3 pt-0">
+                    <p className="text-xs italic text-muted-foreground bg-secondary/30 p-2 rounded-md">{exercise.notes}</p>
+                </CardContent>
+              )}
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }
-
+    
