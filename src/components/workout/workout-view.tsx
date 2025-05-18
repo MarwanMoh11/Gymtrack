@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Card, CardDescription, CardHeader, CardTitle, CardFooter } from '../ui/card';
 import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading';
-import { CheckSquare, TrendingUp } from 'lucide-react';
+import { CheckSquare } from 'lucide-react';
 
 interface WorkoutViewProps {
   workoutDay: WorkoutDay;
@@ -30,8 +30,16 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay, dailyLog: DailyLog) =>
   let completedSets = 0;
 
   workoutDay.exercises.forEach(exercise => {
-    totalSets += exercise.sets.length;
+    // Only count sets for exercises that are not considered "skipped" for totalSets
     const exerciseLog = dailyLog[exercise.id];
+    const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+
+    if (!isSkipped) {
+        exercise.sets.forEach(() => {
+            totalSets++;
+        });
+    }
+    
     if (exerciseLog) {
       exercise.sets.forEach(set => {
         if (exerciseLog[set.id]?.isCompleted) {
@@ -101,20 +109,28 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
             [setId]: log,
         };
         // Check if all sets for this exercise are now marked as not completed
-        const isEmpty = Object.values(newExerciseLog).every(l => !l.isCompleted);
+        const exerciseDef = workoutDay.exercises.find(e => e.id === exerciseId);
+        const allDefinedSetsMarkedNotCompleted = exerciseDef?.sets.every(setDef => newExerciseLog[setDef.id]?.isCompleted === false);
 
-        if (isEmpty) {
-            // If all sets for this exercise are marked incomplete, remove the exercise from the log
+        if (exerciseDef && exerciseDef.sets.length > 0 && allDefinedSetsMarkedNotCompleted) {
+            // If all defined sets are marked incomplete, keep the exercise log (as it represents a "skipped" state)
+            return {
+                ...prevLog,
+                [exerciseId]: newExerciseLog,
+            };
+        } else if (Object.values(newExerciseLog).every(l => !l.isCompleted && (l.reps === '' || l.reps === undefined ))) {
+             // If all logged sets are incomplete AND have no reps (i.e. cleared/reset)
             const { [exerciseId]: _, ...restLog } = prevLog;
             return restLog;
-        } else {
+        }
+        else {
             return {
                 ...prevLog,
                 [exerciseId]: newExerciseLog,
             };
         }
     });
-  }, []);
+  }, [workoutDay.exercises]);
 
   const handleClearDayLog = useCallback(() => {
     setDailyLog({});
@@ -165,38 +181,40 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
 
   const handleSkipExercise = useCallback((exerciseIdToSkip: string) => {
     setDailyLog(prevLog => {
-      const exerciseLog = prevLog[exerciseIdToSkip];
       const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseIdToSkip);
-      if (!exerciseDefinition) return prevLog;
+      if (!exerciseDefinition || exerciseDefinition.sets.length === 0) return prevLog; // Cannot skip exercises without sets
 
-      const updatedExerciseLog: LoggedExerciseData = {};
+      const updatedExerciseLog: LoggedExerciseData = { ...(prevLog[exerciseIdToSkip] || {}) };
 
       exerciseDefinition.sets.forEach(setDef => {
         updatedExerciseLog[setDef.id] = {
-          reps: exerciseLog?.[setDef.id]?.reps || '', // Keep reps if they were entered
-          weight: exerciseLog?.[setDef.id]?.weight, // Keep weight
+          reps: prevLog[exerciseIdToSkip]?.[setDef.id]?.reps || '', // Keep reps if they were entered
+          weight: prevLog[exerciseIdToSkip]?.[setDef.id]?.weight, // Keep weight
           isCompleted: false // Mark as not completed
         };
       });
       
-      const isNowEffectivelyEmpty = Object.values(updatedExerciseLog).every(
-        log => !log.isCompleted && (log.reps === '' || log.reps === undefined)
-      );
-
-      if (isNowEffectivelyEmpty) {
-        const { [exerciseIdToSkip]: _, ...restLog } = prevLog;
-        return restLog;
-      } else {
-        return {
+      return {
           ...prevLog,
           [exerciseIdToSkip]: updatedExerciseLog,
-        };
-      }
+      };
     });
     toast({
       variant: "default",
       title: "Exercise Skipped",
       description: `"${workoutDay.exercises.find(e => e.id === exerciseIdToSkip)?.name || 'Exercise'}" has been marked as skipped for today. Your workout score will be affected.`,
+    });
+  }, [workoutDay.exercises, toast]);
+
+  const handleUnskipExercise = useCallback((exerciseIdToUnskip: string) => {
+    setDailyLog(prevLog => {
+      const { [exerciseIdToUnskip]: _, ...restLog } = prevLog;
+      return restLog;
+    });
+    setEffectiveTargetWeightsKey(prev => prev + 1); // Force re-render of ExerciseCards
+    toast({
+      title: "Exercise Unskipped",
+      description: `"${workoutDay.exercises.find(e => e.id === exerciseIdToUnskip)?.name || 'Exercise'}" is no longer skipped. You can now log sets.`,
     });
   }, [workoutDay.exercises, toast]);
 
@@ -244,23 +262,28 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       </Card>
 
       {workoutDay.exercises.map((exercise: Exercise) => {
-        // This ensures that for each ExerciseCard, we get the latest effective target weight
-        // considering any overrides. The key change (effectiveTargetWeightsKey) forces
-        // re-evaluation if an override is set.
         const effectiveTargetWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
+        const exerciseLog = dailyLog[exercise.id];
+        const isSkipped = exerciseLog && 
+                          exercise.sets.length > 0 && 
+                          exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+        
         return (
           <ExerciseCard
-            key={`${exercise.id}-${effectiveTargetWeightsKey}`} // Add key to ensure re-render on weight override
+            key={`${exercise.id}-${effectiveTargetWeightsKey}`} 
             exercise={exercise}
             effectiveTargetWeight={effectiveTargetWeight}
             onLogSet={handleLogSet}
             loggedData={dailyLog[exercise.id]}
             onUpdateEffectiveTargetWeight={handleUpdateEffectiveTargetWeight}
             triggerRepReset={triggerRepReset}
-            onSkipExercise={handleSkipExercise} // Changed from onClearExerciseLog
+            onSkipExercise={handleSkipExercise}
+            onUnskipExercise={handleUnskipExercise}
+            isSkipped={isSkipped}
           />
         );
       })}
     </div>
   );
 }
+

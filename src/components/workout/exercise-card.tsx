@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles, XSquare } from 'lucide-react'; // Added XSquare, removed RotateCcw
+import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles, XSquare, Undo2, Lock } from 'lucide-react'; // Added Undo2, Lock
 import type { Exercise, LoggedExerciseData, LoggedSetData, SetData } from '@/types/workout';
 import SetLogger from './set-logger';
 import AIRecommendationModal from './ai-recommendation-modal';
@@ -23,6 +23,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { cn } from '@/lib/utils';
 
 
 // Helper function to parse target reps (handles numbers, strings like '8-10', '10+')
@@ -65,7 +66,9 @@ interface ExerciseCardProps {
   loggedData?: LoggedExerciseData;
   onUpdateEffectiveTargetWeight: (exerciseId: string, newWeight: string) => void;
   triggerRepReset: (exerciseId: string) => void; // Callback to trigger rep reset in parent
-  onSkipExercise: (exerciseId: string) => void; // Changed from onClearExerciseLog
+  onSkipExercise: (exerciseId: string) => void; 
+  onUnskipExercise: (exerciseId: string) => void;
+  isSkipped: boolean;
 }
 
 export default function ExerciseCard({
@@ -75,7 +78,9 @@ export default function ExerciseCard({
   loggedData,
   onUpdateEffectiveTargetWeight,
   triggerRepReset,
-  onSkipExercise, // Changed from onClearExerciseLog
+  onSkipExercise,
+  onUnskipExercise,
+  isSkipped,
 }: ExerciseCardProps) {
   const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
@@ -150,15 +155,23 @@ export default function ExerciseCard({
   };
 
   const handleSkipExercisePress = () => {
-    onSkipExercise(exercise.id); // Call the renamed prop
-    // Optionally, reset local UI states if needed, e.g., close editing mode
+    onSkipExercise(exercise.id); 
     setIsEditingTarget(false);
-    setCanSuggestWeightIncrease(false); // Re-evaluate this after log clears
-    setForceSetEditKey(prev => prev + 1); // Force re-render of set loggers
+    setCanSuggestWeightIncrease(false); 
+    setForceSetEditKey(prev => prev + 1); 
+  };
+  
+  const handleUnskipExercisePress = () => {
+    onUnskipExercise(exercise.id);
+    setIsEditingTarget(false);
+    setCanSuggestWeightIncrease(false);
+    setForceSetEditKey(prev => prev + 1);
   };
 
   const isSpecialActivity = exercise.isActivity || exercise.isConditioning || exercise.isWarmup || exercise.isMatch || exercise.isStretch || exercise.isFoamRoll || exercise.isRecovery;
-  const canShowAIButton = !isSpecialActivity && !exercise.isCore;
+  const canShowAIButton = !isSpecialActivity && !exercise.isCore && !isSkipped;
+  const canShowSkipButton = exercise.sets.length > 0; // Only allow skipping exercises with defined sets
+
   const allSetsCompletedCheck = useMemo(() => {
      return exercise.sets.every(set => loggedData?.[set.id]?.isCompleted);
   }, [exercise.sets, loggedData]);
@@ -167,7 +180,7 @@ export default function ExerciseCard({
   const currentPlanTargetToDisplay = effectiveTargetWeight || exercise.targetWeight;
 
   const renderTargetWeightControls = () => {
-    if (isSpecialActivity || exercise.isCore) return null;
+    if (isSpecialActivity || exercise.isCore || isSkipped) return null;
 
     return (
       <div className="mt-2 mb-1 p-3 bg-secondary/30 rounded-md border border-secondary/50">
@@ -208,8 +221,62 @@ export default function ExerciseCard({
     );
   };
 
+  const renderSkipUnskipButton = () => {
+    if (!canShowSkipButton) return null;
+
+    if (isSkipped) {
+      return (
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={handleUnskipExercisePress}
+          className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0" 
+          aria-label={`Unskip ${exercise.name}`}
+        >
+          <Undo2 className="h-4 w-4" />
+          <span className="sr-only">Unskip {exercise.name}</span>
+        </Button>
+      );
+    } else {
+      return (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0" 
+              aria-label={`Skip ${exercise.name}`}
+            >
+              <XSquare className="h-4 w-4" />
+              <span className="sr-only">Skip {exercise.name}</span>
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Skip Exercise: {exercise.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will mark all sets for "{exercise.name}" as not completed for today, which will affect your workout score.
+                You can log sets for this exercise later if you change your mind.
+                Are you sure you want to skip this exercise?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleSkipExercisePress} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                Skip Exercise
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      );
+    }
+  };
+
   return (
-    <Card className="mb-6 shadow-md hover:shadow-lg transition-shadow duration-300">
+    <Card className={cn(
+      "mb-6 shadow-md hover:shadow-lg transition-shadow duration-300 relative",
+      isSkipped && "bg-card/50" // Slightly muted background when skipped
+    )}>
       <CardHeader className="pb-2">
         <div className="flex justify-between items-start">
           <div>
@@ -223,44 +290,24 @@ export default function ExerciseCard({
             )}
           </div>
           <div className="flex items-center gap-2">
-            {exercise.notes && (
+            {isSkipped && (
+              <Badge variant="destructive" className="text-xs font-normal">
+                <Lock className="h-3 w-3 mr-1" /> Skipped
+              </Badge>
+            )}
+            {exercise.notes && !isSkipped && (
                 <Badge variant="secondary" className="whitespace-nowrap ml-2 shrink-0 text-xs">{exercise.notes}</Badge>
             )}
-            <AlertDialog>
-                <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0" aria-label={`Skip ${exercise.name}`}>
-                        <XSquare className="h-4 w-4" />
-                        <span className="sr-only">Skip {exercise.name}</span>
-                    </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                    <AlertDialogTitle>Skip Exercise: {exercise.name}?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                        This will mark all sets for "{exercise.name}" as not completed for today, which will affect your workout score.
-                        You can log sets for this exercise later if you change your mind.
-                        Are you sure you want to skip this exercise?
-                    </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleSkipExercisePress} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                        Skip Exercise
-                    </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
+            {renderSkipUnskipButton()}
           </div>
         </div>
         {renderTargetWeightControls()}
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className={cn("p-0", isSkipped && "opacity-40 pointer-events-none")}>
         {exercise.sets.map((set, index) => {
           const lastSessionSetPerformance = getPreviousSetPerformance(exercise.id, set.id, exercise.sets);
           const currentLoggedSetData = loggedData?.[set.id];
-          // Determine initial edit state: if not completed, or if forceSetEditKey changed AND it was completed (to allow re-editing a completed set after weight change)
           const isEditingInitially = !currentLoggedSetData?.isCompleted || (forceSetEditKey > 0 && !!currentLoggedSetData?.isCompleted);
-
 
           return (
             <SetLogger
@@ -268,7 +315,7 @@ export default function ExerciseCard({
               setNumber={index + 1}
               setData={set}
               loggedSetData={currentLoggedSetData}
-              lastSessionSetPerformance={lastSessionSetPerformance} // Pass last session's data for this set
+              lastSessionSetPerformance={lastSessionSetPerformance} 
               effectiveTargetWeight={currentPlanTargetToDisplay}
               onLogSet={(log) => handleLogSet(set.id, log)}
               exerciseUnit={exercise.unit}
@@ -287,12 +334,12 @@ export default function ExerciseCard({
             disabled={!allSetsCompletedCheck}
             className="bg-accent/20 hover:bg-accent/30 text-accent-foreground border-accent/50"
             >
-            <Sparkles className="mr-2 h-4 w-4" /> {/* Changed Icon */}
+            <Sparkles className="mr-2 h-4 w-4" /> 
             AI Weight Advice
           </Button>
         </CardFooter>
       )}
-      {canShowAIButton && (
+      {canShowAIButton && ( // This condition already ensures it's not skipped for AI modal
          <AIRecommendationModal
             exercise={exercise}
             loggedExerciseData={loggedData}
@@ -303,3 +350,4 @@ export default function ExerciseCard({
     </Card>
   );
 }
+
