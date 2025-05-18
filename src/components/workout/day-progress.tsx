@@ -1,39 +1,27 @@
+
 'use client';
 
 import { Progress } from '@/components/ui/progress';
-import type { DailyLog, WorkoutDay } from '@/types/workout';
 
 interface DayProgressProps {
-  workoutDay: WorkoutDay;
-  dailyLog: DailyLog;
+  completedSets: number;
+  totalSets: number;
 }
 
-export default function DayProgress({ workoutDay, dailyLog }: DayProgressProps) {
-  const totalSets = workoutDay.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0);
-  
-  let completedSets = 0;
-  workoutDay.exercises.forEach(exercise => {
-    const exerciseLog = dailyLog[exercise.id] || {};
-    exercise.sets.forEach(set => {
-      if (exerciseLog[set.id]?.isCompleted) {
-        completedSets++;
-      }
-    });
-  });
-
-  const progressPercentage = totalSets > 0 ? (completedSets / totalSets) * 100 : 0;
+export default function DayProgress({ completedSets, totalSets }: DayProgressProps) {
+  const progressPercentage = totalSets > 0 ? Math.round((completedSets / totalSets) * 100) : 0;
 
   if (totalSets === 0) {
     return null; // No sets to track
   }
 
   return (
-    <div className="mb-6">
-      <div className="mb-2 flex justify-between text-sm font-medium">
-        <span>Daily Progress</span>
-        <span>{completedSets} / {totalSets} sets completed</span>
+    <div className="w-full">
+      <div className="mb-1 flex justify-between text-xs font-medium text-muted-foreground">
+        <span>Overall Progress</span>
+        <span>{progressPercentage}%</span>
       </div>
-      <Progress value={progressPercentage} aria-label={`Workout progress: ${progressPercentage.toFixed(0)}%`} />
+      <Progress value={progressPercentage} aria-label={`Workout progress: ${progressPercentage}%`} className="h-3" />
     </div>
   );
 }

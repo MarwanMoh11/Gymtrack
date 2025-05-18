@@ -5,11 +5,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles } from 'lucide-react'; // Added Sparkles
+import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles, RotateCcw } from 'lucide-react'; // Added Sparkles, RotateCcw
 import type { Exercise, LoggedExerciseData, LoggedSetData, SetData } from '@/types/workout';
 import SetLogger from './set-logger';
 import AIRecommendationModal from './ai-recommendation-modal';
-import { parseWeightToNumber, getPreviousSetPerformance } from '@/lib/workout-utils'; // Added getPreviousSetPerformance
+import { getPreviousSetPerformance } from '@/lib/workout-utils'; // Added getPreviousSetPerformance
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -65,6 +65,7 @@ interface ExerciseCardProps {
   loggedData?: LoggedExerciseData;
   onUpdateEffectiveTargetWeight: (exerciseId: string, newWeight: string) => void;
   triggerRepReset: (exerciseId: string) => void; // Callback to trigger rep reset in parent
+  onClearExerciseLog: (exerciseId: string) => void; // Callback to clear log for this exercise
 }
 
 export default function ExerciseCard({
@@ -73,13 +74,14 @@ export default function ExerciseCard({
   onLogSet,
   loggedData,
   onUpdateEffectiveTargetWeight,
-  triggerRepReset
+  triggerRepReset,
+  onClearExerciseLog,
 }: ExerciseCardProps) {
   const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [manualTargetWeight, setManualTargetWeight] = useState(effectiveTargetWeight || exercise.targetWeight || '');
   const [forceSetEditKey, setForceSetEditKey] = useState(0);
-  const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false); 
+  const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
 
 
   // Function to check if weight increase can be suggested based on PLAN targets
@@ -94,7 +96,7 @@ export default function ExerciseCard({
       const maxTarget = parseMaxTargetReps(set.targetReps); // Plan's target reps
       const loggedRepsNum = loggedSet?.reps !== undefined ? parseInt(String(loggedSet.reps), 10) : NaN;
 
-      if (maxTarget === null) continue; 
+      if (maxTarget === null) continue;
 
       if (isNaN(loggedRepsNum) || loggedRepsNum < maxTarget) {
         return false;
@@ -135,7 +137,7 @@ export default function ExerciseCard({
       onUpdateEffectiveTargetWeight(exercise.id, manualTargetWeight);
       triggerRepReset(exercise.id);
       setForceSetEditKey(prev => prev + 1);
-      setCanSuggestWeightIncrease(false); 
+      setCanSuggestWeightIncrease(false);
     }
     setIsEditingTarget(false);
   };
@@ -143,6 +145,14 @@ export default function ExerciseCard({
   const handleCancelEdit = () => {
     setIsEditingTarget(false);
     setManualTargetWeight(effectiveTargetWeight || exercise.targetWeight || '');
+  };
+
+  const handleClearLogPress = () => {
+    onClearExerciseLog(exercise.id);
+    // Optionally, reset local UI states if needed, e.g., close editing mode
+    setIsEditingTarget(false);
+    setCanSuggestWeightIncrease(false); // Re-evaluate this after log clears
+    setForceSetEditKey(prev => prev + 1); // Force re-render of set loggers
   };
 
   const isSpecialActivity = exercise.isActivity || exercise.isConditioning || exercise.isWarmup || exercise.isMatch || exercise.isStretch || exercise.isFoamRoll || exercise.isRecovery;
@@ -204,15 +214,41 @@ export default function ExerciseCard({
             <CardTitle className="text-xl font-semibold text-foreground">
               {exercise.name}
             </CardTitle>
-            {!(isSpecialActivity || exercise.isCore) && exercise.targetWeight && !currentPlanTargetToDisplay && ( 
+            {!(isSpecialActivity || exercise.isCore) && exercise.targetWeight && !currentPlanTargetToDisplay && (
                 <CardDescription className="text-xs text-muted-foreground/70">
                     Base Plan: {exercise.targetWeight}
                 </CardDescription>
             )}
           </div>
-          {exercise.notes && (
-            <Badge variant="secondary" className="whitespace-nowrap ml-2 shrink-0 text-xs">{exercise.notes}</Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {exercise.notes && (
+                <Badge variant="secondary" className="whitespace-nowrap ml-2 shrink-0 text-xs">{exercise.notes}</Badge>
+            )}
+            <AlertDialog>
+                <AlertDialogTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0">
+                        <RotateCcw className="h-4 w-4" />
+                        <span className="sr-only">Clear Log for {exercise.name}</span>
+                    </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                    <AlertDialogTitle>Clear Exercise Log?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        This will mark all sets for "{exercise.name}" as incomplete for today.
+                        Your logged reps/weight for individual sets will be kept if you decide to log them again.
+                        Are you sure you want to clear progress for this exercise?
+                    </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleClearLogPress} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                        Clear Log
+                    </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </div>
         {renderTargetWeightControls()}
       </CardHeader>
@@ -220,11 +256,13 @@ export default function ExerciseCard({
         {exercise.sets.map((set, index) => {
           const lastSessionSetPerformance = getPreviousSetPerformance(exercise.id, set.id, exercise.sets);
           const currentLoggedSetData = loggedData?.[set.id];
-          const isEditingInitially = !currentLoggedSetData?.isCompleted || (forceSetEditKey > 0 && currentLoggedSetData?.isCompleted);
+          // Determine initial edit state: if not completed, or if forceSetEditKey changed AND it was completed (to allow re-editing a completed set after weight change)
+          const isEditingInitially = !currentLoggedSetData?.isCompleted || (forceSetEditKey > 0 && !!currentLoggedSetData?.isCompleted);
+
 
           return (
             <SetLogger
-              key={`${set.id}-${forceSetEditKey}`} 
+              key={`${set.id}-${forceSetEditKey}`}
               setNumber={index + 1}
               setData={set}
               loggedSetData={currentLoggedSetData}
@@ -244,7 +282,7 @@ export default function ExerciseCard({
             variant="outline"
             size="sm"
             onClick={() => setIsAIRecModalOpen(true)}
-            disabled={!allSetsCompletedCheck} 
+            disabled={!allSetsCompletedCheck}
             className="bg-accent/20 hover:bg-accent/30 text-accent-foreground border-accent/50"
             >
             <Sparkles className="mr-2 h-4 w-4" /> {/* Changed Icon */}

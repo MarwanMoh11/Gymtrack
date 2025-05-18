@@ -1,17 +1,16 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import type { WorkoutDay, DailyLog, LoggedSetData, Exercise } from '@/types/workout';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { WorkoutDay, DailyLog, LoggedSetData, Exercise, LoggedExerciseData } from '@/types/workout';
 import ExerciseCard from './exercise-card';
 import DayProgress from './day-progress';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardDescription, CardHeader, CardTitle } from '../ui/card';
-// Removed AI imports: nextSessionRecommendation, NextSessionRecommendationInput, NextSessionRecommendationOutput
-// Removed AI related utility: transformHistoricalDataForAI
+import { Card, CardDescription, CardHeader, CardTitle, CardFooter } from '../ui/card';
 import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
-import LoadingWorkoutPage from '@/app/workout/[day]/loading'; // Import loading component
+import LoadingWorkoutPage from '@/app/workout/[day]/loading';
+import { CheckSquare, TrendingUp } from 'lucide-react';
 
 interface WorkoutViewProps {
   workoutDay: WorkoutDay;
@@ -25,11 +24,31 @@ function getLocalStorageKey(dayId: string, date: string): string {
   return `gymtrack_log_${dayId}_${date}`;
 }
 
+// Helper function to calculate progress, moved outside for reusability if needed
+const calculateWorkoutProgress = (workoutDay: WorkoutDay, dailyLog: DailyLog) => {
+  let totalSets = 0;
+  let completedSets = 0;
+
+  workoutDay.exercises.forEach(exercise => {
+    totalSets += exercise.sets.length;
+    const exerciseLog = dailyLog[exercise.id];
+    if (exerciseLog) {
+      exercise.sets.forEach(set => {
+        if (exerciseLog[set.id]?.isCompleted) {
+          completedSets++;
+        }
+      });
+    }
+  });
+  const score = totalSets > 0 ? Math.round((completedSets / totalSets) * 100) : 0;
+  return { completedSets, totalSets, score };
+};
+
+
 export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
-  // Removed AI State: aiSuggestionsForToday, isLoadingAISuggestions
   const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0);
   const { toast } = useToast();
 
@@ -52,11 +71,11 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       } else {
         setDailyLog({});
       }
-      setIsInitialized(true); // Mark as initialized after loading attempt
+      setIsInitialized(true);
     } else {
-        setIsInitialized(true); // Mark initialized even if window is undefined (SSR/initial)
+        setIsInitialized(true);
     }
-  }, [workoutDay.id]); // Only depends on workoutDay.id
+  }, [workoutDay.id]);
 
   // Save log to localStorage whenever it changes
   useEffect(() => {
@@ -65,7 +84,6 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       if (Object.keys(dailyLog).length > 0) {
         localStorage.setItem(key, JSON.stringify(dailyLog));
       } else {
-        // Only remove if the key actually exists to avoid unnecessary writes
         if (localStorage.getItem(key)) {
             localStorage.removeItem(key);
         }
@@ -73,24 +91,19 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
     }
   }, [dailyLog, workoutDay.id, isInitialized, currentDate]);
 
-  // Removed fetchAISuggestionsForToday function and related useEffect
 
-  // Handle logging a single set
   const handleLogSet = useCallback((exerciseId: string, setId: string, log: LoggedSetData) => {
     setDailyLog(prevLog => {
         const newExerciseLog = {
             ...(prevLog[exerciseId] || {}),
             [setId]: log,
         };
-        // Check if this exercise log is now effectively empty (only contains non-completed sets)
         const isEmpty = Object.values(newExerciseLog).every(l => !l.isCompleted);
-        
+
         if (isEmpty) {
-             // Remove the exercise entry entirely if all its sets are marked incomplete
             const { [exerciseId]: _, ...restLog } = prevLog;
             return restLog;
         } else {
-            // Otherwise, update the exercise log
             return {
                 ...prevLog,
                 [exerciseId]: newExerciseLog,
@@ -99,42 +112,37 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
     });
   }, []);
 
-  // Clear the entire log for the current day
   const handleClearDayLog = useCallback(() => {
     setDailyLog({});
     toast({
       title: "Log Cleared",
       description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
     });
-     // Also force refresh of effective weights display if needed
     setEffectiveTargetWeightsKey(prev => prev + 1);
   }, [workoutDay.dayName, currentDate, toast]);
 
-  // Update the target weight override and trigger UI refresh
   const handleUpdateEffectiveTargetWeight = useCallback((exerciseId: string, newWeight: string) => {
     const exerciseName = workoutDay.exercises.find(e => e.id === exerciseId)?.name || 'exercise';
     setTargetWeightOverride(exerciseId, newWeight);
-    setEffectiveTargetWeightsKey(prev => prev + 1); // Force re-render to show updated target weight
+    setEffectiveTargetWeightsKey(prev => prev + 1);
     toast({
       title: "Plan Updated",
       description: `Target weight for ${exerciseName} updated to ${newWeight}.`,
     });
   }, [toast, workoutDay.exercises]);
 
-  // Reset logged reps for a specific exercise (called when weight changes)
   const triggerRepReset = useCallback((exerciseId: string) => {
     setDailyLog(prevLog => {
         const exerciseLog = prevLog[exerciseId];
-        if (!exerciseLog) return prevLog; // No log exists for this exercise yet
+        if (!exerciseLog) return prevLog;
 
         const updatedExerciseLog: LoggedExerciseData = {};
         const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseId);
 
         exerciseDefinition?.sets.forEach(setDef => {
-             // Keep the weight if previously logged, but reset reps and mark incomplete
             updatedExerciseLog[setDef.id] = {
-                weight: exerciseLog[setDef.id]?.weight, // Keep existing logged weight if any
-                reps: '', // Set reps to empty string for placeholder
+                weight: exerciseLog[setDef.id]?.weight,
+                reps: '',
                 isCompleted: false
             };
         });
@@ -151,8 +159,54 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
      });
   }, [workoutDay.exercises, toast]);
 
+  const handleClearExerciseLog = useCallback((exerciseIdToClear: string) => {
+    setDailyLog(prevLog => {
+      const exerciseLog = prevLog[exerciseIdToClear];
+      if (!exerciseLog) return prevLog; // No log to clear for this exercise
 
-  // Show loading state until initialized
+      const updatedExerciseLog: LoggedExerciseData = {};
+      const exerciseDefinition = workoutDay.exercises.find(e => e.id === exerciseIdToClear);
+
+      exerciseDefinition?.sets.forEach(setDef => {
+        // Keep existing logged weight/reps but mark as incomplete
+        updatedExerciseLog[setDef.id] = {
+          reps: exerciseLog[setDef.id]?.reps || '', // Keep reps if they were entered
+          weight: exerciseLog[setDef.id]?.weight, // Keep weight
+          isCompleted: false // Mark as not completed
+        };
+      });
+      
+      // Check if the exercise log is now effectively empty (all sets incomplete and no actual data)
+      // This logic might need refinement based on how "empty" is defined
+      const isNowEffectivelyEmpty = Object.values(updatedExerciseLog).every(
+        log => !log.isCompleted && (log.reps === '' || log.reps === undefined)
+      );
+
+      if (isNowEffectivelyEmpty) {
+        // If clearing made it empty, remove the exercise entry from the daily log
+        const { [exerciseIdToClear]: _, ...restLog } = prevLog;
+        return restLog;
+      } else {
+        // Otherwise, update the exercise log with all sets marked incomplete
+        return {
+          ...prevLog,
+          [exerciseIdToClear]: updatedExerciseLog,
+        };
+      }
+    });
+    toast({
+      variant: "default",
+      title: "Exercise Progress Cleared",
+      description: `Progress for ${workoutDay.exercises.find(e => e.id === exerciseIdToClear)?.name || 'exercise'} has been cleared for today. You can log it again if needed.`,
+    });
+  }, [workoutDay.exercises, toast]);
+
+
+  const { completedSets, totalSets, score } = useMemo(
+    () => calculateWorkoutProgress(workoutDay, dailyLog),
+    [workoutDay, dailyLog]
+  );
+
   if (!isInitialized) {
     return typeof LoadingWorkoutPage === 'function' ? <LoadingWorkoutPage /> : <div>Loading workout...</div>;
   }
@@ -167,30 +221,40 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
               <CardDescription className="text-lg text-muted-foreground">{workoutDay.title} - {currentDate}</CardDescription>
             </div>
              <Button variant="outline" onClick={handleClearDayLog} size="sm" className="rounded-full shrink-0">
-              Clear Today's Log
+              Clear Today's Full Log
             </Button>
           </div>
           {workoutDay.notes && (
             <p className="mt-3 text-sm text-foreground/80 p-3 bg-secondary/50 rounded-md">{workoutDay.notes}</p>
           )}
         </CardHeader>
+        <CardFooter className="flex flex-col sm:flex-row justify-between items-center pt-3 pb-4 px-6 gap-4">
+             <div className="w-full sm:w-auto">
+                <h3 className="text-sm font-medium text-muted-foreground flex items-center">
+                    <CheckSquare className="h-4 w-4 mr-1.5 text-primary/80" />
+                    Session Score
+                </h3>
+                <p className="text-2xl font-bold text-primary">{score}%</p>
+                <p className="text-xs text-muted-foreground">{completedSets} of {totalSets} sets completed</p>
+             </div>
+             <div className="w-full sm:w-auto flex-grow max-w-xs">
+                 <DayProgress completedSets={completedSets} totalSets={totalSets} />
+             </div>
+        </CardFooter>
       </Card>
-
-      <DayProgress workoutDay={workoutDay} dailyLog={dailyLog} />
 
       {workoutDay.exercises.map((exercise: Exercise) => {
         const effectiveTargetWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
-
         return (
           <ExerciseCard
-            key={`${exercise.id}-${effectiveTargetWeightsKey}`} // Add key to force re-render on target weight changes
+            key={`${exercise.id}-${effectiveTargetWeightsKey}`}
             exercise={exercise}
-            effectiveTargetWeight={effectiveTargetWeight} // Pass down the effective weight
+            effectiveTargetWeight={effectiveTargetWeight}
             onLogSet={handleLogSet}
             loggedData={dailyLog[exercise.id]}
-            // Removed AI suggestion props
             onUpdateEffectiveTargetWeight={handleUpdateEffectiveTargetWeight}
-            triggerRepReset={triggerRepReset} // Pass down the reset function
+            triggerRepReset={triggerRepReset}
+            onClearExerciseLog={handleClearExerciseLog}
           />
         );
       })}
