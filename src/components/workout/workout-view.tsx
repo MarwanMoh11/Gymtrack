@@ -15,7 +15,7 @@ import type { WorkoutDay, DailyLog, LoggedSetData, Exercise } from '@/types/work
 import DayProgress from './day-progress';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardDescription, CardHeader, CardTitle, CardFooter } from '../ui/card';
+import { Card, CardDescription, CardHeader, CardTitle, CardFooter, CardContent } from '../ui/card'; // Added CardContent
 // Target weight logic might still be relevant if this page is kept for other days.
 // import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading';
