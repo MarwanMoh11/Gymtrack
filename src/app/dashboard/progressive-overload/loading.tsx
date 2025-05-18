@@ -1,7 +1,7 @@
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
-import { CalendarDays, Lightbulb, History } from "lucide-react"; // Added History
+import { CalendarDays, History } from "lucide-react"; // Removed Lightbulb
 
 export default function LoadingProgressiveOverloadDashboard() {
   return (
@@ -32,31 +32,10 @@ export default function LoadingProgressiveOverloadDashboard() {
            </CardContent>
          </Card>
 
-         {/* AI Coaching Tip Section (Below Calendar) */}
-        <Card className="shadow-lg rounded-2xl">
-          <CardHeader>
-             <div className="flex justify-between items-center"> {/* Align title and add button skeleton */}
-               <div className="flex items-center">
-                   <Lightbulb className="mr-2 h-6 w-6 text-primary/50 animate-pulse" />
-                   <Skeleton className="h-8 w-3/4" /> {/* Coaching Tip Title */}
-               </div>
-               {/* Refresh Button Skeleton */}
-               <Skeleton className="h-8 w-8 rounded-full" /> 
-             </div>
-             <Skeleton className="h-4 w-1/2 mt-1" /> {/* Coaching Tip Desc */}
-          </CardHeader>
-          <CardContent className="min-h-[150px] flex items-center justify-center"> {/* Match min-height */}
-            {/* Keep loading content skeleton */}
-            <div className="space-y-3 w-full">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-4/5" />
-            </div>
-          </CardContent>
-        </Card>
+         {/* AI Coaching Tip Section Removed */}
       </div>
     </div>
   );
 }
 
+    
