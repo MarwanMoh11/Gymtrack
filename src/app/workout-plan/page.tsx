@@ -3,27 +3,27 @@
 'use client';
 
 import Link from 'next/link';
-import { weeklyPlan as defaultWeeklyPlan, getDays as getDefaultDays, getAllExercisesFromPlan } from '@/data/workout-data';
+import { weeklyPlan as defaultWeeklyPlan, getAllExercisesFromPlan } from '@/data/workout-data';
 import type { WorkoutDay, Exercise, SetData } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowRight, CalendarDays, Edit, Save, XCircle, PlusCircle, Trash2, ArrowUp, ArrowDown, Info } from 'lucide-react';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import AddExerciseModal from '@/components/workout-plan/add-exercise-modal'; // New Modal
+import AddExerciseModal from '@/components/workout-plan/add-exercise-modal';
 
 export default function WorkoutPlanPage() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editablePlan, setEditablePlan] = useState<WorkoutDay[]>(() => JSON.parse(JSON.stringify(defaultWeeklyPlan)));
   const [initialPlan, setInitialPlan] = useState<WorkoutDay[]>(() => JSON.parse(JSON.stringify(defaultWeeklyPlan)));
 
-  const [isAddExerciseModalOpen, setIsAddExerciseModalOpen] = useState(false);
-  const [dayIdForNewExercise, setDayIdForNewExercise] = useState<string | null>(null);
+  const [isExerciseModalOpen, setIsExerciseModalOpen] = useState(false);
+  const [dayIdForModal, setDayIdForModal] = useState<string | null>(null);
+  const [exerciseToEdit, setExerciseToEdit] = useState<Exercise | null>(null);
   
   const allExercisesForAutocomplete = useMemo(() => getAllExercisesFromPlan(), []);
-
 
   const { toast } = useToast();
 
@@ -43,8 +43,9 @@ export default function WorkoutPlanPage() {
   };
 
   const handleSaveChanges = () => {
+    // In a real app, this would send editablePlan to a backend/localStorage
     console.log("Saving customized plan (client-side):", editablePlan);
-    setInitialPlan(JSON.parse(JSON.stringify(editablePlan)));
+    setInitialPlan(JSON.parse(JSON.stringify(editablePlan))); // Update the baseline for future cancels
     setIsEditMode(false);
     toast({
       title: "Plan Changes Applied",
@@ -53,7 +54,7 @@ export default function WorkoutPlanPage() {
   };
 
   const handleCancelChanges = () => {
-    setEditablePlan(JSON.parse(JSON.stringify(initialPlan)));
+    setEditablePlan(JSON.parse(JSON.stringify(initialPlan))); // Revert to the last saved state
     setIsEditMode(false);
     toast({
       title: "Changes Canceled",
@@ -62,9 +63,10 @@ export default function WorkoutPlanPage() {
     });
   };
   
-  const handleEditExercise = (dayId: string, exerciseId: string) => {
-    toast({ title: "Placeholder", description: `Editing exercise ${exerciseId} for day ${dayId} will be implemented next.`});
-    // Future: Open a modal similar to AddExerciseModal but pre-filled with existing exercise data.
+  const openExerciseModal = (dayId: string, exercise?: Exercise) => {
+    setDayIdForModal(dayId);
+    setExerciseToEdit(exercise || null);
+    setIsExerciseModalOpen(true);
   };
   
   const handleRemoveExercise = (dayId: string, exerciseId: string) => {
@@ -79,23 +81,29 @@ export default function WorkoutPlanPage() {
     toast({ title: "Exercise Removed", description: `Exercise removed from ${dayId}. Save changes to apply.`});
   };
    
-  const handleAddExerciseClick = (dayId: string) => {
-    setDayIdForNewExercise(dayId);
-    setIsAddExerciseModalOpen(true);
-  };
-
-  const handleSaveNewExercise = (dayId: string, newExercise: Exercise) => {
+  const handleSaveExercise = (dayId: string, savedExercise: Exercise) => {
     setEditablePlan(prevPlan =>
       prevPlan.map(day => {
         if (day.id === dayId) {
-          return { ...day, exercises: [...day.exercises, newExercise] };
+          if (exerciseToEdit) { // Editing existing exercise
+            return {
+              ...day,
+              exercises: day.exercises.map(ex => ex.id === savedExercise.id ? savedExercise : ex),
+            };
+          } else { // Adding new exercise
+            return { ...day, exercises: [...day.exercises, savedExercise] };
+          }
         }
         return day;
       })
     );
-    setIsAddExerciseModalOpen(false);
-    setDayIdForNewExercise(null);
-    toast({ title: "Exercise Added", description: `${newExercise.name} added to ${dayId}. Save changes to apply.`});
+    setIsExerciseModalOpen(false);
+    setDayIdForModal(null);
+    setExerciseToEdit(null);
+    toast({ 
+      title: exerciseToEdit ? "Exercise Updated" : "Exercise Added", 
+      description: `${savedExercise.name} ${exerciseToEdit ? 'updated' : 'added'} for ${dayId}. Save changes to apply.`
+    });
   };
 
   const handleMoveExercise = (dayId: string, exerciseId: string, direction: 'up' | 'down') => {
@@ -229,7 +237,7 @@ export default function WorkoutPlanPage() {
                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'down')} disabled={index === day.exercises.length - 1}>
                                 <ArrowDown className="h-3 w-3" />
                            </Button>
-                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleEditExercise(day.id, ex.id)}>
+                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openExerciseModal(day.id, ex)}>
                                 <Edit className="h-3 w-3" />
                            </Button>
                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleRemoveExercise(day.id, ex.id)}>
@@ -247,7 +255,7 @@ export default function WorkoutPlanPage() {
                 </ul>
                  {isEditMode && (
                     <div className="mt-3 pt-3 border-t border-border/50">
-                        <Button variant="outline" size="sm" className="w-full" onClick={() => handleAddExerciseClick(day.id)}>
+                        <Button variant="outline" size="sm" className="w-full" onClick={() => openExerciseModal(day.id)}>
                             <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise to {day.dayName}
                         </Button>
                     </div>
@@ -266,16 +274,16 @@ export default function WorkoutPlanPage() {
           ))}
         </div>
       )}
-       {isAddExerciseModalOpen && dayIdForNewExercise && (
+       {isExerciseModalOpen && dayIdForModal && (
         <AddExerciseModal
-          isOpen={isAddExerciseModalOpen}
-          onOpenChange={setIsAddExerciseModalOpen}
-          onSave={(newExercise) => handleSaveNewExercise(dayIdForNewExercise, newExercise)}
+          isOpen={isExerciseModalOpen}
+          onOpenChange={setIsExerciseModalOpen}
+          onSave={(savedExercise) => handleSaveExercise(dayIdForModal, savedExercise)}
           allExercises={allExercisesForAutocomplete}
-          dayId={dayIdForNewExercise}
+          dayId={dayIdForModal}
+          initialData={exerciseToEdit}
         />
       )}
     </div>
   );
 }
-

@@ -17,44 +17,68 @@ import { useToast } from '@/hooks/use-toast';
 interface AddExerciseModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (newExercise: Exercise) => void;
-  allExercises: Exercise[]; // For autocomplete and pre-filling
-  dayId: string; // To associate the new exercise with a day
+  onSave: (exercise: Exercise) => void;
+  allExercises: Exercise[];
+  dayId: string;
+  initialData?: Exercise | null; // For editing
 }
 
-const initialExerciseState: Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[] } = {
-  name: '',
-  targetWeight: '',
-  notes: '',
-  description: '',
-  videoUrl: '',
-  muscleGroups: [],
-  isCore: false,
-  unit: 'reps',
-  sets: [{ id: `set-${Date.now()}`, targetReps: '', targetWeight: '', unit: 'reps' }],
+const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
+  if (initialData) {
+    return {
+      id: initialData.id, // Preserve ID if editing
+      name: initialData.name,
+      targetWeight: initialData.targetWeight || '',
+      notes: initialData.notes || '',
+      description: initialData.description || '',
+      videoUrl: initialData.videoUrl || '',
+      muscleGroups: initialData.muscleGroups || [],
+      isCore: initialData.isCore || false,
+      unit: initialData.unit || 'reps',
+      sets: initialData.sets.map((s, index) => ({
+        id: s.id || `set-${Date.now()}-${index}`, // Use existing set ID or generate if missing
+        targetReps: String(s.targetReps),
+        targetWeight: s.targetWeight || '',
+        unit: s.unit || initialData.unit || 'reps',
+      })),
+    };
+  }
+  // Default for adding new exercise
+  return {
+    name: '',
+    targetWeight: '',
+    notes: '',
+    description: '',
+    videoUrl: '',
+    muscleGroups: [],
+    isCore: false,
+    unit: 'reps',
+    sets: [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: 'reps' }],
+  };
 };
 
-export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExercises, dayId }: AddExerciseModalProps) {
-  const [exerciseData, setExerciseData] = useState<Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[] }>(
-    JSON.parse(JSON.stringify(initialExerciseState)) // Deep copy
-  );
+
+export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExercises, dayId, initialData }: AddExerciseModalProps) {
+  const [exerciseData, setExerciseData] = useState(getInitialExerciseState(initialData));
   const [muscleGroupsInput, setMuscleGroupsInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const { toast } = useToast();
 
+  const isEditing = !!initialData;
+
   useEffect(() => {
-    // Reset form when modal opens/closes or dayId changes
-    setExerciseData(JSON.parse(JSON.stringify(initialExerciseState)));
-    setMuscleGroupsInput('');
-    setSearchTerm('');
+    const stateToSet = getInitialExerciseState(initialData);
+    setExerciseData(stateToSet);
+    setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
+    setSearchTerm(stateToSet.name || ''); // Initialize search term if editing
     setShowAutocomplete(false);
-  }, [isOpen, dayId]);
+  }, [isOpen, initialData, dayId]);
 
   const filteredExercises = useMemo(() => {
-    if (!searchTerm) return [];
+    if (!searchTerm || isEditing) return []; // Don't show autocomplete if editing an existing item from search
     return allExercises.filter(ex => ex.name.toLowerCase().includes(searchTerm.toLowerCase()));
-  }, [searchTerm, allExercises]);
+  }, [searchTerm, allExercises, isEditing]);
 
   const handleInputChange = (field: keyof Omit<Exercise, 'id' | 'sets' | 'muscleGroups'>, value: string | boolean | undefined) => {
     setExerciseData(prev => ({ ...prev, [field]: value }));
@@ -74,7 +98,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const addSet = () => {
     setExerciseData(prev => ({
       ...prev,
-      sets: [...prev.sets, { id: `set-${Date.now()}-${prev.sets.length}`, targetReps: '', targetWeight: '', unit: 'reps' }],
+      sets: [...prev.sets, { id: `set-${Date.now()}-${prev.sets.length}`, targetReps: '', targetWeight: '', unit: prev.unit || 'reps' }],
     }));
   };
 
@@ -87,21 +111,14 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleAutocompleteSelect = (selectedExercise: Exercise) => {
-    setExerciseData({
-      name: selectedExercise.name,
-      targetWeight: selectedExercise.targetWeight || '',
-      notes: selectedExercise.notes || '',
-      description: selectedExercise.description || '',
-      videoUrl: selectedExercise.videoUrl || '',
-      muscleGroups: selectedExercise.muscleGroups || [],
-      isCore: selectedExercise.isCore || false,
-      unit: selectedExercise.unit || 'reps',
-      sets: selectedExercise.sets.length > 0 
-        ? selectedExercise.sets.map(s => ({ id: `set-${Date.now()}-${Math.random()}`, targetReps: String(s.targetReps), targetWeight: s.targetWeight || '', unit: s.unit || selectedExercise.unit || 'reps' }))
-        : [{ id: `set-${Date.now()}`, targetReps: '', targetWeight: '', unit: selectedExercise.unit || 'reps' }],
-    });
+    // This function is mainly for when adding a *new* exercise based on an existing one.
+    // If editing, the initialData useEffect already handles pre-filling.
+    const newState = getInitialExerciseState(selectedExercise);
+    // Ensure we don't overwrite the ID if we are *editing* an exercise that was found via search (though unlikely scenario)
+    // For simplicity, autocomplete is primarily for *adding* new exercises based on templates.
+    setExerciseData({ ...newState, id: undefined }); // New exercise, so no existing ID
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
-    setSearchTerm(selectedExercise.name); // Update search term to reflect selection
+    setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
   };
 
@@ -111,32 +128,36 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
       return;
     }
     if (exerciseData.sets.some(s => !String(s.targetReps).trim())) {
-      toast({ variant: 'destructive', title: 'Validation Error', description: 'Target reps are required for all sets.' });
+      toast({ variant: 'destructive', title: 'Validation Error', description: 'Target reps/duration are required for all sets.' });
       return;
     }
 
     const finalMuscleGroups = muscleGroupsInput.split(',').map(s => s.trim()).filter(s => s);
-    const newExercise: Exercise = {
+    const exerciseToSave: Exercise = {
       ...exerciseData,
-      id: `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`, // Unique ID
+      id: exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
       muscleGroups: finalMuscleGroups,
-      sets: exerciseData.sets.map(s => ({
-        id: `set-${s.id}`, // Ensure set IDs are also unique if needed, or simplify
+      // Ensure sets have proper IDs and structure
+      sets: exerciseData.sets.map((s, index) => ({
+        id: s.id || `set-${Date.now()}-final-${index}`, // Ensure every set has an ID
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
         unit: s.unit,
       })),
     };
-    onSave(newExercise);
-    onOpenChange(false); // Close modal after save
+    onSave(exerciseToSave);
+    onOpenChange(false);
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={(open) => {
+      if (!open) setShowAutocomplete(false); // Hide autocomplete when dialog closes
+      onOpenChange(open);
+    }}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Add New Exercise to Plan</DialogTitle>
-          <DialogDescription>Define the details for the new exercise.</DialogDescription>
+          <DialogTitle>{isEditing ? 'Edit Exercise' : 'Add New Exercise to Plan'}</DialogTitle>
+          <DialogDescription>Define the details for the exercise.</DialogDescription>
         </DialogHeader>
         <ScrollArea className="flex-grow pr-6 -mr-6 pl-1">
           <div className="space-y-4 py-4 pr-1">
@@ -144,17 +165,16 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
               <Label htmlFor="exerciseName">Exercise Name*</Label>
               <Input
                 id="exerciseName"
-                value={searchTerm || exerciseData.name}
+                value={searchTerm} // Use searchTerm for the input field directly
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
-                  handleInputChange('name', e.target.value);
-                  setShowAutocomplete(true);
+                  handleInputChange('name', e.target.value); // Still update the underlying exerciseData.name
+                  if (!isEditing) setShowAutocomplete(true); // Only show autocomplete if adding new
                 }}
-                onFocus={() => setShowAutocomplete(true)}
-                // onBlur={() => setTimeout(() => setShowAutocomplete(false), 100)} // Delay to allow click on autocomplete
+                onFocus={() => { if (!isEditing) setShowAutocomplete(true); }}
                 placeholder="e.g., Barbell Squat"
               />
-              {showAutocomplete && filteredExercises.length > 0 && searchTerm && (
+              {showAutocomplete && filteredExercises.length > 0 && searchTerm && !isEditing && (
                 <div className="absolute z-10 w-full bg-card border border-border rounded-md mt-1 max-h-40 overflow-y-auto shadow-lg">
                   {filteredExercises.map(ex => (
                     <div
@@ -230,7 +250,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
             <div className="space-y-1">
                  <Label>Define Sets*</Label>
                  {exerciseData.sets.map((set, index) => (
-                    <div key={set.id || index} className="flex items-end gap-2 p-2 border rounded-md bg-secondary/30">
+                    <div key={set.id || `temp-${index}`} className="flex items-end gap-2 p-2 border rounded-md bg-secondary/30">
                         <span className="text-sm font-medium pt-6">Set {index + 1}:</span>
                         <div className="flex-grow">
                             <Label htmlFor={`set-reps-${index}`} className="text-xs">Target Reps/Duration*</Label>
@@ -282,10 +302,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         </ScrollArea>
         <DialogFooter className="pt-4 border-t">
           <DialogClose asChild>
-            <Button type="button" variant="outline" onClick={() => {
-                 setShowAutocomplete(false); // Ensure autocomplete is hidden on cancel
-                 onOpenChange(false);
-            }}>
+            <Button type="button" variant="outline">
               Cancel
             </Button>
           </DialogClose>
@@ -295,3 +312,4 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     </Dialog>
   );
 }
+
