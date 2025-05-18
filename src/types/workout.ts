@@ -1,3 +1,4 @@
+
 export type SetData = {
   targetReps: string | number;
   targetWeight?: string;
@@ -5,7 +6,7 @@ export type SetData = {
   loggedWeight?: string;
   unit?: 'reps' | 's' | 'min';
   isCompleted?: boolean;
-  id: string; 
+  id: string;
 };
 
 export type Exercise = {
@@ -14,6 +15,9 @@ export type Exercise = {
   targetWeight?: string;
   sets: SetData[];
   notes?: string;
+  description?: string; // New: Detailed description of the exercise
+  videoUrl?: string; // New: URL to an instructional video
+  muscleGroups?: string[]; // New: Array of muscle groups targeted
   isCore?: boolean;
   isConditioning?: boolean;
   isWarmup?: boolean;

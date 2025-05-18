@@ -2,10 +2,11 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import Link from 'next/link'; // Import Link
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles, XSquare, Undo2, Lock } from 'lucide-react'; // Added Undo2, Lock
+import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles, XSquare, Undo2, Lock, Info } from 'lucide-react'; // Added Info
 import type { Exercise, LoggedExerciseData, LoggedSetData, SetData } from '@/types/workout';
 import SetLogger from './set-logger';
 import AIRecommendationModal from './ai-recommendation-modal';
@@ -66,7 +67,7 @@ interface ExerciseCardProps {
   loggedData?: LoggedExerciseData;
   onUpdateEffectiveTargetWeight: (exerciseId: string, newWeight: string) => void;
   triggerRepReset: (exerciseId: string) => void; // Callback to trigger rep reset in parent
-  onSkipExercise: (exerciseId: string) => void; 
+  onSkipExercise: (exerciseId: string) => void;
   onUnskipExercise: (exerciseId: string) => void;
   isSkipped: boolean;
 }
@@ -155,12 +156,12 @@ export default function ExerciseCard({
   };
 
   const handleSkipExercisePress = () => {
-    onSkipExercise(exercise.id); 
+    onSkipExercise(exercise.id);
     setIsEditingTarget(false);
-    setCanSuggestWeightIncrease(false); 
-    setForceSetEditKey(prev => prev + 1); 
+    setCanSuggestWeightIncrease(false);
+    setForceSetEditKey(prev => prev + 1);
   };
-  
+
   const handleUnskipExercisePress = () => {
     onUnskipExercise(exercise.id);
     setIsEditingTarget(false);
@@ -226,11 +227,11 @@ export default function ExerciseCard({
 
     if (isSkipped) {
       return (
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={handleUnskipExercisePress}
-          className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0" 
+          className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0"
           aria-label={`Unskip ${exercise.name}`}
         >
           <Undo2 className="h-4 w-4" />
@@ -241,10 +242,10 @@ export default function ExerciseCard({
       return (
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0" 
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
               aria-label={`Skip ${exercise.name}`}
             >
               <XSquare className="h-4 w-4" />
@@ -279,16 +280,21 @@ export default function ExerciseCard({
     )}>
       <CardHeader className="pb-2">
         <div className="flex justify-between items-start">
-          <div>
-            <CardTitle className="text-xl font-semibold text-foreground">
-              {exercise.name}
-            </CardTitle>
-            {!(isSpecialActivity || exercise.isCore) && exercise.targetWeight && !currentPlanTargetToDisplay && (
-                <CardDescription className="text-xs text-muted-foreground/70">
-                    Base Plan: {exercise.targetWeight}
-                </CardDescription>
-            )}
+          <div className="flex items-center gap-2">
+            <Link href={`/exercises/${exercise.id}`} passHref legacyBehavior>
+                <a className="hover:underline focus:outline-none focus:ring-1 focus:ring-primary rounded">
+                    <CardTitle className="text-xl font-semibold text-foreground hover:text-primary transition-colors">
+                        {exercise.name}
+                    </CardTitle>
+                </a>
+            </Link>
+            <Link href={`/exercises/${exercise.id}`} passHref legacyBehavior>
+                <a aria-label={`More information about ${exercise.name}`} className="text-muted-foreground hover:text-primary transition-colors">
+                    <Info className="h-4 w-4"/>
+                </a>
+            </Link>
           </div>
+
           <div className="flex items-center gap-2">
             {isSkipped && (
               <Badge variant="destructive" className="text-xs font-normal">
@@ -301,6 +307,11 @@ export default function ExerciseCard({
             {renderSkipUnskipButton()}
           </div>
         </div>
+         {!(isSpecialActivity || exercise.isCore) && exercise.targetWeight && !currentPlanTargetToDisplay && !isSkipped && (
+                <CardDescription className="text-xs text-muted-foreground/70 mt-1">
+                    Base Plan: {exercise.targetWeight}
+                </CardDescription>
+         )}
         {renderTargetWeightControls()}
       </CardHeader>
       <CardContent className={cn("p-0", isSkipped && "opacity-40 pointer-events-none")}>
@@ -315,7 +326,7 @@ export default function ExerciseCard({
               setNumber={index + 1}
               setData={set}
               loggedSetData={currentLoggedSetData}
-              lastSessionSetPerformance={lastSessionSetPerformance} 
+              lastSessionSetPerformance={lastSessionSetPerformance}
               effectiveTargetWeight={currentPlanTargetToDisplay}
               onLogSet={(log) => handleLogSet(set.id, log)}
               exerciseUnit={exercise.unit}
@@ -334,7 +345,7 @@ export default function ExerciseCard({
             disabled={!allSetsCompletedCheck}
             className="bg-accent/20 hover:bg-accent/30 text-accent-foreground border-accent/50"
             >
-            <Sparkles className="mr-2 h-4 w-4" /> 
+            <Sparkles className="mr-2 h-4 w-4" />
             AI Weight Advice
           </Button>
         </CardFooter>
@@ -350,4 +361,3 @@ export default function ExerciseCard({
     </Card>
   );
 }
-
