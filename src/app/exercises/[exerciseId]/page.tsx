@@ -19,6 +19,7 @@ import AIRecommendationModal from '@/components/workout/ai-recommendation-modal'
 import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 import { useToast } from '@/hooks/use-toast';
 import LoadingExercisePage from './loading';
+import { getPreviousSetPerformance } from '@/lib/workout-utils'; // Added import
 import {
   AlertDialog,
   AlertDialogAction,
