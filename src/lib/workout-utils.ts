@@ -1,8 +1,7 @@
 
-import type { DailyLog, Exercise, WorkoutDay, LoggedExerciseData } from '@/types/workout';
+import type { DailyLog, Exercise, WorkoutDay, LoggedExerciseData, SetData } from '@/types/workout';
 import { weeklyPlan } from '@/data/workout-data';
 import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
-import type { CoachingTipsInput, LogSummarySchema } from '@/ai/flows/coaching-tips-flow'; // Import LogSummarySchema
 
 
 export const getAllExercises = (): Array<{ id: string; name: string }> => {
@@ -193,20 +192,21 @@ export const calculateStreaks = (dates: Date[]): { current: number; longest: num
 
 
 /**
- * Summarizes recent workout logs for AI coaching tips input.
- * Fetches logs from the last ~4 weeks (28 days).
- * @returns An array of LogSummary objects.
+ * Retrieves the performance for a specific set of an exercise from the most recent *previous* session.
+ * @param exerciseId The ID of the exercise.
+ * @param currentSetId The ID of the set for which to find previous performance.
+ * @param exerciseSetsDefinition The full list of set definitions for the current exercise.
+ * @returns The LoggedSetData for that set from the last relevant session, or undefined.
  */
-export const summarizeRecentLogs = (): Array<LogSummarySchema> => { // Explicit return type
-  if (typeof window === 'undefined') return [];
+export const getPreviousSetPerformance = (
+    exerciseId: string,
+    currentSetId: string,
+    exerciseSetsDefinition: SetData[]
+): LoggedSetData | undefined => {
+    if (typeof window === 'undefined') return undefined;
 
-  const summaries: Array<LogSummarySchema> = []; // Explicit type
-  const fourWeeksAgo = new Date();
-  fourWeeksAgo.setUTCDate(fourWeeksAgo.getUTCDate() - 28); // Use UTC dates
-  const fourWeeksAgoTimestamp = Date.UTC(fourWeeksAgo.getUTCFullYear(), fourWeeksAgo.getUTCMonth(), fourWeeksAgo.getUTCDate());
-
-
-  const keysToSearch: string[] = [];
+    const todayStr = new Date().toISOString().split('T')[0];
+    const keysToSearch: string[] = [];
     try {
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
@@ -215,77 +215,56 @@ export const summarizeRecentLogs = (): Array<LogSummarySchema> => { // Explicit 
             }
         }
     } catch (error) {
-        console.error("Error accessing localStorage keys:", error);
-        return []; // Return empty if localStorage is inaccessible
+        console.error("Error accessing localStorage keys for getPreviousSetPerformance:", error);
+        return undefined;
     }
 
-  // Sort keys by date descending to process recent ones first
-  keysToSearch.sort((a, b) => {
-    const dateA = a.match(/_(\d{4}-\d{2}-\d{2})$/)?.[1];
-    const dateB = b.match(/_(\d{4}-\d{2}-\d{2})$/)?.[1];
-    if (dateA && dateB) return new Date(dateB).getTime() - new Date(dateA).getTime(); // Descending
-    return 0;
-  });
+    // Sort keys by date descending to find the most recent previous log
+    keysToSearch.sort((a, b) => {
+        const dateA = a.match(/_(\d{4}-\d{2}-\d{2})$/)?.[1];
+        const dateB = b.match(/_(\d{4}-\d{2}-\d{2})$/)?.[1];
+        if (dateA && dateB) return new Date(dateB).getTime() - new Date(dateA).getTime(); // Descending
+        return 0;
+    });
 
-  for (const key of keysToSearch) {
-    const match = key.match(/_(\d{4}-\d{2}-\d{2})$/);
-    if (match && match[1]) { // Ensure match and dateString exist
-      const dateStr = match[1];
-      try {
-         // Create Date object from string parts using UTC
-        const dateParts = dateStr.split('-').map(Number);
-        if (dateParts.length === 3 && !dateParts.some(isNaN)) {
-            const logDateTimestamp = Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]);
+    // Find the index of the current set in its definition
+    const currentSetIndex = exerciseSetsDefinition.findIndex(set => set.id === currentSetId);
+    if (currentSetIndex === -1) return undefined; // Should not happen if data is consistent
 
-            if (logDateTimestamp >= fourWeeksAgoTimestamp) {
+    for (const key of keysToSearch) {
+        const match = key.match(/_(\d{4}-\d{2}-\d{2})$/);
+        if (match && match[1]) {
+            const dateStr = match[1];
+            if (dateStr === todayStr) continue; // Skip today's log
+
+            try {
                 const dailyLogString = localStorage.getItem(key);
                 if (!dailyLogString) continue;
                 const dailyLog: DailyLog = JSON.parse(dailyLogString);
 
-                let exercisesCompleted = 0;
-                let setsCompleted = 0;
-
-                Object.values(dailyLog).forEach((exerciseLog) => {
-                  // Ensure exerciseLog is a valid object before iterating
-                  if (exerciseLog && typeof exerciseLog === 'object') {
-                    let exerciseHasCompletedSet = false;
-                    Object.values(exerciseLog).forEach((setLog) => {
-                      // Ensure setLog is valid and check isCompleted
-                      if (setLog && typeof setLog === 'object' && setLog.isCompleted) {
-                        setsCompleted++;
-                        exerciseHasCompletedSet = true;
-                      }
-                    });
-                    if (exerciseHasCompletedSet) {
-                      exercisesCompleted++;
+                const historicalExerciseLog = dailyLog[exerciseId];
+                if (historicalExerciseLog && typeof historicalExerciseLog === 'object') {
+                    // Attempt to find the historical set by its ID first (if plans are consistent)
+                    // Or, fall back to matching by index if set IDs might change across plan versions
+                    // For this implementation, we'll try finding a set at the same index.
+                    
+                    // Get all set IDs from the historical log for this exercise
+                    const historicalSetIds = Object.keys(historicalExerciseLog);
+                    if (historicalSetIds.length > currentSetIndex) {
+                        // Assume the set at the same index is the corresponding one.
+                        // This is a simplification. A more robust system might store historical set definitions.
+                        const historicalSetKey = historicalSetIds[currentSetIndex]; // This relies on consistent ordering of sets in the log
+                        const previousPerformance = historicalExerciseLog[historicalSetKey];
+                        
+                        if (previousPerformance && previousPerformance.isCompleted) {
+                            return previousPerformance;
+                        }
                     }
-                  }
-                });
-
-
-                // Only add summary if at least one set was completed
-                if (setsCompleted > 0) {
-                    summaries.push({
-                    date: dateStr,
-                    exercisesCompleted: exercisesCompleted,
-                    setsCompleted: setsCompleted,
-                    });
                 }
-
-            } else {
-                // Stop processing older logs once we go past the 4-week mark
-                break;
+            } catch (e) {
+                console.error(`Error processing historical log for key ${key} in getPreviousSetPerformance:`, e);
             }
-        } else {
-             console.error(`Invalid date string format found in key: ${key}`);
         }
-
-      } catch (e) {
-        console.error(`Error processing log summary for key ${key}:`, e);
-      }
     }
-  }
-
-  // Return summaries sorted ascending by date for the AI
-  return summaries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return undefined;
 };

@@ -5,12 +5,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle } from 'lucide-react'; // Removed Loader2, added ArrowUpCircle
+import { Wand2, CheckCircle, XCircle, Edit, Save, ArrowUpCircle, Sparkles } from 'lucide-react'; // Added Sparkles
 import type { Exercise, LoggedExerciseData, LoggedSetData, SetData } from '@/types/workout';
 import SetLogger from './set-logger';
 import AIRecommendationModal from './ai-recommendation-modal';
-// Removed NextSessionRecommendationOutput import
-import { parseWeightToNumber } from '@/lib/workout-utils';
+import { parseWeightToNumber, getPreviousSetPerformance } from '@/lib/workout-utils'; // Added getPreviousSetPerformance
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -64,7 +63,6 @@ interface ExerciseCardProps {
   effectiveTargetWeight?: string; // User's current planned target (from localStorage or default)
   onLogSet: (exerciseId: string, setId: string, log: LoggedSetData) => void;
   loggedData?: LoggedExerciseData;
-  // Removed AI Suggestion Props
   onUpdateEffectiveTargetWeight: (exerciseId: string, newWeight: string) => void;
   triggerRepReset: (exerciseId: string) => void; // Callback to trigger rep reset in parent
 }
@@ -74,7 +72,6 @@ export default function ExerciseCard({
   effectiveTargetWeight,
   onLogSet,
   loggedData,
-  // Removed AI Suggestion Props
   onUpdateEffectiveTargetWeight,
   triggerRepReset
 }: ExerciseCardProps) {
@@ -82,41 +79,35 @@ export default function ExerciseCard({
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [manualTargetWeight, setManualTargetWeight] = useState(effectiveTargetWeight || exercise.targetWeight || '');
   const [forceSetEditKey, setForceSetEditKey] = useState(0);
-  const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false); // New state
+  const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false); 
 
 
-  // Function to check if weight increase can be suggested
-  const checkCompletionAndReps = useCallback((currentLogData?: LoggedExerciseData) => {
+  // Function to check if weight increase can be suggested based on PLAN targets
+  const checkCompletionAndPlanReps = useCallback((currentLogData?: LoggedExerciseData) => {
     if (!currentLogData || exercise.sets.length === 0) return false;
 
-    // 1. Check if all sets are completed
     const allSetsCompleted = exercise.sets.every(set => currentLogData[set.id]?.isCompleted);
     if (!allSetsCompleted) return false;
 
-    // 2. Check if logged reps meet/exceed max target reps for all sets
     for (const set of exercise.sets) {
       const loggedSet = currentLogData[set.id];
-      const maxTarget = parseMaxTargetReps(set.targetReps);
+      const maxTarget = parseMaxTargetReps(set.targetReps); // Plan's target reps
       const loggedRepsNum = loggedSet?.reps !== undefined ? parseInt(String(loggedSet.reps), 10) : NaN;
 
-      // If target is not numeric (e.g., 'to failure'), we can't base suggestion on it
-      if (maxTarget === null) continue; // Skip check for non-numeric targets
+      if (maxTarget === null) continue; 
 
-      // If reps weren't logged as a number or are less than target, no suggestion
       if (isNaN(loggedRepsNum) || loggedRepsNum < maxTarget) {
         return false;
       }
     }
-
-    // If all checks pass
     return true;
   }, [exercise.sets]);
 
 
-  // Update suggestion state when loggedData changes (initial load or updates)
+  // Update suggestion state when loggedData changes
   useEffect(() => {
-    setCanSuggestWeightIncrease(checkCompletionAndReps(loggedData));
-  }, [loggedData, checkCompletionAndReps]);
+    setCanSuggestWeightIncrease(checkCompletionAndPlanReps(loggedData));
+  }, [loggedData, checkCompletionAndPlanReps]);
 
 
   // Update local manual input if the effective target changes externally
@@ -130,12 +121,11 @@ export default function ExerciseCard({
     const newLog = { ...log, weight: weightToLog };
     onLogSet(exercise.id, setId, newLog);
 
-    // Create the potential next state of the log to check for suggestions
     const nextLogState = {
         ...(loggedData || {}),
         [setId]: newLog
     };
-    setCanSuggestWeightIncrease(checkCompletionAndReps(nextLogState));
+    setCanSuggestWeightIncrease(checkCompletionAndPlanReps(nextLogState));
   };
 
 
@@ -145,7 +135,7 @@ export default function ExerciseCard({
       onUpdateEffectiveTargetWeight(exercise.id, manualTargetWeight);
       triggerRepReset(exercise.id);
       setForceSetEditKey(prev => prev + 1);
-      setCanSuggestWeightIncrease(false); // Reset suggestion after weight change
+      setCanSuggestWeightIncrease(false); 
     }
     setIsEditingTarget(false);
   };
@@ -193,7 +183,7 @@ export default function ExerciseCard({
                 <p className="text-sm font-semibold text-foreground">{currentPlanTargetToDisplay || 'Not set'}</p>
                 {canSuggestWeightIncrease && (
                    <Badge variant="default" className="px-1.5 py-0.5 text-xs bg-green-600 hover:bg-green-700 text-white">
-                      <ArrowUpCircle className="h-3 w-3 mr-0.5" /> Inc.
+                      <ArrowUpCircle className="h-3 w-3 mr-0.5" /> Suggest Inc.
                    </Badge>
                 )}
              </div>
@@ -202,7 +192,6 @@ export default function ExerciseCard({
             </Button>
           </div>
         )}
-        {/* Removed AI Suggestion for today section */}
       </div>
     );
   };
@@ -215,7 +204,7 @@ export default function ExerciseCard({
             <CardTitle className="text-xl font-semibold text-foreground">
               {exercise.name}
             </CardTitle>
-            {!(isSpecialActivity || exercise.isCore) && exercise.targetWeight && !currentPlanTargetToDisplay && ( // Show base plan if no override
+            {!(isSpecialActivity || exercise.isCore) && exercise.targetWeight && !currentPlanTargetToDisplay && ( 
                 <CardDescription className="text-xs text-muted-foreground/70">
                     Base Plan: {exercise.targetWeight}
                 </CardDescription>
@@ -229,19 +218,17 @@ export default function ExerciseCard({
       </CardHeader>
       <CardContent className="p-0">
         {exercise.sets.map((set, index) => {
-          const previousSetId = index > 0 ? exercise.sets[index - 1].id : undefined;
-          // Get logged reps from the *current* loggedData state
-          const previousLoggedReps = previousSetId ? loggedData?.[previousSetId]?.reps : undefined;
+          const lastSessionSetPerformance = getPreviousSetPerformance(exercise.id, set.id, exercise.sets);
           const currentLoggedSetData = loggedData?.[set.id];
           const isEditingInitially = !currentLoggedSetData?.isCompleted || (forceSetEditKey > 0 && currentLoggedSetData?.isCompleted);
 
           return (
             <SetLogger
-              key={`${set.id}-${forceSetEditKey}`} // Include key to force re-render on weight change
+              key={`${set.id}-${forceSetEditKey}`} 
               setNumber={index + 1}
               setData={set}
               loggedSetData={currentLoggedSetData}
-              previousLoggedReps={previousLoggedReps} // Pass previous set's LOGGED reps
+              lastSessionSetPerformance={lastSessionSetPerformance} // Pass last session's data for this set
               effectiveTargetWeight={currentPlanTargetToDisplay}
               onLogSet={(log) => handleLogSet(set.id, log)}
               exerciseUnit={exercise.unit}
@@ -257,11 +244,11 @@ export default function ExerciseCard({
             variant="outline"
             size="sm"
             onClick={() => setIsAIRecModalOpen(true)}
-            disabled={!allSetsCompletedCheck} // Disable until all sets are marked completed
+            disabled={!allSetsCompletedCheck} 
             className="bg-accent/20 hover:bg-accent/30 text-accent-foreground border-accent/50"
             >
-            <Wand2 className="mr-2 h-4 w-4" />
-            AI Advice for Next Workout
+            <Sparkles className="mr-2 h-4 w-4" /> {/* Changed Icon */}
+            AI Weight Advice
           </Button>
         </CardFooter>
       )}
@@ -276,3 +263,4 @@ export default function ExerciseCard({
     </Card>
   );
 }
+

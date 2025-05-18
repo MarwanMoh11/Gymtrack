@@ -5,7 +5,7 @@ import type { SetData, LoggedSetData } from '@/types/workout';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Check, Edit3, Plus, Minus } from 'lucide-react'; // Removed Dumbbell
+import { Check, Edit3, Plus, Minus, History, Sparkles } from 'lucide-react'; // Added History, Sparkles
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -13,19 +13,19 @@ interface SetLoggerProps {
   setNumber: number;
   setData: SetData; // Includes target reps/weight for the set definition
   loggedSetData?: LoggedSetData; // Data logged specifically for this set instance
-  previousLoggedReps?: string | number; // Reps logged in the previous set of this session
+  lastSessionSetPerformance?: LoggedSetData; // Performance for THIS set from the LAST session
   effectiveTargetWeight?: string; // The weight planned for this exercise today
   onLogSet: (log: LoggedSetData) => void;
   exerciseUnit?: 'reps' | 's' | 'min';
   isSimpleLog?: boolean; // For exercises like conditioning, warmups etc.
-  isEditingInitially?: boolean; // Control initial edit state, e.g., after weight change
+  isEditingInitially?: boolean; // Control initial edit state
 }
 
 export default function SetLogger({
   setNumber,
   setData,
   loggedSetData,
-  previousLoggedReps,
+  lastSessionSetPerformance,
   effectiveTargetWeight,
   onLogSet,
   exerciseUnit,
@@ -34,45 +34,50 @@ export default function SetLogger({
 }: SetLoggerProps) {
   const unitLabel = setData.unit || exerciseUnit || 'reps';
 
-  // Initialize with previous logged reps if editing and no current log, otherwise use current log or target
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined) return String(loggedSetData.reps);
-    if (isEditingInitially && previousLoggedReps !== undefined) return String(previousLoggedReps);
-    return ''; // Default to empty if nothing else applies
+    // If starting edit and no current log, suggest based on last session's performance + 1 (if numeric)
+    if (isEditingInitially && lastSessionSetPerformance?.reps !== undefined) {
+        const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
+        if (!isNaN(lastRepsNum)) {
+            // return String(lastRepsNum + 1); // Suggesting increase
+            return String(lastRepsNum); // Or just show what they did last time
+        }
+        return String(lastSessionSetPerformance.reps); // If not numeric, just show as is
+    }
+    return ''; // Default to empty
   };
 
   const [currentReps, setCurrentReps] = useState<string>(getInitialReps);
   const [isEditing, setIsEditing] = useState(isEditingInitially);
 
-  // Effect to update editing state and reps if isEditingInitially changes
-   useEffect(() => {
+  useEffect(() => {
     setIsEditing(isEditingInitially);
-    // When forced into editing (e.g., weight change), reset input based on priority
     if (isEditingInitially) {
         if (loggedSetData?.reps !== undefined) {
            setCurrentReps(String(loggedSetData.reps));
-        } else if (previousLoggedReps !== undefined) {
-           setCurrentReps(String(previousLoggedReps));
+        } else if (lastSessionSetPerformance?.reps !== undefined) {
+            // Use last session's actual reps if available when starting fresh edit
+           setCurrentReps(String(lastSessionSetPerformance.reps));
         } else {
            setCurrentReps(''); // Fallback to empty
         }
     }
-   }, [isEditingInitially, loggedSetData?.reps, previousLoggedReps]);
+   }, [isEditingInitially, loggedSetData?.reps, lastSessionSetPerformance?.reps]);
 
-   // Effect to reset currentReps if loggedData is cleared externally
    useEffect(() => {
     if (!loggedSetData && isEditing) {
-       setCurrentReps(previousLoggedReps !== undefined ? String(previousLoggedReps) : '');
+       setCurrentReps(lastSessionSetPerformance?.reps !== undefined ? String(lastSessionSetPerformance.reps) : '');
     }
-   }, [loggedSetData, isEditing, previousLoggedReps]);
+   }, [loggedSetData, isEditing, lastSessionSetPerformance?.reps]);
 
 
   const handleLog = () => {
-    // Log with current reps OR previous logged reps if input is empty, fallback to target
-    const repsToLog = currentReps || (previousLoggedReps !== undefined ? String(previousLoggedReps) : setData.targetReps);
+    const repsToLog = currentReps || 
+                      (lastSessionSetPerformance?.reps !== undefined ? String(lastSessionSetPerformance.reps) : setData.targetReps);
     onLogSet({
       reps: repsToLog,
-      weight: effectiveTargetWeight || setData.targetWeight, // Use the overall exercise target weight
+      weight: effectiveTargetWeight || setData.targetWeight, 
       isCompleted: true
     });
     setIsEditing(false);
@@ -80,13 +85,12 @@ export default function SetLogger({
 
   const handleEdit = () => {
     setIsEditing(true);
-    // Set input to the last logged value when starting edit
     setCurrentReps(loggedSetData?.reps !== undefined ? String(loggedSetData.reps) : '');
   }
 
   const handleMarkAsDone = () => {
      onLogSet({
-        reps: setData.targetReps, // Use target reps when simply marking done
+        reps: setData.targetReps, 
         weight: effectiveTargetWeight || setData.targetWeight,
         isCompleted: true
     });
@@ -96,7 +100,6 @@ export default function SetLogger({
   const handleMarkAsNotDone = () => {
     onLogSet({ reps: loggedSetData?.reps, weight: loggedSetData?.weight, isCompleted: false });
     setIsEditing(true);
-    // Reset input to previously logged value or empty
     setCurrentReps(loggedSetData?.reps !== undefined ? String(loggedSetData.reps) : '');
   }
 
@@ -108,9 +111,33 @@ export default function SetLogger({
     setCurrentReps(prev => String(Math.max(0, Number(prev || 0) - 1)));
   };
 
+  const getPlaceholderReps = () => {
+    if (lastSessionSetPerformance?.reps !== undefined) {
+        const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
+        if (!isNaN(lastRepsNum)) {
+            return String(lastRepsNum + 1); // Suggest one more rep than last time
+        }
+        return String(lastSessionSetPerformance.reps); // If not numeric, show as is
+    }
+    return String(setData.targetReps); // Fallback to plan's target
+  };
+  
+  // Gamification: Check if current performance beats last session
+  const performanceBeatLast = useMemo(() => {
+    if (!loggedSetData?.isCompleted || !lastSessionSetPerformance?.isCompleted) return null;
+
+    const currentRepsNum = parseInt(String(loggedSetData.reps), 10);
+    const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
+    // Assuming weight is consistent for this comparison, or add weight comparison too
+    if (!isNaN(currentRepsNum) && !isNaN(lastRepsNum) && currentRepsNum > lastRepsNum) {
+        return { type: 'reps', diff: currentRepsNum - lastRepsNum };
+    }
+    // Could extend to weight PRs too
+    return null;
+  }, [loggedSetData, lastSessionSetPerformance]);
+
 
   if (isSimpleLog) {
-    // Simplified view for activities, warmups etc.
     return (
       <div className="flex items-center justify-between p-3 border-t border-border/50">
         <div className="flex items-center gap-2">
@@ -130,17 +157,31 @@ export default function SetLogger({
     );
   }
 
-  // View for completed sets
   if (!isEditing && loggedSetData?.isCompleted) {
     return (
-      <div className="flex items-center justify-between p-3 border-t border-border/50 bg-secondary/30">
+      <div className={cn(
+        "flex items-center justify-between p-3 border-t border-border/50",
+        performanceBeatLast ? "bg-primary/10" : "bg-secondary/30" // Highlight if PR
+      )}>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span className="font-medium w-12">Set {setNumber}:</span>
           <span>Target: {setData.targetReps} {unitLabel}</span>
-          <span className="text-primary font-semibold flex items-center">
+          <span className={cn(
+            "font-semibold flex items-center",
+            performanceBeatLast ? "text-primary" : "text-foreground"
+          )}>
             Logged: {loggedSetData.reps ?? 'N/A'} {unitLabel}
-            {/* Weight display removed from here */}
+            {performanceBeatLast && performanceBeatLast.type === 'reps' && (
+              <span className="ml-1.5 text-xs flex items-center text-green-500">(<Sparkles className="h-3 w-3 mr-0.5" /> +{performanceBeatLast.diff}!)</span>
+            )}
+          </span>
+          {lastSessionSetPerformance && (
+            <span className="text-xs text-muted-foreground/80 flex items-center">
+              <History className="h-3 w-3 mr-1 opacity-70" />
+              Last: {lastSessionSetPerformance.reps} {unitLabel}
+              {lastSessionSetPerformance.weight && ` @ ${lastSessionSetPerformance.weight}`}
             </span>
+          )}
         </div>
         <Button variant="ghost" size="icon" onClick={handleEdit} className="h-8 w-8">
           <Edit3 className="h-4 w-4" />
@@ -149,16 +190,15 @@ export default function SetLogger({
     );
   }
 
-  // View for editing/logging sets
   return (
     <div className="p-3 border-t border-border/50">
-      <div className="flex items-end gap-2 sm:gap-3">
+      <div className="flex items-end gap-2 sm:gap-3 mb-1.5">
         <Label htmlFor={`set-${setNumber}-reps`} className="w-12 pt-1 text-sm font-medium shrink-0">
           Set {setNumber}
         </Label>
         <div className="flex-1">
           <Label htmlFor={`set-${setNumber}-reps`} className="text-xs text-muted-foreground">
-            {unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1)} (Target: {setData.targetReps})
+            {unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1)} (Plan: {setData.targetReps})
           </Label>
           <div className="flex items-center gap-1 mt-1">
              <Button onClick={decrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0">
@@ -170,12 +210,11 @@ export default function SetLogger({
               type="number"
               inputMode="numeric"
               pattern="[0-9]*"
-              // Use previous LOGGED reps as placeholder if available and editing, otherwise target
-              placeholder={`${loggedSetData?.reps !== undefined ? loggedSetData.reps : (previousLoggedReps !== undefined ? previousLoggedReps : setData.targetReps)}`}
+              placeholder={getPlaceholderReps()}
               value={currentReps}
               onChange={(e) => setCurrentReps(e.target.value.replace(/[^0-9]/g, ''))}
-              className="h-9 text-lg font-semibold text-center appearance-none w-16 flex-shrink-0" // Larger text, fixed width
-              style={{ MozAppearance: 'textfield' }} // Hide spinners in Firefox
+              className="h-9 text-lg font-semibold text-center appearance-none w-16 flex-shrink-0"
+              style={{ MozAppearance: 'textfield' }} 
             />
              <Button onClick={incrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0">
               <Plus className="h-4 w-4" />
@@ -183,12 +222,19 @@ export default function SetLogger({
             </Button>
           </div>
         </div>
-        {/* Weight input removed */}
         <Button onClick={handleLog} size="sm" className="h-9 shrink-0 self-end">
           <Check className="h-4 w-4" />
           <span className="sr-only sm:not-sr-only sm:ml-1">Log</span>
         </Button>
       </div>
+      {lastSessionSetPerformance && (
+        <div className="pl-[calc(3rem+0.5rem)] text-xs text-muted-foreground/70 flex items-center"> {/* Align with input field */}
+            <History className="h-3 w-3 mr-1 opacity-60" />
+            Last time: {lastSessionSetPerformance.reps} {unitLabel}
+            {lastSessionSetPerformance.weight && ` @ ${lastSessionSetPerformance.weight}`}
+        </div>
+      )}
     </div>
   );
 }
+
