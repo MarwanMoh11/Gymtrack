@@ -3,9 +3,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { getWorkoutByDay } from '@/data/workout-data';
+import { getWorkoutByDay } from '@/lib/workout-plan-service'; // Corrected import
 import type { DailyLog, WorkoutDay } from '@/types/workout';
-import { History, CalendarDays, Flame } from 'lucide-react'; // Removed Lightbulb, RefreshCw
+import { History, CalendarDays, Flame } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading';
 import { calculateStreaks } from '@/lib/workout-utils';
 import { useToast } from '@/hooks/use-toast';
@@ -26,6 +26,10 @@ const getLoggedDays = (): Date[] => {
       const match = key.match(/^gymtrack_log_[a-zA-Z0-9-]+_(\d{4}-\d{2}-\d{2})$/);
       if (match && match[1]) {
         const dateString = match[1];
+        if (!dateString) { // Added check for undefined dateString
+            console.warn("Found log key with undefined date string:", key);
+            continue;
+        }
         const logContent = localStorage.getItem(key);
         if (logContent && logContent !== '{}') {
            try {
@@ -49,7 +53,7 @@ const getLoggedDays = (): Date[] => {
   return Array.from(loggedDates)
     .filter(dateStr => typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr))
     .map(dateStr => {
-       if (!dateStr) return null;
+       if (!dateStr) return null; // Should be caught by filter, but defensive
       const [year, month, day] = dateStr.split('-').map(Number);
       if (isNaN(year) || isNaN(month) || isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) {
          console.error("Failed to parse valid date components from string:", dateStr);
@@ -117,70 +121,66 @@ export default function ProgressiveOverloadDashboardPage() {
 
     const dayIndex = selectedDateUTC.getUTCDay();
     const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-    const dayId = daysOfWeek[dayIndex];
-    const workoutForDay = getWorkoutByDay(dayId);
-    setSelectedWorkoutDay(workoutForDay);
+    const dayIdFromDayOfWeek = daysOfWeek[dayIndex]; // This is a generic day ID like "monday"
+    
+    // Attempt to get workout day from the active plan using the generic day of the week ID
+    const workoutForDayFromActivePlan = getWorkoutByDay(dayIdFromDayOfWeek);
+    setSelectedWorkoutDay(workoutForDayFromActivePlan);
 
-    if (workoutForDay) {
-        const key = getLocalStorageKey(workoutForDay.id, selectedDateUTC);
-        const storedLog = localStorage.getItem(key);
+    // Try to find the specific log for this date. The key might contain a more specific dayId.
+    let foundLogKey = null;
+    let specificDayIdFromLog: string | null = null;
+
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k) {
+                const match = k.match(/^gymtrack_log_([a-zA-Z0-9-]+)_(\d{4}-\d{2}-\d{2})$/);
+                if (match && match[1] && match[2] === dateStr) {
+                    foundLogKey = k;
+                    specificDayIdFromLog = match[1]; // This is the dayId used when the workout was logged
+                    break;
+                }
+            }
+        }
+    } catch (error) {
+        console.error("Error accessing localStorage keys:", error);
+        toast({ variant: "destructive", title: "Storage Error", description: "Could not access log data." });
+        setIsLogModalOpen(false);
+        return;
+    }
+
+    if (foundLogKey) {
+        const storedLog = localStorage.getItem(foundLogKey);
         if (storedLog) {
             try {
-            setSelectedDateLog(JSON.parse(storedLog));
-            setIsLogModalOpen(true);
+                setSelectedDateLog(JSON.parse(storedLog));
+                // If we found a specificDayIdFromLog, try to get its structure.
+                // This is more accurate than relying on workoutForDayFromActivePlan if plans changed.
+                if (specificDayIdFromLog) {
+                    const historicalWorkoutDay = getWorkoutByDay(specificDayIdFromLog); // This will search active plan, but could be expanded
+                    setSelectedWorkoutDay(historicalWorkoutDay); // May still be null if not in active plan
+                }
+                setIsLogModalOpen(true);
             } catch (error) {
-            console.error("Failed to parse stored log for selected date:", error);
-            toast({ variant: "destructive", title: "Error", description: "Could not load the log for the selected date." });
-            setSelectedDateLog(null);
-            setIsLogModalOpen(false);
-            }
-        } else {
-            setSelectedDateLog(null);
-            setIsLogModalOpen(false);
-            toast({ variant: "default", title: "Log Data Missing", description: "Log data seems missing for this logged day." });
-        }
-    } else {
-         let foundKey = null;
-         try {
-             for (let i = 0; i < localStorage.length; i++) {
-                 const k = localStorage.key(i);
-                 if (k && k.startsWith('gymtrack_log_') && k.endsWith(`_${dateStr}`)) {
-                     foundKey = k;
-                     break;
-                 }
-             }
-         } catch (error) {
-              console.error("Error accessing localStorage keys:", error);
-              toast({ variant: "destructive", title: "Storage Error", description: "Could not access log data." });
-              setSelectedDateLog(null);
-              setIsLogModalOpen(false);
-              return;
-         }
-
-         if (foundKey) {
-             const storedLog = localStorage.getItem(foundKey);
-             if (storedLog) {
-                 try {
-                    setSelectedDateLog(JSON.parse(storedLog));
-                    setIsLogModalOpen(true);
-                    toast({ variant: "default", title: "Log Found (No Plan)", description: "Showing raw log data as no current plan matches this day." });
-                 } catch (error) {
-                     console.error("Failed to parse stored log for selected date without plan:", error);
-                     toast({ variant: "destructive", title: "Error", description: "Could not load the log data." });
-                     setSelectedDateLog(null);
-                     setIsLogModalOpen(false);
-                 }
-            } else {
-                toast({ variant: "default", title: "Log Data Missing", description: "Log data seems missing for this logged day." });
+                console.error("Failed to parse stored log for selected date:", error);
+                toast({ variant: "destructive", title: "Error", description: "Could not load the log for the selected date." });
                 setSelectedDateLog(null);
                 setIsLogModalOpen(false);
             }
-         } else {
-             toast({ variant: "default", title: "Rest Day / No Log Found", description: "No workout log found for this day." });
-             setSelectedDateLog(null);
-             setIsLogModalOpen(false);
-         }
+        } else {
+            toast({ variant: "default", title: "Log Data Missing", description: "Log data seems missing for this logged day." });
+            setSelectedDateLog(null);
+            setIsLogModalOpen(false);
+        }
+    } else {
+        // This case means the day was marked as "logged" by getLoggedDays, but we couldn't find the actual log item by iterating keys.
+        // This might indicate an issue in getLoggedDays or if a log was partially deleted.
+        toast({ variant: "default", title: "Log Inconsistency", description: "Could not retrieve specific log details for this day." });
+        setSelectedDateLog(null);
+        setIsLogModalOpen(false);
     }
+
   }, [loggedDays, toast]);
 
    const handleMonthChange = (month: Date) => {
@@ -288,8 +288,6 @@ export default function ProgressiveOverloadDashboardPage() {
               />
             </CardContent>
           </Card>
-
-          {/* AI Coaching Tip Section Removed */}
         </div>
 
         <Dialog open={isLogModalOpen} onOpenChange={setIsLogModalOpen}>
@@ -301,14 +299,10 @@ export default function ProgressiveOverloadDashboardPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="flex-grow overflow-y-auto pr-2 -mr-6 pl-6">
-              {selectedWorkoutDay && selectedDateLog ? (
+              {selectedDateLog ? ( // selectedWorkoutDay might be null if plan changed
                  <PastWorkoutLogView workoutDay={selectedWorkoutDay} dailyLog={selectedDateLog} />
               ) : (
-                 !selectedWorkoutDay && selectedDateLog ? (
-                   <PastWorkoutLogView workoutDay={null} dailyLog={selectedDateLog} />
-                 ) : (
-                    <p className="text-muted-foreground text-center mt-8">Log details could not be loaded.</p>
-                 )
+                 <p className="text-muted-foreground text-center mt-8">Log details could not be loaded.</p>
               )}
             </div>
           </DialogContent>
@@ -316,5 +310,3 @@ export default function ProgressiveOverloadDashboardPage() {
     </div>
   );
 }
-
-    

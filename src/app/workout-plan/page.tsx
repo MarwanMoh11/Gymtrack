@@ -9,12 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator'; // Added import
+import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { ArrowRight, CalendarDays, Edit, Save, XCircle, PlusCircle, Trash2, ArrowUp, ArrowDown, Info, CheckCircle, WandSparkles } from 'lucide-react';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import AddExerciseModal from '@/components/workout-plan/add-exercise-modal';
-import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data'; // For global autocomplete
+import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data';
 import { produce } from 'immer';
 
 export default function WorkoutPlanPage() {
@@ -29,6 +30,9 @@ export default function WorkoutPlanPage() {
   const [dayIdForModal, setDayIdForModal] = useState<string | null>(null);
   const [exerciseToEdit, setExerciseToEdit] = useState<Exercise | null>(null);
   
+  const [isNewPlanDialogVisible, setIsNewPlanDialogVisible] = useState(false);
+  const [newPlanNameInput, setNewPlanNameInput] = useState('');
+
   const allExercisesForModalAutocomplete = useMemo(() => getAllExercisesForAutocompleteGlobal(), []);
 
   const { toast } = useToast();
@@ -55,6 +59,7 @@ export default function WorkoutPlanPage() {
   const handleSetPlanActive = (planId: string) => {
     setActiveWorkoutPlan(planId);
     refreshPlans();
+    setIsEditMode(false); // Exit edit mode when switching active plan
     toast({ title: "Active Plan Switched", description: `The active workout plan has been updated.` });
   };
 
@@ -72,14 +77,14 @@ export default function WorkoutPlanPage() {
 
   const handleSaveChangesToActivePlan = () => {
     if (activePlanDetails) {
-      updateActiveWorkoutPlan(editableActivePlan); // This saves to localStorage via service
+      updateActiveWorkoutPlan(editableActivePlan); 
       setInitialActivePlanForEdit(JSON.parse(JSON.stringify(editableActivePlan)));
       setIsEditMode(false);
       toast({
         title: "Active Plan Updated",
         description: `Changes to '${activePlanDetails.name}' have been saved.`,
       });
-      refreshPlans(); // Re-fetch to ensure UI consistency
+      refreshPlans(); 
     }
   };
 
@@ -116,9 +121,9 @@ export default function WorkoutPlanPage() {
       produce(editableActivePlan, draft => {
         const day = draft.find(d => d.id === dayId);
         if (day) {
-          if (exerciseToEdit) { // Editing existing
-            const index = day.exercises.findIndex(ex => ex.id === savedExercise.id);
-            if (index !== -1) day.exercises[index] = savedExercise;
+          const existingExerciseIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
+          if (existingExerciseIndex !== -1) { // Editing existing
+            day.exercises[existingExerciseIndex] = savedExercise;
           } else { // Adding new
             day.exercises.push(savedExercise);
           }
@@ -153,15 +158,38 @@ export default function WorkoutPlanPage() {
     );
   };
 
-  // Placeholder for creating a new plan
-  const handleCreateNewPlan = () => {
-    // Basic prompt for plan name
-    const newPlanName = prompt("Enter name for the new workout plan:", "My Custom Plan");
-    if (newPlanName) {
-      createNewWorkoutPlan(newPlanName);
-      refreshPlans();
-      toast({ title: "New Plan Created", description: `Plan '${newPlanName}' added. You can now set it as active and edit it.` });
+  const triggerCreateNewPlanModal = () => {
+    setNewPlanNameInput('');
+    setIsNewPlanDialogVisible(true);
+  };
+
+  const handleActualCreateNewPlan = () => {
+    if (!newPlanNameInput.trim()) {
+      toast({ variant: 'destructive', title: 'Plan Name Required', description: 'Please enter a name for the new plan.' });
+      return;
     }
+    createNewWorkoutPlan(newPlanNameInput.trim());
+    refreshPlans();
+    toast({ title: "New Plan Created", description: `Plan '${newPlanNameInput.trim()}' added. You can now set it as active and edit it.` });
+    setIsNewPlanDialogVisible(false);
+    setNewPlanNameInput('');
+  };
+
+  const handleAddDayToActivePlan = () => {
+    const newDayId = `custom-day-${Date.now()}`;
+    const newDay: WorkoutDay = {
+      id: newDayId,
+      dayName: 'New Day',
+      title: 'Workout Title (Click to Edit)',
+      exercises: [],
+      notes: 'Add exercises and notes for this day.',
+    };
+    setEditableActivePlan(
+      produce(editableActivePlan, draft => {
+        draft.push(newDay);
+      })
+    );
+    toast({ title: "New Day Added", description: "A new day has been added to the plan. Edit its details and add exercises. Don't forget to save plan changes." });
   };
 
   return (
@@ -176,7 +204,7 @@ export default function WorkoutPlanPage() {
             Switch between workout plans or customize the active one.
           </p>
         </div>
-        <Button onClick={handleCreateNewPlan} variant="outline" size="sm">
+        <Button onClick={triggerCreateNewPlanModal} variant="outline" size="sm">
           <PlusCircle className="mr-2 h-4 w-4" /> Create New Plan
         </Button>
       </header>
@@ -242,11 +270,11 @@ export default function WorkoutPlanPage() {
                 </div>
             </header>
 
-            {editableActivePlan.length === 0 && activePlanDetails.plan.length === 0 ? (
+            {editableActivePlan.length === 0 && activePlanDetails.plan.length === 0 && !isEditMode ? (
                 <Card className="shadow-lg rounded-2xl">
                 <CardHeader><CardTitle className="text-xl font-semibold">Empty Plan</CardTitle></CardHeader>
                 <CardContent className="text-center py-12">
-                    <p className="text-muted-foreground">This plan is empty. Start by adding days and exercises in edit mode.</p>
+                    <p className="text-muted-foreground">This plan is empty. Click "Edit Active Plan" to add days and exercises.</p>
                 </CardContent>
                 </Card>
             ) : (
@@ -350,23 +378,58 @@ export default function WorkoutPlanPage() {
                     )}
                     </Card>
                 ))}
+                {isEditMode && (
+                  <div className="mt-8">
+                    <Button variant="outline" onClick={handleAddDayToActivePlan} className="w-full">
+                      <PlusCircle className="mr-2 h-4 w-4" /> Add New Day to Plan
+                    </Button>
+                  </div>
+                )}
                 </div>
             )}
         </section>
       )}
 
-
-       {isExerciseModalOpen && dayIdForModal && activePlanDetails && (
+      {isExerciseModalOpen && dayIdForModal && activePlanDetails && (
         <AddExerciseModal
           isOpen={isExerciseModalOpen}
           onOpenChange={setIsExerciseModalOpen}
           onSave={(savedExercise) => handleSaveExerciseToActivePlan(dayIdForModal, savedExercise)}
-          allExercises={allExercisesForModalAutocomplete} // Use global list for autocomplete
+          allExercises={allExercisesForModalAutocomplete}
           dayId={dayIdForModal}
           initialData={exerciseToEdit}
         />
       )}
+
+      <Dialog open={isNewPlanDialogVisible} onOpenChange={setIsNewPlanDialogVisible}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Workout Plan</DialogTitle>
+            <DialogDescription>
+              Enter a name for your new workout plan. You can add days and exercises after creating it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="new-plan-name" className="text-right">
+                Plan Name
+              </Label>
+              <Input
+                id="new-plan-name"
+                value={newPlanNameInput}
+                onChange={(e) => setNewPlanNameInput(e.target.value)}
+                className="col-span-3"
+                placeholder="e.g., My Strength Focus"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewPlanDialogVisible(false)}>Cancel</Button>
+            <Button onClick={handleActualCreateNewPlan}>Create Plan</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
-
