@@ -1,5 +1,8 @@
 
-import { getWorkoutByDay as getWorkoutByDayFromActivePlan, getActiveWorkoutPlan } from '@/lib/workout-plan-service'; // Updated import
+// src/app/workout/[day]/page.tsx
+'use client'; // Add this directive
+
+import { getWorkoutByDay as getWorkoutByDayFromActivePlan } from '@/lib/workout-plan-service'; // Corrected to use the direct function name
 import WorkoutView from '@/components/workout/workout-view';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertTriangle } from 'lucide-react';
