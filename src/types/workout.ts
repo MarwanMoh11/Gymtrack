@@ -26,8 +26,8 @@ export type Exercise = {
   isStretch?: boolean;
   isFoamRoll?: boolean;
   isRecovery?: boolean;
-  isSkill?: boolean; // New flag for skill work
-  isMobility?: boolean; // New flag for mobility work
+  isSkill?: boolean; 
+  isMobility?: boolean; 
   unit?: 'reps' | 's' | 'min';
 };
 
@@ -37,6 +37,9 @@ export type WorkoutDay = {
   title: string;
   exercises: Exercise[];
   notes?: string;
+  mapsToActualDayOfWeek?: number; // 0 for Sunday, 1 for Monday, etc.
+  isRecovery?: boolean; // Added from Calisthenics plan
+  isConditioning?: boolean; // Added from Calisthenics plan
 };
 
 export type WeeklyPlan = WorkoutDay[];
@@ -70,4 +73,3 @@ export type NewSetData = {
   targetWeight: string;
   unit: 'reps' | 's' | 'min';
 };
-
