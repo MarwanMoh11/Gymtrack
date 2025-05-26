@@ -5,24 +5,21 @@
 // For now, it can remain for the /workout/[day] pages, but those will be inconsistent
 // with the new logging flow until they are also updated.
 
-'use client';
+'use client'; // THIS IS NOW A CLIENT COMPONENT
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link'; // Added import for Link
-import type { WorkoutDay, DailyLog, LoggedSetData, Exercise } from '@/types/workout';
-// ExerciseCard is no longer used here for the primary logging view.
-// import ExerciseCard from './exercise-card'; 
+import type { WorkoutDay, DailyLog, Exercise } from '@/types/workout';
 import DayProgress from './day-progress';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardDescription, CardHeader, CardTitle, CardFooter, CardContent } from '../ui/card'; // Added CardContent
-// Target weight logic might still be relevant if this page is kept for other days.
-// import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
+import { Card, CardDescription, CardHeader, CardTitle, CardFooter, CardContent } from '../ui/card';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading';
-import { CheckSquare, AlertTriangle, ArrowRight } from 'lucide-react'; // Added ArrowRight
+import { CheckSquare, AlertTriangle, ArrowRight } from 'lucide-react';
+import { getWorkoutByDay as getWorkoutByDayFromActivePlan } from '@/lib/workout-plan-service'; // Updated to use service
 
 interface WorkoutViewProps {
-  workoutDay: WorkoutDay;
+  dayId: string; // Prop passed from Server Component page
 }
 
 const getCurrentDateString = (): string => {
@@ -34,13 +31,15 @@ function getLocalStorageKey(dayId: string, date: string): string {
 }
 
 // Simplified progress calculation, as detailed logging is elsewhere
-const calculateWorkoutProgress = (workoutDay: WorkoutDay, dailyLog: DailyLog) => {
+const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: DailyLog) => {
+  if (!workoutDay) return { completedSets: 0, totalSets: 0, score: 0 };
+
   let totalSets = 0;
   let completedSets = 0;
 
   workoutDay.exercises.forEach(exercise => {
     const exerciseLog = dailyLog[exercise.id];
-    const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+    const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => set[set.id]?.isCompleted === false);
 
     if (!isSkipped) {
         exercise.sets.forEach(() => {
@@ -61,19 +60,23 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay, dailyLog: DailyLog) =>
 };
 
 
-export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
+export default function WorkoutView({ dayId }: WorkoutViewProps) { // Accept dayId as prop
+  const [workoutDay, setWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
-  // const [effectiveTargetWeightsKey, setEffectiveTargetWeightsKey] = useState(0); 
   const { toast } = useToast();
 
   useEffect(() => {
     const dateStr = getCurrentDateString();
     setCurrentDate(dateStr);
 
-    if (typeof window !== 'undefined') {
-      const key = getLocalStorageKey(workoutDay.id, dateStr);
+    // Fetch workout day using the dayId prop
+    const fetchedWorkoutDay = getWorkoutByDayFromActivePlan(dayId);
+    setWorkoutDay(fetchedWorkoutDay);
+
+    if (typeof window !== 'undefined' && fetchedWorkoutDay) {
+      const key = getLocalStorageKey(fetchedWorkoutDay.id, dateStr);
       const storedLog = localStorage.getItem(key);
       if (storedLog) {
         try {
@@ -86,16 +89,12 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       } else {
         setDailyLog({}); 
       }
-      setIsInitialized(true);
-    } else {
-        setIsInitialized(true); 
     }
-  }, [workoutDay.id]); 
-
-  // This component no longer directly handles logging sets. 
-  // It only displays progress based on localStorage.
+    setIsInitialized(true);
+  }, [dayId]); // Depend on dayId prop
 
   const handleClearDayLog = useCallback(() => {
+    if (!workoutDay) return;
     setDailyLog({});
     if (typeof window !== 'undefined') {
         localStorage.removeItem(getLocalStorageKey(workoutDay.id, currentDate));
@@ -104,13 +103,32 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
       title: "Log Cleared",
       description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
     });
-    // setEffectiveTargetWeightsKey(prev => prev + 1);
-  }, [workoutDay.id, workoutDay.dayName, currentDate, toast]);
+  }, [workoutDay, currentDate, toast]);
   
   const { completedSets, totalSets, score } = calculateWorkoutProgress(workoutDay, dailyLog);
 
-  if (!isInitialized) {
+  if (!isInitialized || workoutDay === undefined) {
     return <LoadingWorkoutPage />;
+  }
+
+  if (!workoutDay) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card className="border-destructive">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle /> Workout Not Found
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p>No workout plan found for the day ID: "{dayId}". Check your plan or the URL.</p>
+            <Button asChild variant="link" className="mt-2">
+                <Link href="/workout-plan">Manage Workout Plans</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
   
   const isExerciseCompleted = (exercise: Exercise): boolean => {
@@ -157,7 +175,7 @@ export default function WorkoutView({ workoutDay }: WorkoutViewProps) {
         {workoutDay.exercises.map((exercise) => {
            const exerciseCompleted = isExerciseCompleted(exercise);
            const exerciseLog = dailyLog[exercise.id];
-           const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+           const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => set[set.id]?.isCompleted === false);
 
           return (
             <Card key={exercise.id} className="shadow-md hover:shadow-lg transition-shadow duration-300">

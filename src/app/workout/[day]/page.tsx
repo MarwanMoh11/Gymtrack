@@ -1,12 +1,7 @@
 
 // src/app/workout/[day]/page.tsx
-'use client'; // Add this directive
-
-import { getWorkoutByDay as getWorkoutByDayFromActivePlan } from '@/lib/workout-plan-service'; // Corrected to use the direct function name
+// Ensure NO 'use client'; directive is present in this file.
 import WorkoutView from '@/components/workout/workout-view';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertTriangle } from 'lucide-react';
-import Link from 'next/link';
 import { defaultNamedPlans } from '@/data/workout-data'; // For generateStaticParams
 
 type WorkoutPageProps = {
@@ -15,32 +10,9 @@ type WorkoutPageProps = {
   };
 };
 
+// This page is a Server Component. It passes the dayId to the Client Component.
 export default function WorkoutPage({ params }: WorkoutPageProps) {
-  // Fetch workout day from the *active* plan
-  const workoutDay = getWorkoutByDayFromActivePlan(params.day);
-
-  if (!workoutDay) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <Card className="border-destructive">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle /> Workout Not Found
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>The workout for "{params.day}" could not be found in the active plan.</p>
-            <p className="mt-2">
-              Please check the URL or return to <Link href="/dashboard/today" className="underline hover:text-primary">Today's Session</Link>.
-              Or <Link href="/workout-plan" className="underline hover:text-primary">manage your active plan</Link>.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  return <WorkoutView workoutDay={workoutDay} />;
+  return <WorkoutView dayId={params.day} />; // Pass dayId as a prop
 }
 
 export async function generateStaticParams() {
@@ -56,3 +28,4 @@ export async function generateStaticParams() {
   });
   return params;
 }
+
