@@ -11,12 +11,24 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowRight, CalendarDays, Edit, Save, XCircle, PlusCircle, Trash2, ArrowUp, ArrowDown, Info, CheckCircle, WandSparkles } from 'lucide-react';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import AddExerciseModal from '@/components/workout-plan/add-exercise-modal';
 import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data';
 import { produce } from 'immer';
+
+const daysOfWeekMap: { name: string, value: number }[] = [
+  { name: "Unassigned", value: -1 },
+  { name: "Sunday", value: 0 },
+  { name: "Monday", value: 1 },
+  { name: "Tuesday", value: 2 },
+  { name: "Wednesday", value: 3 },
+  { name: "Thursday", value: 4 },
+  { name: "Friday", value: 5 },
+  { name: "Saturday", value: 6 },
+];
 
 export default function WorkoutPlanPage() {
   const [allPlans, setAllPlans] = useState<NamedWorkoutPlan[]>([]);
@@ -64,7 +76,7 @@ export default function WorkoutPlanPage() {
   };
 
   // --- Editing logic for the *active* plan ---
-  const handleDayDetailChange = (dayId: string, field: 'dayName' | 'title' | 'notes', value: string) => {
+  const handleDayDetailChange = (dayId: string, field: keyof WorkoutDay, value: string | number | undefined) => {
     setEditableActivePlan(
       produce(editableActivePlan, draft => {
         const day = draft.find(d => d.id === dayId);
@@ -183,6 +195,7 @@ export default function WorkoutPlanPage() {
       title: 'Workout Title (Click to Edit)',
       exercises: [],
       notes: 'Add exercises and notes for this day.',
+      mapsToActualDayOfWeek: -1, // Default to Unassigned
     };
     setEditableActivePlan(
       produce(editableActivePlan, draft => {
@@ -302,6 +315,22 @@ export default function WorkoutPlanPage() {
                                 className="text-sm h-8"
                             />
                             </div>
+                             <div>
+                                <Label htmlFor={`${day.id}-mapsToActualDayOfWeek`} className="text-xs font-medium text-muted-foreground">Assign to Day of Week</Label>
+                                <Select
+                                  value={day.mapsToActualDayOfWeek !== undefined && day.mapsToActualDayOfWeek !== -1 ? String(day.mapsToActualDayOfWeek) : "-1"}
+                                  onValueChange={(value) => handleDayDetailChange(day.id, 'mapsToActualDayOfWeek', parseInt(value, 10))}
+                                >
+                                  <SelectTrigger id={`${day.id}-mapsToActualDayOfWeek`} className="h-8 text-sm">
+                                    <SelectValue placeholder="Select day of week" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {daysOfWeekMap.map(d => (
+                                      <SelectItem key={d.value} value={String(d.value)}>{d.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             <div>
                             <Label htmlFor={`${day.id}-notes`} className="text-xs font-medium text-muted-foreground">Day Notes</Label>
                             <Input
@@ -317,6 +346,11 @@ export default function WorkoutPlanPage() {
                         <>
                             <CardTitle className="text-xl font-semibold text-primary">{day.dayName}</CardTitle>
                             <CardDescription className="text-sm text-muted-foreground">{day.title}</CardDescription>
+                            {day.mapsToActualDayOfWeek !== undefined && day.mapsToActualDayOfWeek !== -1 && (
+                                <CardDescription className="text-xs text-muted-foreground/80 mt-1">
+                                    Scheduled for: {daysOfWeekMap.find(d => d.value === day.mapsToActualDayOfWeek)?.name || 'Not Assigned'}
+                                </CardDescription>
+                            )}
                         </>
                         )}
                     </CardHeader>
@@ -433,3 +467,4 @@ export default function WorkoutPlanPage() {
     </div>
   );
 }
+

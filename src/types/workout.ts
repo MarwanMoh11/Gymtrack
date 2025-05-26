@@ -37,9 +37,9 @@ export type WorkoutDay = {
   title: string;
   exercises: Exercise[];
   notes?: string;
-  mapsToActualDayOfWeek?: number; // 0 for Sunday, 1 for Monday, etc.
-  isRecovery?: boolean; // Added from Calisthenics plan
-  isConditioning?: boolean; // Added from Calisthenics plan
+  mapsToActualDayOfWeek?: number; // 0 for Sunday, 1 for Monday, etc. (-1 or undefined for unassigned)
+  isRecovery?: boolean; 
+  isConditioning?: boolean; 
 };
 
 export type WeeklyPlan = WorkoutDay[];
@@ -73,3 +73,4 @@ export type NewSetData = {
   targetWeight: string;
   unit: 'reps' | 's' | 'min';
 };
+
