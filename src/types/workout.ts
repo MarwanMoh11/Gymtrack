@@ -26,6 +26,8 @@ export type Exercise = {
   isStretch?: boolean;
   isFoamRoll?: boolean;
   isRecovery?: boolean;
+  isSkill?: boolean; // New flag for skill work
+  isMobility?: boolean; // New flag for mobility work
   unit?: 'reps' | 's' | 'min';
 };
 
@@ -38,6 +40,14 @@ export type WorkoutDay = {
 };
 
 export type WeeklyPlan = WorkoutDay[];
+
+export type NamedWorkoutPlan = {
+  id: string; // Unique ID for the plan (e.g., 'default-strength', 'calisthenics-beast')
+  name: string; // User-friendly name (e.g., "Original Strength Plan", "Calisthenics Beast")
+  plan: WeeklyPlan; // The actual array of WorkoutDay
+  isActive: boolean; // Only one plan can be active at a time
+  description?: string; // Optional description of the plan
+};
 
 export type LoggedSetData = {
   reps?: string | number;
@@ -60,3 +70,4 @@ export type NewSetData = {
   targetWeight: string;
   unit: 'reps' | 's' | 'min';
 };
+

@@ -1,7 +1,7 @@
 
-import type { WeeklyPlan, Exercise } from '@/types/workout';
+import type { WeeklyPlan, Exercise, NamedWorkoutPlan } from '@/types/workout';
 
-export const weeklyPlan: WeeklyPlan = [
+export const defaultStrengthPlan: WeeklyPlan = [
   {
     id: 'monday',
     dayName: 'Monday',
@@ -44,8 +44,7 @@ export const weeklyPlan: WeeklyPlan = [
         id: 'mon-ex4', name: 'Seated Shoulder Press', targetWeight: '65 kg', unit: 'reps',
         description: 'An overhead pressing exercise, usually performed with a barbell or dumbbells while seated, targeting the deltoid muscles. Can be done with DBs (as in current video) or Barbell.',
         muscleGroups: ['Shoulders (All Heads)', 'Triceps'],
-        videoUrl: 'https://www.youtube.com/embed/qEwKCR5JCog', // DB Version
-        // Alt Barbell: https://www.youtube.com/embed/-t7fuZ0KhDA
+        videoUrl: 'https://www.youtube.com/embed/qEwKCR5JCog',
         sets: [
           { id: 'mon-ex4-set1', targetReps: 12 },
           { id: 'mon-ex4-set2', targetReps: 10 },
@@ -267,8 +266,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'wed-ex8', name: 'Core – Ab Wheel Rollouts or Cable Crunches', unit: 'reps', isCore: true,
         description: 'Ab wheel rollouts are a challenging core exercise engaging the entire abdominal wall. Cable crunches are a weighted abdominal exercise.',
-        videoUrl: 'https://www.youtube.com/embed/sVsrKCSqYic', // Ab Wheel
-        // Alt Cable Crunches: https://www.youtube.com/embed/Fz8mx4U7g2Y
+        videoUrl: 'https://www.youtube.com/embed/sVsrKCSqYic',
         muscleGroups: ['Abs', 'Core'],
         sets: [
           { id: 'wed-ex8-set1', targetReps: 15 },
@@ -401,7 +399,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'fri-ex3', name: 'Advanced Push-Ups', targetWeight: 'bodyweight', unit: 'reps',
         description: 'Variations of the standard push-up that increase difficulty, such as decline push-ups, archer push-ups, or one-arm push-ups. Target chest, shoulders, and triceps.',
-        videoUrl: 'https://www.youtube.com/embed/Pkj8LLRsoDw', // Decline Push-up
+        videoUrl: 'https://www.youtube.com/embed/Pkj8LLRsoDw',
         muscleGroups: ['Chest', 'Shoulders', 'Triceps', 'Core'],
         sets: [
           { id: 'fri-ex3-set1', targetReps: 'to failure / 18' },
@@ -423,7 +421,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'fri-ex5', name: 'Hanging Windshield Wipers or L-Sit', unit: 'reps', isCore: true, targetWeight: 'bodyweight',
         description: 'Advanced core exercises. Windshield wipers involve twisting the legs side to side while hanging. L-sits involve holding the legs straight out in front while supporting the body.',
-        videoUrl: 'https://www.youtube.com/embed/PzAmVcjY2X8', // L-Sit
+        videoUrl: 'https://www.youtube.com/embed/PzAmVcjY2X8',
         muscleGroups: ['Abs', 'Obliques', 'Hip Flexors', 'Core'],
         sets: [
           { id: 'fri-ex5-set1', targetReps: '10 (or hold)' },
@@ -474,21 +472,21 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'sat-ex2', name: 'Accelerations', targetWeight: 'bodyweight', isWarmup: true, isActivity: true,
         description: 'Short sprints with increasing speed to prepare for explosive movements during the match.',
-        videoUrl: '', // No specific general video
+        videoUrl: '',
         muscleGroups: ['Legs', 'Cardio'],
         sets: [{ id: 'sat-ex2-set1', targetReps: '3 × 20 m all‐out' }],
       },
       {
         id: 'sat-ex3', name: 'Football Match', isMatch: true, isActivity: true, targetWeight: 'N/A',
         description: 'Participation in a football (soccer) match.',
-        videoUrl: '', // Not applicable
+        videoUrl: '',
         muscleGroups: ['Full Body', 'Cardio', 'Agility'],
         sets: [{ id: 'sat-ex3-set1', targetReps: 'Match play (~90 min)' }],
       },
       {
         id: 'sat-ex4', name: 'Cool-Down Jog/Walk', targetWeight: 'bodyweight', isActivity: true,
         description: 'Light jogging or walking to gradually lower heart rate and aid recovery after the match.',
-        videoUrl: '', // Not applicable
+        videoUrl: '',
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'sat-ex4-set1', targetReps: '10 min easy' }],
       },
@@ -513,7 +511,7 @@ export const weeklyPlan: WeeklyPlan = [
       {
         id: 'sun-ex1', name: 'Walking', isRecovery: true, isActivity: true, targetWeight: 'bodyweight',
         description: 'Low-intensity walking to promote blood flow and recovery without stressing the body.',
-        videoUrl: '', // Not applicable
+        videoUrl: '',
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'sun-ex1-set1', targetReps: '1 hour, 10,000 Steps' }],
       },
@@ -561,7 +559,353 @@ export const weeklyPlan: WeeklyPlan = [
       },
     ],
   },
+];
+
+export const calisthenicsBeastPlan: WeeklyPlan = [
   {
+    id: 'cal-monday',
+    dayName: 'Monday',
+    title: 'Upper Body Strength & Skill (Pull & Core)',
+    notes: 'Warm-up thoroughly. Focus on form for all exercises.',
+    exercises: [
+      {
+        id: 'cal-mon-skill-hs', name: 'Skill: Handstand Practice', isSkill: true,
+        description: 'Use wall for support if needed. Focus on stacking joints, controlled breathing. If comfortable, practice free handstand attempts.',
+        videoUrl: 'https://www.youtube.com/embed/xsk6P93s5ww', muscleGroups: ['Shoulders', 'Core', 'Triceps', 'Traps'],
+        sets: [
+          { id: 'cal-mon-skill-hs-s1', targetReps: '30-60', unit: 's' },
+          { id: 'cal-mon-skill-hs-s2', targetReps: '30-60', unit: 's' },
+          { id: 'cal-mon-skill-hs-s3', targetReps: '30-60', unit: 's' },
+        ],
+      },
+      {
+        id: 'cal-mon-pullups-weighted', name: 'Weighted Pull-Ups / Lat Pulldown',
+        targetWeight: 'Bodyweight / Add 2.5-10 kg / Lat Pulldown 80% BW',
+        description: 'Use weight belt/dumbbell or Lat Pulldown machine for assistance/regression. Slow, controlled reps.',
+        videoUrl: 'https://www.youtube.com/embed/huR4B2aDhKk', muscleGroups: ['Lats', 'Biceps', 'Upper Back'],
+        sets: [
+          { id: 'cal-mon-pullups-w-s1', targetReps: '5-8' },
+          { id: 'cal-mon-pullups-w-s2', targetReps: '5-8' },
+          { id: 'cal-mon-pullups-w-s3', targetReps: '5-8' },
+          { id: 'cal-mon-pullups-w-s4', targetReps: '5-8' },
+        ],
+      },
+      {
+        id: 'cal-mon-archer-pullups', name: 'Archer Pull-Ups / Wide Pull-Ups', targetWeight: 'Bodyweight',
+        description: 'Perform Archer Pull-Ups, focusing on shifting weight to one arm, or Wide Pull-Ups for broader lat engagement.',
+        videoUrl: 'https://www.youtube.com/embed/IWj7JgD0gB8', muscleGroups: ['Lats', 'Biceps', 'Shoulders'],
+        sets: [
+          { id: 'cal-mon-archer-s1', targetReps: '4-6 (each side for Archer)' },
+          { id: 'cal-mon-archer-s2', targetReps: '4-6 (each side for Archer)' },
+          { id: 'cal-mon-archer-s3', targetReps: '4-6 (each side for Archer)' },
+        ],
+      },
+      {
+        id: 'cal-mon-inverted-rows', name: 'Australian Pull-Ups (Inverted Rows)', targetWeight: 'Bodyweight',
+        description: 'Use Smith Machine bar or low bar in power cage. Adjust bar height to change difficulty.',
+        videoUrl: 'https://www.youtube.com/embed/D7jvi0tN84U', muscleGroups: ['Upper Back', 'Biceps', 'Lats'],
+        sets: [
+          { id: 'cal-mon-invrow-s1', targetReps: '10-15' },
+          { id: 'cal-mon-invrow-s2', targetReps: '10-15' },
+          { id: 'cal-mon-invrow-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'cal-mon-lsit', name: 'L-Sit Holds', targetWeight: 'Bodyweight', isCore: true,
+        description: 'Use parallel bars, dip station, or floor. Aim for straight legs and 90-degree angle.',
+        videoUrl: 'https://www.youtube.com/embed/PzAmVcjY2X8', muscleGroups: ['Core', 'Hip Flexors', 'Triceps', 'Shoulders'],
+        sets: [
+          { id: 'cal-mon-lsit-s1', targetReps: '10-20s hold', unit: 's' },
+          { id: 'cal-mon-lsit-s2', targetReps: '10-20s hold', unit: 's' },
+          { id: 'cal-mon-lsit-s3', targetReps: '10-20s hold', unit: 's' },
+        ],
+      },
+      {
+        id: 'cal-mon-hanging-leg-raises', name: 'Hanging Leg Raises / Toes to Bar', targetWeight: 'Bodyweight', isCore: true,
+        description: 'Hang from a pull-up bar. Raise legs straight up (or knees for regression) towards the bar.',
+        videoUrl: 'https://www.youtube.com/embed/1A0Sqg_M39k', muscleGroups: ['Abs (Lower)', 'Hip Flexors', 'Core'],
+        sets: [
+          { id: 'cal-mon-hlr-s1', targetReps: '10-15' },
+          { id: 'cal-mon-hlr-s2', targetReps: '10-15' },
+          { id: 'cal-mon-hlr-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'cal-mon-plank', name: 'Core – Plank', targetWeight: 'Bodyweight', unit: 's', isCore: true,
+        description: 'Maintain a straight line from head to heels, engaging the core. Avoid letting hips sag.',
+        videoUrl: 'https://www.youtube.com/embed/ASdvN_XEl_c', muscleGroups: ['Core', 'Abs', 'Obliques', 'Lower Back'],
+        sets: [
+          { id: 'cal-mon-plank-s1', targetReps: '60-90', unit: 's' },
+          { id: 'cal-mon-plank-s2', targetReps: '60-90', unit: 's' },
+          { id: 'cal-mon-plank-s3', targetReps: 'to failure', unit: 's' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'cal-tuesday',
+    dayName: 'Tuesday',
+    title: 'Lower Body & Active Mobility',
+    exercises: [
+      {
+        id: 'cal-tue-pistol-squats', name: 'Pistol Squats (Assisted if needed)', targetWeight: 'Bodyweight',
+        description: 'Single-leg squat. Use TRX, rack, or stable object for support if needed to maintain balance and depth.',
+        videoUrl: 'https://www.youtube.com/embed/vq5-vdgJc0I', muscleGroups: ['Quads', 'Glutes', 'Hamstrings', 'Core', 'Balance'],
+        sets: [
+          { id: 'cal-tue-pistol-s1', targetReps: '5-8 (each leg)' },
+          { id: 'cal-tue-pistol-s2', targetReps: '5-8 (each leg)' },
+          { id: 'cal-tue-pistol-s3', targetReps: '5-8 (each leg)' },
+        ],
+      },
+      {
+        id: 'cal-tue-bulgarian-split-squats', name: 'Bulgarian Split Squats', targetWeight: 'Bodyweight (or add DBs)',
+        description: 'Rear foot elevated on a bench or plyo box. Focus on controlled descent and driving up through the front heel.',
+        videoUrl: 'https://www.youtube.com/embed/2C-uNgKwPLE', muscleGroups: ['Quads', 'Glutes', 'Hamstrings'],
+        sets: [
+          { id: 'cal-tue-bss-s1', targetReps: '10-12 (each leg)' },
+          { id: 'cal-tue-bss-s2', targetReps: '10-12 (each leg)' },
+          { id: 'cal-tue-bss-s3', targetReps: '10-12 (each leg)' },
+        ],
+      },
+      {
+        id: 'cal-tue-glute-bridges', name: 'Glute Bridges / Single Leg Glute Bridges', targetWeight: 'Bodyweight',
+        description: 'Lie on your back, knees bent, feet flat. Lift hips towards the ceiling, squeezing glutes. Progress to single leg.',
+        videoUrl: 'https://www.youtube.com/embed/8bbE64Nu_2U', muscleGroups: ['Glutes', 'Hamstrings', 'Core'],
+        sets: [
+          { id: 'cal-tue-gb-s1', targetReps: '15-20' },
+          { id: 'cal-tue-gb-s2', targetReps: '15-20' },
+          { id: 'cal-tue-gb-s3', targetReps: '15-20' },
+        ],
+      },
+      {
+        id: 'cal-tue-calf-raises', name: 'Calf Raises (Bodyweight or Smith Machine)', targetWeight: 'Bodyweight / Add light weight',
+        description: 'Stand with balls of feet on an elevated surface (optional). Raise heels as high as possible, then lower slowly.',
+        videoUrl: 'https://www.youtube.com/embed/JbyjNymZOt0', muscleGroups: ['Calves'],
+        sets: [
+          { id: 'cal-tue-cr-s1', targetReps: '25-30' },
+          { id: 'cal-tue-cr-s2', targetReps: '25-30' },
+          { id: 'cal-tue-cr-s3', targetReps: '25-30' },
+        ],
+      },
+      {
+        id: 'cal-tue-mobility-circuit', name: 'Mobility Circuit', isMobility: true,
+        description: 'Perform 2-3 rounds, 30-45s per exercise. Focus on range of motion and breathing.',
+        videoUrl: 'https://www.youtube.com/embed/L_xrDAtykMI', // General mobility routine
+        muscleGroups: ['Full Body', 'Flexibility'],
+        sets: [
+          { id: 'cal-tue-mob-s1', targetReps: 'Couch Stretch 30-45s/side' },
+          { id: 'cal-tue-mob-s2', targetReps: 'Pigeon Stretch 30-45s/side' },
+          { id: 'cal-tue-mob-s3', targetReps: 'Hip Flexor Stretch 30-45s/side' },
+          { id: 'cal-tue-mob-s4', targetReps: 'Cat-Cow 30-45s' },
+          { id: 'cal-tue-mob-s5', targetReps: 'Thoracic Spine Rotations 30-45s' },
+        ],
+        notes: 'Repeat circuit 2-3 times'
+      },
+    ],
+  },
+   {
+    id: 'cal-wednesday',
+    dayName: 'Wednesday',
+    title: 'Upper Body Strength & Skill (Push & Core)',
+    exercises: [
+      {
+        id: 'cal-wed-skill-planche', name: 'Skill: Leaning Forward Push-ups / Pseudo Planche Push-ups', isSkill: true, targetWeight: 'Bodyweight',
+        description: 'Focus on leaning forward as much as possible, engaging core. Can be done on floor or parallel bars for wrist comfort.',
+        videoUrl: 'https://www.youtube.com/embed/hHXW1q4iJ08', muscleGroups: ['Shoulders (Front)', 'Chest', 'Triceps', 'Core'],
+        sets: [
+          { id: 'cal-wed-skill-planche-s1', targetReps: '5-8' },
+          { id: 'cal-wed-skill-planche-s2', targetReps: '5-8' },
+          { id: 'cal-wed-skill-planche-s3', targetReps: '5-8' },
+        ],
+      },
+      {
+        id: 'cal-wed-dips-weighted', name: 'Weighted Dips / Assisted Dips',
+        targetWeight: 'Bodyweight / Add 2.5-10 kg / Use assisted dip machine',
+        description: 'Use weight belt/dumbbell or Dip Machine for assistance/regression. Controlled descent, full range of motion.',
+        videoUrl: 'https://www.youtube.com/embed/2z8JmcrW-As', muscleGroups: ['Triceps', 'Chest (Lower)', 'Shoulders (Front)'],
+        sets: [
+          { id: 'cal-wed-dips-w-s1', targetReps: '8-12' },
+          { id: 'cal-wed-dips-w-s2', targetReps: '8-12' },
+          { id: 'cal-wed-dips-w-s3', targetReps: '8-12' },
+          { id: 'cal-wed-dips-w-s4', targetReps: '8-12' },
+        ],
+      },
+      {
+        id: 'cal-wed-decline-pushups', name: 'Decline Push-Ups', targetWeight: 'Bodyweight',
+        description: 'Feet elevated on a bench or plyo box to target upper chest and shoulders more intensely.',
+        videoUrl: 'https://www.youtube.com/embed/Pkj8LLRsoDw', muscleGroups: ['Chest (Upper)', 'Shoulders (Front)', 'Triceps'],
+        sets: [
+          { id: 'cal-wed-decline-s1', targetReps: '12-15' },
+          { id: 'cal-wed-decline-s2', targetReps: '12-15' },
+          { id: 'cal-wed-decline-s3', targetReps: '12-15' },
+        ],
+      },
+      {
+        id: 'cal-wed-pike-hspu', name: 'Pike Push-Ups / Wall Handstand Push-Ups', targetWeight: 'Bodyweight',
+        description: 'Pike push-ups with feet on floor or elevated for progression. Or, Wall Handstand Push-Ups (facing wall or back to wall).',
+        videoUrl: 'https://www.youtube.com/embed/sposKfusNqA', muscleGroups: ['Shoulders', 'Triceps', 'Traps'],
+        sets: [
+          { id: 'cal-wed-pike-s1', targetReps: '8-12' },
+          { id: 'cal-wed-pike-s2', targetReps: '8-12' },
+          { id: 'cal-wed-pike-s3', targetReps: '8-12' },
+        ],
+      },
+      {
+        id: 'cal-wed-triceps-ext', name: 'Bodyweight Triceps Extensions', targetWeight: 'Bodyweight',
+        description: 'E.g., Triceps extensions on parallel bars/rings (if available), or close-grip push-ups with elbows tucked.',
+        videoUrl: 'https://www.youtube.com/embed/h3g3x1q4R3A', // Example: Triceps extension on bar
+        muscleGroups: ['Triceps'],
+        sets: [
+          { id: 'cal-wed-tricep-s1', targetReps: '10-15' },
+          { id: 'cal-wed-tricep-s2', targetReps: '10-15' },
+          { id: 'cal-wed-tricep-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'cal-wed-dragon-flags', name: 'Dragon Flags / Reverse Crunches', targetWeight: 'Bodyweight', isCore: true,
+        description: 'Use sturdy bench or decline bench. Dragon flags for advanced core strength, reverse crunches for regression.',
+        videoUrl: 'https://www.youtube.com/embed/moyh9_hIIA0', muscleGroups: ['Abs', 'Core', 'Obliques'],
+        sets: [
+          { id: 'cal-wed-dragon-s1', targetReps: '8-12' },
+          { id: 'cal-wed-dragon-s2', targetReps: '8-12' },
+          { id: 'cal-wed-dragon-s3', targetReps: '8-12' },
+        ],
+      },
+      {
+        id: 'cal-wed-side-plank', name: 'Core – Side Plank', targetWeight: 'Bodyweight', unit: 's', isCore: true,
+        description: 'Maintain a straight line from head to feet, supporting body on one forearm/hand. Engage obliques.',
+        videoUrl: 'https://www.youtube.com/embed/1h4g9sQxV0A', muscleGroups: ['Obliques', 'Core', 'Abs'],
+        sets: [
+          { id: 'cal-wed-sideplank-s1', targetReps: '45-60 (each side)', unit: 's' },
+          { id: 'cal-wed-sideplank-s2', targetReps: '45-60 (each side)', unit: 's' },
+          { id: 'cal-wed-sideplank-s3', targetReps: '45-60 (each side)', unit: 's' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'cal-thursday',
+    dayName: 'Thursday',
+    title: 'Active Recovery / Light Cardio & Mobility',
+    isRecovery: true,
+    exercises: [
+      {
+        id: 'cal-thu-cardio', name: 'Light Cardio', isActivity: true,
+        description: 'Choose preference: Treadmill (jogging/brisk walking), Elliptical, Stationary Bike.',
+        videoUrl: '', muscleGroups: ['Cardio', 'Full Body'],
+        sets: [{ id: 'cal-thu-cardio-s1', targetReps: '30-45', unit: 'min', notes: 'Light to moderate intensity' }],
+      },
+      {
+        id: 'cal-thu-foam-roll', name: 'Foam Rolling', isFoamRoll: true, isMobility: true,
+        description: 'Use gym\'s foam rollers. Focus on Quads, Hamstrings, Glutes, Lats, Chest, Shoulders.',
+        videoUrl: 'https://www.youtube.com/embed/fTvZ47nN3XU', // Full body foam roll
+        muscleGroups: ['Full Body'],
+        sets: [{ id: 'cal-thu-foam-s1', targetReps: '2-3 min per muscle group' }],
+      },
+      {
+        id: 'cal-thu-static-stretch', name: 'Static Stretching', isStretch: true, isMobility: true,
+        description: 'Hold each static stretch for 30 seconds, 2-3 times. Focus on major muscle groups.',
+        videoUrl: 'https://www.youtube.com/embed/Sj_N63D0Zck', // Full body static stretch
+        muscleGroups: ['Full Body', 'Flexibility'],
+        sets: [{ id: 'cal-thu-stretch-s1', targetReps: '30s per stretch, 2-3x' }],
+      },
+      {
+        id: 'cal-thu-joint-rotations', name: 'Joint Rotations & Mobility Drills', isMobility: true,
+        description: 'Ankle rotations, hip circles, arm circles, wrist stretches.',
+        videoUrl: 'https://www.youtube.com/embed/83hWIc0997g', // Joint mobility routine
+        muscleGroups: ['Joints', 'Full Body'],
+        sets: [{ id: 'cal-thu-joint-s1', targetReps: '5-10 min total' }],
+      },
+    ],
+  },
+  {
+    id: 'cal-friday',
+    dayName: 'Friday',
+    title: 'Full Body Calisthenics Circuit (Endurance)',
+    notes: 'Perform as a circuit, minimal rest between exercises; 1-2 min rest between rounds. 3-4 rounds total.',
+    isConditioning: true,
+    exercises: [
+      {
+        id: 'cal-fri-pullups', name: 'Pull-Ups', targetWeight: 'Bodyweight',
+        description: 'Use pull-up bar.', videoUrl: 'https://www.youtube.com/embed/eGo4IYlbE5g', muscleGroups: ['Lats', 'Biceps'],
+        sets: [{ id: 'cal-fri-pullups-s1', targetReps: 'Max (target 8-12)' }],
+      },
+      {
+        id: 'cal-fri-pushups', name: 'Push-Ups', targetWeight: 'Bodyweight',
+        description: 'On floor or with push-up handles for wrist comfort.', videoUrl: 'https://www.youtube.com/embed/IODxDxX7oi4', muscleGroups: ['Chest', 'Triceps', 'Shoulders'],
+        sets: [{ id: 'cal-fri-pushups-s1', targetReps: 'Max (target 15-25)' }],
+      },
+      {
+        id: 'cal-fri-squats', name: 'Bodyweight Squats / Jump Squats', targetWeight: 'Bodyweight',
+        description: 'On gym floor. Jump squats for added intensity.', videoUrl: 'https://www.youtube.com/embed/U4s4mEQ5VqU', muscleGroups: ['Quads', 'Glutes', 'Hamstrings'],
+        sets: [{ id: 'cal-fri-squats-s1', targetReps: '15-20' }],
+      },
+      {
+        id: 'cal-fri-dips', name: 'Dips', targetWeight: 'Bodyweight',
+        description: 'Use dip station or parallel bars.', videoUrl: 'https://www.youtube.com/embed/2z8JmcrW-As', muscleGroups: ['Triceps', 'Chest', 'Shoulders'],
+        sets: [{ id: 'cal-fri-dips-s1', targetReps: 'Max (target 10-15)' }],
+      },
+      {
+        id: 'cal-fri-inverted-rows', name: 'Inverted Rows', targetWeight: 'Bodyweight',
+        description: 'Use Smith Machine bar or low bar in power cage.', videoUrl: 'https://www.youtube.com/embed/D7jvi0tN84U', muscleGroups: ['Upper Back', 'Biceps'],
+        sets: [{ id: 'cal-fri-invrow-s1', targetReps: '12-18' }],
+      },
+      {
+        id: 'cal-fri-burpees', name: 'Burpees', targetWeight: 'Bodyweight',
+        description: 'On gym floor. Full body explosive movement.', videoUrl: 'https://www.youtube.com/embed/JZQA08SlJnM', muscleGroups: ['Full Body', 'Cardio'],
+        sets: [{ id: 'cal-fri-burpees-s1', targetReps: '10-15' }],
+      },
+      {
+        id: 'cal-fri-plank', name: 'Plank', targetWeight: 'Bodyweight', unit: 's', isCore: true,
+        description: 'Hold with good form.', videoUrl: 'https://www.youtube.com/embed/ASdvN_XEl_c', muscleGroups: ['Core', 'Abs'],
+        sets: [{ id: 'cal-fri-plank-s1', targetReps: '45-60', unit: 's' }],
+      },
+    ],
+  },
+  {
+    id: 'cal-saturday',
+    dayName: 'Saturday',
+    title: 'Skill Development & Outdoor / Active Recreation',
+    exercises: [
+      {
+        id: 'cal-sat-skill-focus', name: 'Focused Skill Practice', isSkill: true,
+        description: 'Choose 1-2 skills (e.g., Front Lever, Planche, advanced Handstand). Use gym equipment like power rack, parallettes, wall. Work on progressions for 20-30 min, focusing on form and short, intense efforts.',
+        videoUrl: '', // User specific
+        muscleGroups: ['Skill-Dependent'],
+        sets: [
+          { id: 'cal-sat-skill-flt', targetReps: 'Front Lever Tucks: 3-5 sets, max hold (5-10s)' },
+          { id: 'cal-sat-skill-pll', targetReps: 'Planche Leans: 3-5 sets, max hold (5-10s)' },
+          { id: 'cal-sat-skill-hsh', targetReps: 'Handstand Holds: 3-5 sets, max hold (20-40s)' },
+        ],
+        notes: 'Choose 1-2 skills to focus on.'
+      },
+      {
+        id: 'cal-sat-outdoor-activity', name: 'Outdoor Activity / Active Recreation', isActivity: true,
+        description: 'Hiking, cycling, swimming, playing a sport, or just a long walk.',
+        videoUrl: '', muscleGroups: ['Full Body', 'Cardio'],
+        sets: [{ id: 'cal-sat-outdoor-s1', targetReps: '60-90 min', unit: 'min', notes: 'Enjoyable, moderate intensity' }],
+      },
+    ],
+  },
+  {
+    id: 'cal-sunday',
+    dayName: 'Sunday',
+    title: 'Complete Rest',
+    isRecovery: true,
+    notes: 'Allow your body to fully recover. Focus on good nutrition and hydration.',
+    exercises: [
+      {
+        id: 'cal-sun-rest', name: 'Rest Day', isActivity: true,
+        description: 'Focus on recovery, nutrition, and hydration. Light stretching if desired.',
+        videoUrl: '', muscleGroups: ['N/A'],
+        sets: [{ id: 'cal-sun-rest-s1', targetReps: 'Full day' }],
+      },
+    ],
+  },
+];
+
+// The existing exercise library
+export const exerciseLibrary: WeeklyPlan = [{
     id: 'exercise-library',
     dayName: 'Exercise Library',
     title: 'Reference Exercises (Not a Workout Day)',
@@ -834,45 +1178,79 @@ export const weeklyPlan: WeeklyPlan = [
         sets: [{ id: 'lib-bd-s1', targetReps: '10-12 per side' }, { id: 'lib-bd-s2', targetReps: '10-12 per side' }],
       }
     ],
-  }
+  }];
+
+export const defaultNamedPlans: NamedWorkoutPlan[] = [
+  {
+    id: 'default-strength-plan',
+    name: 'Original Strength Plan',
+    description: 'A balanced strength training program focusing on major compound lifts and accessory work.',
+    plan: defaultStrengthPlan,
+    isActive: true, // By default, the first plan is active
+  },
+  {
+    id: 'calisthenics-beast-plan',
+    name: 'Calisthenics Beast (Gym-Optimized)',
+    description: 'A calisthenics program leveraging gym access for enhanced progressions and skill work.',
+    plan: calisthenicsBeastPlan,
+    isActive: false,
+  },
 ];
 
-export const getWorkoutByDay = (dayId: string) => {
-  return weeklyPlan.find(day => day.id.toLowerCase() === dayId.toLowerCase());
+
+// Helper function to get a specific workout day from a given WeeklyPlan
+export const getWorkoutByDayFromPlan = (plan: WeeklyPlan, dayId: string): WorkoutDay | undefined => {
+  return plan.find(day => day.id.toLowerCase() === dayId.toLowerCase());
 };
 
-// Helper function to get all unique exercises for static param generation or autocomplete
-export const getAllExercisesFromPlan = (): Exercise[] => {
+// Helper function to get all unique exercises from a specific WeeklyPlan or all default plans
+export const getAllExercisesFromPlan = (specificPlan?: WeeklyPlan): Exercise[] => {
   const allExercisesMap = new Map<string, Exercise>();
-  weeklyPlan.forEach(day => {
-    // Do not include exercises from 'exercise-library' in the list of *plannable* exercises shown in UI,
-    // but do include them for autocomplete lookup. The filter for plannable exercises happens where getDays is used.
-    // For getAllExercisesFromPlan, we want everything for autocomplete.
-    day.exercises.forEach(exercise => {
-      if (!allExercisesMap.has(exercise.id)) {
-        allExercisesMap.set(exercise.id, exercise);
-      }
+  const plansToSearch = specificPlan ? [ { id: 'custom', name: 'Custom', plan: specificPlan, isActive: true} ] : defaultNamedPlans;
+
+  plansToSearch.forEach(namedPlan => {
+    namedPlan.plan.forEach(day => {
+      day.exercises.forEach(exercise => {
+        if (!allExercisesMap.has(exercise.id)) {
+          allExercisesMap.set(exercise.id, exercise);
+        }
+      });
     });
   });
-  return Array.from(allExercisesMap.values());
+  // Also include exercises from the standalone library for broader autocomplete
+  exerciseLibrary[0].exercises.forEach(exercise => {
+     if (!allExercisesMap.has(exercise.id)) {
+        allExercisesMap.set(exercise.id, exercise);
+      }
+  });
+  return Array.from(allExercisesMap.values()).sort((a,b) => a.name.localeCompare(b.name));
 };
 
-export const getExerciseById = (exerciseId: string): Exercise | undefined => {
-  for (const day of weeklyPlan) {
-    const foundExercise = day.exercises.find(ex => ex.id === exerciseId);
-    if (foundExercise) {
-      return foundExercise;
+export const getExerciseById = (exerciseId: string, specificPlan?: WeeklyPlan): Exercise | undefined => {
+  const plansToSearch = specificPlan ? [{ plan: specificPlan, name: "Specific", id:"specific", isActive: true }] : defaultNamedPlans;
+  
+  for (const namedPlan of plansToSearch) {
+    for (const day of namedPlan.plan) {
+      const foundExercise = day.exercises.find(ex => ex.id === exerciseId);
+      if (foundExercise) {
+        return foundExercise;
+      }
     }
   }
-  // This fallback is less critical now that getAllExercisesFromPlan sources from weeklyPlan directly,
-  // but kept for robustness.
-  const allExercises = getAllExercisesFromPlan();
+  // Check the library as a fallback
+  const libraryExercise = exerciseLibrary[0].exercises.find(ex => ex.id === exerciseId);
+  if (libraryExercise) return libraryExercise;
+
+  // Last resort: search all known exercises if not found in specific or default plans
+  const allExercises = getAllExercisesFromPlan(); // This will include library
   return allExercises.find(ex => ex.id === exerciseId);
 };
 
-// getDays is used to populate the workout plan page.
-// It should not include the 'exercise-library' pseudo-day.
-export const getDays = () => weeklyPlan.filter(day => day.id !== 'exercise-library').map(day => ({ id: day.id, dayName: day.dayName, title: day.title }));
+// getDays for a specific plan
+export const getDaysForPlan = (plan: WeeklyPlan) => plan.filter(day => day.id !== 'exercise-library').map(day => ({ id: day.id, dayName: day.dayName, title: day.title }));
 
 
-    
+// Old weeklyPlan export - DEPRECATED for direct use, use defaultNamedPlans and plan service instead
+export const weeklyPlan: WeeklyPlan = defaultStrengthPlan; // Kept for any direct legacy imports, but should be phased out.
+
+export { defaultStrengthPlan as originalWeeklyPlan }; // Exporting with a more specific name if needed

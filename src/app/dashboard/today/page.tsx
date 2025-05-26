@@ -4,15 +4,15 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { getWorkoutByDay } from '@/data/workout-data';
+import { getWorkoutByDay as getWorkoutByDayFromActivePlan, getActiveWorkoutPlan } from '@/lib/workout-plan-service'; // Updated import
 import type { WorkoutDay, DailyLog, Exercise as ExerciseType } from '@/types/workout';
-import LoadingWorkoutPage from '@/app/workout/[day]/loading'; // Can reuse this for now
+import LoadingWorkoutPage from '@/app/workout/[day]/loading'; 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import DayProgress from '@/components/workout/day-progress';
 import { useToast } from '@/hooks/use-toast';
 import { AlertTriangle, CheckSquare, ArrowRight, Info } from 'lucide-react';
-import { getUserTargetWeight } from '@/lib/user-settings'; // To display target weight
+import { getUserTargetWeight } from '@/lib/user-settings'; 
 
 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
@@ -21,6 +21,12 @@ const getCurrentDateString = (): string => {
 };
 
 function getLocalStorageKey(dayId: string, date: string): string {
+  // Append active plan ID to localStorage key to separate logs for different plans
+  // This part needs activePlanId to be available. For now, assuming a simpler key or needs rework if planId is part of key.
+  // For simplicity, let's assume dayId and date is enough if logs are not plan-specific or active plan is global for logs.
+  // If logs MUST be plan-specific, this key generation needs active plan context.
+  // const activePlan = getActiveNamedWorkoutPlan(); // This might be too much for a simple key function
+  // const planPrefix = activePlan ? `${activePlan.id}_` : '';
   return `gymtrack_log_${dayId}_${date}`;
 }
 
@@ -66,14 +72,16 @@ export default function TodaysWorkoutDashboardPage() {
     const date = new Date();
     const dayId = days[date.getDay()];
     setCurrentDayId(dayId);
-    const fetchedWorkoutDay = getWorkoutByDay(dayId);
+    
+    // Fetch workout day from the *active* plan
+    const fetchedWorkoutDay = getWorkoutByDayFromActivePlan(dayId);
     setWorkoutDay(fetchedWorkoutDay);
 
     const dateStr = getCurrentDateString();
     setCurrentDate(dateStr);
 
     if (typeof window !== 'undefined' && fetchedWorkoutDay) {
-      const key = getLocalStorageKey(fetchedWorkoutDay.id, dateStr);
+      const key = getLocalStorageKey(fetchedWorkoutDay.id, dateStr); // Key might need active plan ID
       const storedLog = localStorage.getItem(key);
       if (storedLog) {
         try {
@@ -87,10 +95,8 @@ export default function TodaysWorkoutDashboardPage() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only on initial mount to set day and load initial log
+  }, []); 
 
-  // Effect to re-read log from localStorage if component re-renders for other reasons (e.g., focus)
-  // This helps keep the progress up-to-date after navigating back from an exercise detail page.
   useEffect(() => {
     if (typeof window !== 'undefined' && workoutDay && currentDate) {
       const key = getLocalStorageKey(workoutDay.id, currentDate);
@@ -98,7 +104,6 @@ export default function TodaysWorkoutDashboardPage() {
       if (storedLog) {
         try {
           const parsedLog = JSON.parse(storedLog);
-          // Basic check to see if the log has changed significantly to avoid unnecessary re-renders
           if (JSON.stringify(parsedLog) !== JSON.stringify(dailyLog)) {
             setDailyLog(parsedLog);
           }
@@ -106,13 +111,13 @@ export default function TodaysWorkoutDashboardPage() {
           console.error("Failed to parse stored log on update:", error);
         }
       } else {
-        if (Object.keys(dailyLog).length > 0) { // If there was a log, but now it's gone
+        if (Object.keys(dailyLog).length > 0) { 
           setDailyLog({});
         }
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workoutDay, currentDate]); // Re-run if workoutDay or currentDate changes. Add other dependencies if needed for re-syncing.
+  }, [workoutDay, currentDate]); 
 
 
   const handleClearDayLog = useCallback(() => {
@@ -146,7 +151,10 @@ export default function TodaysWorkoutDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p>No workout plan found for {currentDayId || 'today'}. Enjoy your rest day or check your plan!</p>
+            <p>No workout plan found for {currentDayId || 'today'} in the active plan. Enjoy your rest day or check your plan!</p>
+            <Button asChild variant="link" className="mt-2">
+                <Link href="/workout-plan">Manage Workout Plans</Link>
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -236,4 +244,3 @@ export default function TodaysWorkoutDashboardPage() {
     </div>
   );
 }
-    
