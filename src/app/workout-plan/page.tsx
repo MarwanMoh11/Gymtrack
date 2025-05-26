@@ -81,7 +81,14 @@ export default function WorkoutPlanPage() {
       produce(editableActivePlan, draft => {
         const day = draft.find(d => d.id === dayId);
         if (day) {
-          (day as any)[field] = value;
+          if (field === 'mapsToActualDayOfWeek') {
+            (day as any)[field] = value;
+            // Also update dayName based on the selected day of the week
+            const selectedDayObj = daysOfWeekMap.find(d => d.value === value);
+            day.dayName = selectedDayObj && selectedDayObj.value !== -1 ? selectedDayObj.name : "Unassigned Day";
+          } else {
+            (day as any)[field] = value;
+          }
         }
       })
     );
@@ -191,7 +198,7 @@ export default function WorkoutPlanPage() {
     const newDayId = `custom-day-${Date.now()}`;
     const newDay: WorkoutDay = {
       id: newDayId,
-      dayName: 'New Day',
+      dayName: 'New Day', // This will be updated if assigned via dropdown
       title: 'Workout Title (Click to Edit)',
       exercises: [],
       notes: 'Add exercises and notes for this day.',
@@ -203,6 +210,14 @@ export default function WorkoutPlanPage() {
       })
     );
     toast({ title: "New Day Added", description: "A new day has been added to the plan. Edit its details and add exercises. Don't forget to save plan changes." });
+  };
+
+  const getDisplayDayName = (day: WorkoutDay): string => {
+    if (day.mapsToActualDayOfWeek !== undefined && day.mapsToActualDayOfWeek !== -1) {
+      const mapped = daysOfWeekMap.find(d => d.value === day.mapsToActualDayOfWeek);
+      return mapped ? mapped.name : day.dayName;
+    }
+    return day.dayName;
   };
 
   return (
@@ -297,31 +312,13 @@ export default function WorkoutPlanPage() {
                     <CardHeader>
                         {isEditMode ? (
                         <div className="space-y-3">
-                            <div>
-                            <Label htmlFor={`${day.id}-dayName`} className="text-xs font-medium text-muted-foreground">Day Name</Label>
-                            <Input
-                                id={`${day.id}-dayName`}
-                                value={day.dayName}
-                                onChange={(e) => handleDayDetailChange(day.id, 'dayName', e.target.value)}
-                                className="text-xl font-semibold text-primary h-9"
-                            />
-                            </div>
-                            <div>
-                            <Label htmlFor={`${day.id}-title`} className="text-xs font-medium text-muted-foreground">Day Title/Focus</Label>
-                            <Input
-                                id={`${day.id}-title`}
-                                value={day.title}
-                                onChange={(e) => handleDayDetailChange(day.id, 'title', e.target.value)}
-                                className="text-sm h-8"
-                            />
-                            </div>
                              <div>
                                 <Label htmlFor={`${day.id}-mapsToActualDayOfWeek`} className="text-xs font-medium text-muted-foreground">Assign to Day of Week</Label>
                                 <Select
                                   value={day.mapsToActualDayOfWeek !== undefined && day.mapsToActualDayOfWeek !== -1 ? String(day.mapsToActualDayOfWeek) : "-1"}
                                   onValueChange={(value) => handleDayDetailChange(day.id, 'mapsToActualDayOfWeek', parseInt(value, 10))}
                                 >
-                                  <SelectTrigger id={`${day.id}-mapsToActualDayOfWeek`} className="h-8 text-sm">
+                                  <SelectTrigger id={`${day.id}-mapsToActualDayOfWeek`} className="text-xl font-semibold text-primary h-9">
                                     <SelectValue placeholder="Select day of week" />
                                   </SelectTrigger>
                                   <SelectContent>
@@ -331,6 +328,15 @@ export default function WorkoutPlanPage() {
                                   </SelectContent>
                                 </Select>
                               </div>
+                            <div>
+                            <Label htmlFor={`${day.id}-title`} className="text-xs font-medium text-muted-foreground">Day Title/Focus</Label>
+                            <Input
+                                id={`${day.id}-title`}
+                                value={day.title}
+                                onChange={(e) => handleDayDetailChange(day.id, 'title', e.target.value)}
+                                className="text-sm h-8"
+                            />
+                            </div>
                             <div>
                             <Label htmlFor={`${day.id}-notes`} className="text-xs font-medium text-muted-foreground">Day Notes</Label>
                             <Input
@@ -344,13 +350,8 @@ export default function WorkoutPlanPage() {
                         </div>
                         ) : (
                         <>
-                            <CardTitle className="text-xl font-semibold text-primary">{day.dayName}</CardTitle>
+                            <CardTitle className="text-xl font-semibold text-primary">{getDisplayDayName(day)}</CardTitle>
                             <CardDescription className="text-sm text-muted-foreground">{day.title}</CardDescription>
-                            {day.mapsToActualDayOfWeek !== undefined && day.mapsToActualDayOfWeek !== -1 && (
-                                <CardDescription className="text-xs text-muted-foreground/80 mt-1">
-                                    Scheduled for: {daysOfWeekMap.find(d => d.value === day.mapsToActualDayOfWeek)?.name || 'Not Assigned'}
-                                </CardDescription>
-                            )}
                         </>
                         )}
                     </CardHeader>
@@ -396,7 +397,7 @@ export default function WorkoutPlanPage() {
                         {isEditMode && (
                             <div className="mt-3 pt-3 border-t border-border/50">
                                 <Button variant="outline" size="sm" className="w-full" onClick={() => openExerciseModal(day.id)}>
-                                    <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise to {day.dayName}
+                                    <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise to {getDisplayDayName(day)}
                                 </Button>
                             </div>
                         )}
@@ -405,7 +406,7 @@ export default function WorkoutPlanPage() {
                         <CardContent className="pt-0 pb-4">
                         <Button asChild variant="ghost" className="w-full justify-start text-primary hover:bg-primary/10">
                             <Link href={`/workout/${day.id}`}>
-                            View {day.dayName}'s Workout <ArrowRight className="ml-auto h-4 w-4" />
+                            View {getDisplayDayName(day)}'s Workout <ArrowRight className="ml-auto h-4 w-4" />
                             </Link>
                         </Button>
                         </CardContent>

@@ -6,8 +6,8 @@ import { use, useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 // Import service functions
-import { getExerciseById as getBaseExerciseByIdFromService, getWorkoutByDayFromPlan, getActiveNamedWorkoutPlan, getPlanById } from '@/lib/workout-plan-service';
-import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data'; // For modal
+import { getExerciseById as getBaseExerciseByIdFromService, getActiveNamedWorkoutPlan, getPlanById } from '@/lib/workout-plan-service';
+import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal, getWorkoutByDayFromPlan } from '@/data/workout-data'; // For modal
 
 import type { Exercise as ExerciseType, SetData, LoggedSetData, DailyLog, WorkoutDay, LoggedExerciseData, WeeklyPlan } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
