@@ -7,43 +7,120 @@ import { defaultNamedPlans, getWorkoutByDayFromPlan as getWorkoutByDayFromPlanDa
 import { produce } from 'immer'; // Using immer for easier immutable updates
 
 const WORKOUT_PLANS_STORAGE_KEY = 'gymtrack_workout_plans';
+const OPTIMIZED_PLAN_ID = 'optimized-gym-calisthenics-blended-plan'; // ID of the new default plan
 
 let clientSidePlans: NamedWorkoutPlan[] | null = null;
 
 function deepClone<T>(obj: T): T {
-  return JSON.parse(JSON.stringify(obj));
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  // Handle Date objects
+  if (obj instanceof Date) {
+    return new Date(obj.getTime()) as any;
+  }
+  // Handle Arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => deepClone(item)) as any;
+  }
+  // Handle Objects
+  const clonedObj: any = {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      clonedObj[key] = deepClone(obj[key]);
+    }
+  }
+  return clonedObj;
 }
 
 export function loadWorkoutPlans(): NamedWorkoutPlan[] {
-  if (clientSidePlans) return deepClone(clientSidePlans);
-
-  if (typeof window !== 'undefined') {
-    const storedPlans = localStorage.getItem(WORKOUT_PLANS_STORAGE_KEY);
-    if (storedPlans) {
-      try {
-        clientSidePlans = JSON.parse(storedPlans);
-        // Ensure at least one plan is active if none are
-        if (clientSidePlans && !clientSidePlans.some(p => p.isActive)) {
-          clientSidePlans[0].isActive = true;
+  if (typeof window === 'undefined') {
+    // Server-side rendering or no window context, return a fresh copy of defaults
+    // Ensure the optimized plan is active here as well for SSR consistency if ever needed
+    const plans = deepClone(defaultNamedPlans);
+    let optimizedPlanIsActive = false;
+    plans.forEach(p => {
+        if (p.id === OPTIMIZED_PLAN_ID) {
+            p.isActive = true;
+            optimizedPlanIsActive = true;
+        } else {
+            p.isActive = false;
         }
-        return deepClone(clientSidePlans!);
+    });
+    // Fallback if optimized plan somehow wasn't in defaults or ID mismatch
+    if (!optimizedPlanIsActive && plans.length > 0) {
+        plans[0].isActive = true;
+    }
+    return plans;
+  }
+
+  if (clientSidePlans === null) { // Check if already loaded in this session
+    let loadedUserPlans: NamedWorkoutPlan[] = [];
+    const storedPlansString = localStorage.getItem(WORKOUT_PLANS_STORAGE_KEY);
+
+    if (storedPlansString) {
+      try {
+        loadedUserPlans = JSON.parse(storedPlansString);
       } catch (e) {
         console.error("Failed to parse workout plans from localStorage", e);
         localStorage.removeItem(WORKOUT_PLANS_STORAGE_KEY); // Clear corrupted data
+        // Fallback to defaults if parsing fails
+        loadedUserPlans = [];
       }
     }
+    
+    let finalPlans: NamedWorkoutPlan[] = deepClone(loadedUserPlans);
+    const existingPlanIds = new Set(finalPlans.map(p => p.id));
+
+    // Add any default plans that are missing from the user's stored plans
+    defaultNamedPlans.forEach(defaultPlan => {
+      if (!existingPlanIds.has(defaultPlan.id)) {
+        finalPlans.push(deepClone(defaultPlan)); // Add if new
+        existingPlanIds.add(defaultPlan.id); // Add to set to track it's now included
+      } else {
+        // Optional: Update existing default plans if they change in code?
+        // For now, we don't overwrite user's version of a default plan if they have it.
+        // However, we MUST ensure the `isActive` status is correctly managed for the OPTIMIZED_PLAN_ID.
+      }
+    });
+    
+    let optimizedPlanExists = false;
+    finalPlans.forEach(p => {
+      if (p.id === OPTIMIZED_PLAN_ID) {
+        p.isActive = true;
+        optimizedPlanExists = true;
+      } else {
+        p.isActive = false;
+      }
+    });
+
+    // If the optimized plan (by its ID) wasn't found in the final list (e.g. user deleted it),
+    // re-add it from defaults and make it active.
+    if (!optimizedPlanExists) {
+        const optimizedPlanFromDefaults = defaultNamedPlans.find(dp => dp.id === OPTIMIZED_PLAN_ID);
+        if (optimizedPlanFromDefaults) {
+            finalPlans.push(deepClone(optimizedPlanFromDefaults)); // This will have isActive true from defaults
+            // Ensure all others are inactive again
+             finalPlans.forEach(p => {
+                p.isActive = (p.id === OPTIMIZED_PLAN_ID);
+            });
+        }
+    }
+    
+    // Fallback: if after all merging, no plan is active (edge case), make the first one active.
+    if (finalPlans.length > 0 && !finalPlans.some(p => p.isActive)) {
+      finalPlans[0].isActive = true;
+    }
+    
+    clientSidePlans = finalPlans;
+    saveWorkoutPlans(clientSidePlans); // Save the potentially merged/updated list
   }
-  // If no stored plans or server-side rendering, use defaults
-  clientSidePlans = deepClone(defaultNamedPlans);
-  if (clientSidePlans.length > 0 && !clientSidePlans.some(p => p.isActive)) {
-      clientSidePlans[0].isActive = true; // Ensure first plan is active by default
-  }
-  saveWorkoutPlans(clientSidePlans); // Save defaults to localStorage if it's the first load client-side
-  return deepClone(clientSidePlans);
+  return deepClone(clientSidePlans); // Return a clone to prevent direct mutation
 }
 
+
 export function saveWorkoutPlans(plans: NamedWorkoutPlan[]): void {
-  clientSidePlans = deepClone(plans);
+  clientSidePlans = deepClone(plans); // Update the in-memory cache
   if (typeof window !== 'undefined') {
     localStorage.setItem(WORKOUT_PLANS_STORAGE_KEY, JSON.stringify(plans));
   }
@@ -66,7 +143,7 @@ export function getActiveNamedWorkoutPlan(): NamedWorkoutPlan | null {
 }
 
 export function setActiveWorkoutPlan(planId: string): void {
-  const currentPlans = loadWorkoutPlans();
+  const currentPlans = loadWorkoutPlans(); // Ensures we're working with the latest merged data
   const updatedPlans = produce(currentPlans, draft => {
     let foundNewActive = false;
     draft.forEach(p => {
@@ -79,7 +156,9 @@ export function setActiveWorkoutPlan(planId: string): void {
     });
     // If the planId wasn't found, or something went wrong, ensure at least one plan is active
     if (!foundNewActive && draft.length > 0) {
-        draft[0].isActive = true;
+        const optPlan = draft.find(p => p.id === OPTIMIZED_PLAN_ID);
+        if (optPlan) optPlan.isActive = true;
+        else draft[0].isActive = true; // Fallback to first or optimized
     }
   });
   saveWorkoutPlans(updatedPlans);
@@ -109,16 +188,18 @@ export function getExerciseById(exerciseId: string): Exercise | undefined {
     return getExerciseByIdData(exerciseId); // Fallback to global search from workout-data
 }
 
-// Function to update the active plan (e.g., after editing)
 export function updateActiveWorkoutPlan(updatedWeeklyPlan: WeeklyPlan): void {
     const currentPlans = loadWorkoutPlans();
     const activePlanIndex = currentPlans.findIndex(p => p.isActive);
 
     if (activePlanIndex === -1 && currentPlans.length > 0) {
-        // If no active plan somehow, make the first one active and update it
+        // If no active plan somehow, make the optimized one active and update it
+        const optimizedPlanIndex = currentPlans.findIndex(p => p.id === OPTIMIZED_PLAN_ID);
+        const targetIndex = optimizedPlanIndex !== -1 ? optimizedPlanIndex : 0;
+
         const updatedPlans = produce(currentPlans, draft => {
-            draft[0].isActive = true;
-            draft[0].plan = updatedWeeklyPlan;
+            draft.forEach((p,idx) => p.isActive = (idx === targetIndex) );
+            draft[targetIndex].plan = updatedWeeklyPlan;
         });
         saveWorkoutPlans(updatedPlans);
         return;
@@ -130,21 +211,29 @@ export function updateActiveWorkoutPlan(updatedWeeklyPlan: WeeklyPlan): void {
         });
         saveWorkoutPlans(updatedPlans);
     } else {
-        console.warn("No active plan found to update. This shouldn't happen if plans are loaded correctly.");
-        // Optionally, create a new plan or set a default as active
+        console.warn("No active plan found to update. Creating a new plan with this data.");
+        // This case implies no plans exist at all, which loadWorkoutPlans should prevent.
+        // However, as a safeguard, create a new plan.
+        const newPlan: NamedWorkoutPlan = {
+            id: OPTIMIZED_PLAN_ID, // Or generate a new ID if optimized isn't appropriate
+            name: "Updated Active Plan",
+            description: "Automatically created or updated.",
+            plan: updatedWeeklyPlan,
+            isActive: true,
+        };
+        saveWorkoutPlans([newPlan, ...currentPlans.map(p => ({...p, isActive: false}))]);
     }
 }
 
 
-// Placeholder for creating a new plan - more UI needed for this
 export function createNewWorkoutPlan(name: string, description?: string): NamedWorkoutPlan {
-    const newPlanId = `custom-plan-${Date.now()}`;
+    const newPlanId = `custom-plan-${name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     const newNamedPlan: NamedWorkoutPlan = {
         id: newPlanId,
         name: name,
         description: description || "A new custom workout plan.",
-        plan: [], // Starts as an empty plan
-        isActive: false, // Not active by default
+        plan: [], 
+        isActive: false, 
     };
     
     const currentPlans = loadWorkoutPlans();
