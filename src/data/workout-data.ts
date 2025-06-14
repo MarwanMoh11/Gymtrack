@@ -478,21 +478,21 @@ export const defaultStrengthPlan: WeeklyPlan = [
       {
         id: 'sat-ex2', name: 'Accelerations', targetWeight: 'bodyweight', isWarmup: true, isActivity: true,
         description: 'Short sprints with increasing speed to prepare for explosive movements during the match.',
-        videoUrl: '',
+        videoUrl: 'https://www.youtube.com/embed/placeholder',
         muscleGroups: ['Legs', 'Cardio'],
         sets: [{ id: 'sat-ex2-set1', targetReps: '3 × 20 m all‐out' }],
       },
       {
         id: 'sat-ex3', name: 'Football Match', isMatch: true, isActivity: true, targetWeight: 'N/A',
         description: 'Participation in a football (soccer) match.',
-        videoUrl: '',
+        videoUrl: 'https://www.youtube.com/embed/placeholder',
         muscleGroups: ['Full Body', 'Cardio', 'Agility'],
         sets: [{ id: 'sat-ex3-set1', targetReps: 'Match play (~90 min)' }],
       },
       {
         id: 'sat-ex4', name: 'Cool-Down Jog/Walk', targetWeight: 'bodyweight', isActivity: true,
         description: 'Light jogging or walking to gradually lower heart rate and aid recovery after the match.',
-        videoUrl: '',
+        videoUrl: 'https://www.youtube.com/embed/placeholder',
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'sat-ex4-set1', targetReps: '10 min easy' }],
       },
@@ -518,7 +518,7 @@ export const defaultStrengthPlan: WeeklyPlan = [
       {
         id: 'sun-ex1', name: 'Walking', isRecovery: true, isActivity: true, targetWeight: 'bodyweight',
         description: 'Low-intensity walking to promote blood flow and recovery without stressing the body.',
-        videoUrl: '',
+        videoUrl: 'https://www.youtube.com/embed/placeholder',
         muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'sun-ex1-set1', targetReps: '1 hour, 10,000 Steps' }],
       },
@@ -803,7 +803,7 @@ export const calisthenicsBeastPlan: WeeklyPlan = [
       {
         id: 'cal-thu-cardio', name: 'Light Cardio', isActivity: true, unit: 'min',
         description: 'Choose preference: Treadmill (jogging/brisk walking), Elliptical, Stationary Bike.',
-        videoUrl: '', muscleGroups: ['Cardio', 'Full Body'],
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['Cardio', 'Full Body'],
         sets: [{ id: 'cal-thu-cardio-s1', targetReps: '30-45', unit: 'min', notes: 'Light to moderate intensity' }],
       },
       {
@@ -883,7 +883,7 @@ export const calisthenicsBeastPlan: WeeklyPlan = [
       {
         id: 'cal-sat-skill-focus', name: 'Focused Skill Practice', isSkill: true, unit: 's',
         description: 'Choose 1-2 skills (e.g., Front Lever, Planche, advanced Handstand). Use gym equipment like power rack, parallettes, wall. Work on progressions for 20-30 min, focusing on form and short, intense efforts.',
-        videoUrl: '', // User specific
+        videoUrl: 'https://www.youtube.com/embed/placeholder', // User specific
         muscleGroups: ['Skill-Dependent'],
         sets: [
           { id: 'cal-sat-skill-flt', targetReps: 'max hold (5-10s)', notes: 'Front Lever Tucks: 3-5 sets' },
@@ -895,7 +895,7 @@ export const calisthenicsBeastPlan: WeeklyPlan = [
       {
         id: 'cal-sat-outdoor-activity', name: 'Outdoor Activity / Active Recreation', isActivity: true, unit: 'min',
         description: 'Hiking, cycling, swimming, playing a sport, or just a long walk.',
-        videoUrl: '', muscleGroups: ['Full Body', 'Cardio'],
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['Full Body', 'Cardio'],
         sets: [{ id: 'cal-sat-outdoor-s1', targetReps: '60-90 min', unit: 'min', notes: 'Enjoyable, moderate intensity' }],
       },
     ],
@@ -911,7 +911,7 @@ export const calisthenicsBeastPlan: WeeklyPlan = [
       {
         id: 'cal-sun-rest', name: 'Rest Day', isActivity: true,
         description: 'Focus on recovery, nutrition, and hydration. Light stretching if desired.',
-        videoUrl: '', muscleGroups: ['N/A'],
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['N/A'],
         sets: [{ id: 'cal-sun-rest-s1', targetReps: 'Full day' }],
       },
     ],
@@ -1194,13 +1194,464 @@ export const exerciseLibrary: WeeklyPlan = [{
     ],
   }];
 
+// --- Optimized Gym & Calisthenics Blended Plan ---
+const optimizedGymCalisthenicsPlan: WeeklyPlan = [
+  {
+    id: 'ogcb-day1',
+    dayName: 'Monday',
+    title: 'Upper Body - Push Focus',
+    mapsToActualDayOfWeek: 1,
+    notes: 'Warm-up: 5-10 min light cardio & dynamic stretches. Cool-down: 5-10 min static stretches.',
+    exercises: [
+      {
+        id: 'ogcb-d1-ex1', name: 'Machine Chest Press', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Compound chest strength exercise using a machine press for stability and controlled movement.',
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['Chest', 'Shoulders', 'Triceps'],
+        sets: [
+          { id: 'ogcb-d1-ex1-s1', targetReps: '6-10' },
+          { id: 'ogcb-d1-ex1-s2', targetReps: '6-10' },
+          { id: 'ogcb-d1-ex1-s3', targetReps: '6-10' },
+        ],
+      },
+      {
+        id: 'ogcb-d1-ex2', name: 'Overhead Press (Barbell or Dumbbell)', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Compound shoulder strength exercise. Press weight overhead from shoulder level.',
+        videoUrl: 'https://www.youtube.com/embed/2yjwXTZQDDI', muscleGroups: ['Shoulders', 'Triceps'],
+        sets: [
+          { id: 'ogcb-d1-ex2-s1', targetReps: '6-10' },
+          { id: 'ogcb-d1-ex2-s2', targetReps: '6-10' },
+          { id: 'ogcb-d1-ex2-s3', targetReps: '6-10' },
+        ],
+      },
+      {
+        id: 'ogcb-d1-ex3', name: 'Incline Dumbbell Press', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Targets upper chest, front deltoids, and triceps.',
+        videoUrl: 'https://www.youtube.com/embed/8iPEnn-ltC8', muscleGroups: ['Chest (Upper)', 'Shoulders (Front)', 'Triceps'],
+        sets: [
+          { id: 'ogcb-d1-ex3-s1', targetReps: '8-12' },
+          { id: 'ogcb-d1-ex3-s2', targetReps: '8-12' },
+          { id: 'ogcb-d1-ex3-s3', targetReps: '8-12' },
+        ],
+      },
+      {
+        id: 'ogcb-d1-ex4', name: 'Dips (Parallel Bars or Assisted)', targetWeight: 'Bodyweight/Assisted', unit: 'reps',
+        description: 'Calisthenics compound for triceps and lower chest.',
+        videoUrl: 'https://www.youtube.com/embed/2z8JmcrW-As', muscleGroups: ['Triceps', 'Chest', 'Shoulders'],
+        sets: [
+          { id: 'ogcb-d1-ex4-s1', targetReps: '8-12' },
+          { id: 'ogcb-d1-ex4-s2', targetReps: '8-12' },
+          { id: 'ogcb-d1-ex4-s3', targetReps: '8-12' },
+        ],
+      },
+      {
+        id: 'ogcb-d1-ex5', name: 'Push-ups (Standard, Decline, or Pseudo Planche)', targetWeight: 'Bodyweight', unit: 'reps',
+        description: 'Progressive bodyweight push exercise.',
+        videoUrl: 'https://www.youtube.com/embed/IODxDxX7oi4', muscleGroups: ['Chest', 'Triceps', 'Shoulders', 'Core'],
+        sets: [
+          { id: 'ogcb-d1-ex5-s1', targetReps: 'To Failure (or 10-15 strict)' },
+          { id: 'ogcb-d1-ex5-s2', targetReps: 'To Failure (or 10-15 strict)' },
+          { id: 'ogcb-d1-ex5-s3', targetReps: 'To Failure (or 10-15 strict)' },
+        ],
+      },
+      {
+        id: 'ogcb-d1-ex6', name: 'Triceps Pushdowns (Cable)', targetWeight: 'Light-Moderate', unit: 'reps',
+        description: 'Triceps isolation using cables.',
+        videoUrl: 'https://www.youtube.com/embed/2-LAMcpzODU', muscleGroups: ['Triceps'],
+        sets: [
+          { id: 'ogcb-d1-ex6-s1', targetReps: '10-15' },
+          { id: 'ogcb-d1-ex6-s2', targetReps: '10-15' },
+          { id: 'ogcb-d1-ex6-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d1-ex7', name: 'Lateral Raises (Dumbbell)', targetWeight: 'Light', unit: 'reps',
+        description: 'Isolation for side deltoids.',
+        videoUrl: 'https://www.youtube.com/embed/3VcKaXpzqRo', muscleGroups: ['Shoulders (Lateral)'],
+        sets: [
+          { id: 'ogcb-d1-ex7-s1', targetReps: '12-15' },
+          { id: 'ogcb-d1-ex7-s2', targetReps: '12-15' },
+          { id: 'ogcb-d1-ex7-s3', targetReps: '12-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d1-ex8', name: 'Core: Plank', targetWeight: 'Bodyweight', unit: 's', isCore: true,
+        description: 'Core stability exercise.',
+        videoUrl: 'https://www.youtube.com/embed/ASdvN_XEl_c', muscleGroups: ['Core', 'Abs'],
+        sets: [
+          { id: 'ogcb-d1-ex8-s1', targetReps: '45-60', unit: 's' },
+          { id: 'ogcb-d1-ex8-s2', targetReps: '45-60', unit: 's' },
+          { id: 'ogcb-d1-ex8-s3', targetReps: '45-60', unit: 's' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'ogcb-day2',
+    dayName: 'Tuesday',
+    title: 'Lower Body (Gym Focus)',
+    mapsToActualDayOfWeek: 2,
+    notes: 'Warm-up: 5-10 min light cardio & dynamic stretches. Cool-down: 5-10 min static stretches.',
+    exercises: [
+      {
+        id: 'ogcb-d2-ex1', name: 'Barbell Back Squat', targetWeight: 'Moderate-Heavy', unit: 'reps',
+        description: 'Compound leg strength exercise.',
+        videoUrl: 'https://www.youtube.com/embed/ultWZbUMPL8', muscleGroups: ['Quads', 'Glutes', 'Hamstrings', 'Core'],
+        sets: [
+          { id: 'ogcb-d2-ex1-s1', targetReps: '6-10' },
+          { id: 'ogcb-d2-ex1-s2', targetReps: '6-10' },
+          { id: 'ogcb-d2-ex1-s3', targetReps: '6-10' },
+        ],
+      },
+      {
+        id: 'ogcb-d2-ex2', name: 'Romanian Deadlifts (RDLs)', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Compound exercise for hamstrings and glutes.',
+        videoUrl: 'https://www.youtube.com/embed/JCXUYuzwNrM', muscleGroups: ['Hamstrings', 'Glutes', 'Lower Back'],
+        sets: [
+          { id: 'ogcb-d2-ex2-s1', targetReps: '8-12' },
+          { id: 'ogcb-d2-ex2-s2', targetReps: '8-12' },
+          { id: 'ogcb-d2-ex2-s3', targetReps: '8-12' },
+        ],
+      },
+      {
+        id: 'ogcb-d2-ex3', name: 'Leg Press', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Overall leg development using a machine.',
+        videoUrl: 'https://www.youtube.com/embed/IZxyjW7MPJQ', muscleGroups: ['Quads', 'Glutes', 'Hamstrings'],
+        sets: [
+          { id: 'ogcb-d2-ex3-s1', targetReps: '10-15' },
+          { id: 'ogcb-d2-ex3-s2', targetReps: '10-15' },
+          { id: 'ogcb-d2-ex3-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d2-ex4', name: 'Leg Extensions', targetWeight: 'Light-Moderate', unit: 'reps',
+        description: 'Quadriceps isolation.',
+        videoUrl: 'https://www.youtube.com/embed/YyvSfVjQeL0', muscleGroups: ['Quads'],
+        sets: [
+          { id: 'ogcb-d2-ex4-s1', targetReps: '12-15' },
+          { id: 'ogcb-d2-ex4-s2', targetReps: '12-15' },
+          { id: 'ogcb-d2-ex4-s3', targetReps: '12-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d2-ex5', name: 'Hamstring Curls', targetWeight: 'Light-Moderate', unit: 'reps',
+        description: 'Hamstring isolation.',
+        videoUrl: 'https://www.youtube.com/embed/F488k67BTmA', muscleGroups: ['Hamstrings'],
+        sets: [
+          { id: 'ogcb-d2-ex5-s1', targetReps: '12-15' },
+          { id: 'ogcb-d2-ex5-s2', targetReps: '12-15' },
+          { id: 'ogcb-d2-ex5-s3', targetReps: '12-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d2-ex6', name: 'Calf Raises (Standing or Seated)', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Calf isolation.',
+        videoUrl: 'https://www.youtube.com/embed/JbyjNymZOt0', muscleGroups: ['Calves'],
+        sets: [
+          { id: 'ogcb-d2-ex6-s1', targetReps: '15-20' },
+          { id: 'ogcb-d2-ex6-s2', targetReps: '15-20' },
+          { id: 'ogcb-d2-ex6-s3', targetReps: '15-20' },
+        ],
+      },
+      {
+        id: 'ogcb-d2-ex7', name: 'Core: Hanging Leg Raises (or Lying Leg Raises)', targetWeight: 'Bodyweight', unit: 'reps', isCore: true,
+        description: 'Targets lower abs.',
+        videoUrl: 'https://www.youtube.com/embed/1A0Sqg_M39k', muscleGroups: ['Abs (Lower)', 'Hip Flexors'],
+        sets: [
+          { id: 'ogcb-d2-ex7-s1', targetReps: '15-20' },
+          { id: 'ogcb-d2-ex7-s2', targetReps: '15-20' },
+          { id: 'ogcb-d2-ex7-s3', targetReps: '15-20' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'ogcb-day3',
+    dayName: 'Wednesday',
+    title: 'Upper Body - Pull Focus',
+    mapsToActualDayOfWeek: 3,
+    notes: 'Warm-up: 5-10 min light cardio & dynamic stretches. Cool-down: 5-10 min static stretches.',
+    exercises: [
+      {
+        id: 'ogcb-d3-ex1', name: 'Pull-ups (Assisted, Banded, or Bodyweight)', targetWeight: 'Bodyweight/Assisted', unit: 'reps',
+        description: 'Calisthenics compound for back width and biceps.',
+        videoUrl: 'https://www.youtube.com/embed/eGo4IYlbE5g', muscleGroups: ['Lats', 'Biceps', 'Upper Back'],
+        sets: [
+          { id: 'ogcb-d3-ex1-s1', targetReps: 'To Failure (or 6-10)' },
+          { id: 'ogcb-d3-ex1-s2', targetReps: 'To Failure (or 6-10)' },
+          { id: 'ogcb-d3-ex1-s3', targetReps: 'To Failure (or 6-10)' },
+        ],
+      },
+      {
+        id: 'ogcb-d3-ex2', name: 'Barbell Rows or Dumbbell Rows', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Compound exercise for back thickness.',
+        videoUrl: 'https://www.youtube.com/embed/G8l_8chR5BE', muscleGroups: ['Lats', 'Rhomboids', 'Traps', 'Biceps'],
+        sets: [
+          { id: 'ogcb-d3-ex2-s1', targetReps: '8-12' },
+          { id: 'ogcb-d3-ex2-s2', targetReps: '8-12' },
+          { id: 'ogcb-d3-ex2-s3', targetReps: '8-12' },
+        ],
+      },
+      {
+        id: 'ogcb-d3-ex3', name: 'Lat Pulldown (Cable)', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Machine exercise for back width.',
+        videoUrl: 'https://www.youtube.com/embed/lueEJGjTuPQ', muscleGroups: ['Lats', 'Biceps'],
+        sets: [
+          { id: 'ogcb-d3-ex3-s1', targetReps: '10-15' },
+          { id: 'ogcb-d3-ex3-s2', targetReps: '10-15' },
+          { id: 'ogcb-d3-ex3-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d3-ex4', name: 'Inverted Rows (Bodyweight Rows)', targetWeight: 'Bodyweight', unit: 'reps',
+        description: 'Bodyweight back exercise. Adjust bar height to change difficulty.',
+        videoUrl: 'https://www.youtube.com/embed/D7jvi0tN84U', muscleGroups: ['Upper Back', 'Lats', 'Biceps'],
+        sets: [
+          { id: 'ogcb-d3-ex4-s1', targetReps: '10-15' },
+          { id: 'ogcb-d3-ex4-s2', targetReps: '10-15' },
+          { id: 'ogcb-d3-ex4-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d3-ex5', name: 'Chin-ups (Assisted, Banded, or Bodyweight)', targetWeight: 'Bodyweight/Assisted', unit: 'reps',
+        description: 'Calisthenics exercise emphasizing biceps and back.',
+        videoUrl: 'https://www.youtube.com/embed/ZUndn_jJqM0', muscleGroups: ['Biceps', 'Lats'],
+        sets: [
+          { id: 'ogcb-d3-ex5-s1', targetReps: 'To Failure (or 6-10)' },
+          { id: 'ogcb-d3-ex5-s2', targetReps: 'To Failure (or 6-10)' },
+          { id: 'ogcb-d3-ex5-s3', targetReps: 'To Failure (or 6-10)' },
+        ],
+      },
+      {
+        id: 'ogcb-d3-ex6', name: 'Bicep Curls (Dumbbell or Barbell)', targetWeight: 'Light-Moderate', unit: 'reps',
+        description: 'Biceps isolation.',
+        videoUrl: 'https://www.youtube.com/embed/ykJmrZ5v0Oo', muscleGroups: ['Biceps'],
+        sets: [
+          { id: 'ogcb-d3-ex6-s1', targetReps: '10-15' },
+          { id: 'ogcb-d3-ex6-s2', targetReps: '10-15' },
+          { id: 'ogcb-d3-ex6-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d3-ex7', name: 'Face Pulls (Cable)', targetWeight: 'Light', unit: 'reps',
+        description: 'For rear delts and upper back health.',
+        videoUrl: 'https://www.youtube.com/embed/rep-qVOkqgk', muscleGroups: ['Shoulders (Rear)', 'Traps', 'Rhomboids'],
+        sets: [
+          { id: 'ogcb-d3-ex7-s1', targetReps: '15-20' },
+          { id: 'ogcb-d3-ex7-s2', targetReps: '15-20' },
+          { id: 'ogcb-d3-ex7-s3', targetReps: '15-20' },
+        ],
+      },
+      {
+        id: 'ogcb-d3-ex8', name: 'Core: Russian Twists', targetWeight: 'Bodyweight or Light Weight', unit: 'reps', isCore: true,
+        description: 'Targets obliques and rotational core strength.',
+        videoUrl: 'https://www.youtube.com/embed/wkD8rjkodUI', muscleGroups: ['Obliques', 'Abs', 'Core'],
+        sets: [
+          { id: 'ogcb-d3-ex8-s1', targetReps: '15-20 per side' },
+          { id: 'ogcb-d3-ex8-s2', targetReps: '15-20 per side' },
+          { id: 'ogcb-d3-ex8-s3', targetReps: '15-20 per side' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'ogcb-day4',
+    dayName: 'Thursday',
+    title: 'Full Body Calisthenics & Core',
+    mapsToActualDayOfWeek: 4,
+    notes: 'Warm-up: 5-10 min light cardio & dynamic stretches. Perform strength exercises as a circuit. Cool-down: 5-10 min static stretches.',
+    exercises: [
+      {
+        id: 'ogcb-d4-ex1-pistol', name: 'Pistol Squats (Assisted or Progression)', targetWeight: 'Bodyweight', unit: 'reps',
+        description: 'Unilateral leg strength. Use assistance if needed, or progress from single-leg box squats.',
+        videoUrl: 'https://www.youtube.com/embed/vq5-vdgJc0I', muscleGroups: ['Quads', 'Glutes', 'Balance'],
+        sets: [
+          { id: 'ogcb-d4-ex1-pistol-s1', targetReps: '5-8 per leg' },
+          { id: 'ogcb-d4-ex1-pistol-s2', targetReps: '5-8 per leg' },
+          { id: 'ogcb-d4-ex1-pistol-s3', targetReps: '5-8 per leg' },
+        ],
+        notes: 'Part of Calisthenics Strength Circuit.',
+      },
+      {
+        id: 'ogcb-d4-ex1-archer', name: 'Archer Push-ups or Pseudo Planche Push-ups', targetWeight: 'Bodyweight', unit: 'reps',
+        description: 'Advanced pushing progression.',
+        videoUrl: 'https://www.youtube.com/embed/hHXW1q4iJ08', muscleGroups: ['Chest', 'Shoulders', 'Triceps', 'Core'],
+        sets: [
+          { id: 'ogcb-d4-ex1-archer-s1', targetReps: '5-8 per side/total' },
+          { id: 'ogcb-d4-ex1-archer-s2', targetReps: '5-8 per side/total' },
+          { id: 'ogcb-d4-ex1-archer-s3', targetReps: '5-8 per side/total' },
+        ],
+        notes: 'Part of Calisthenics Strength Circuit.',
+      },
+      {
+        id: 'ogcb-d4-ex1-frontlever', name: 'Tuck Front Lever Holds (or progressions)', targetWeight: 'Bodyweight', unit: 's', isSkill: true,
+        description: 'Isometric back and core strength. Progress from tuck front lever rows if needed.',
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['Lats', 'Core', 'Abs'],
+        sets: [
+          { id: 'ogcb-d4-ex1-frontlever-s1', targetReps: '10-20', unit: 's' },
+          { id: 'ogcb-d4-ex1-frontlever-s2', targetReps: '10-20', unit: 's' },
+          { id: 'ogcb-d4-ex1-frontlever-s3', targetReps: '10-20', unit: 's' },
+        ],
+        notes: 'Part of Calisthenics Strength Circuit.',
+      },
+      {
+        id: 'ogcb-d4-ex1-lsit', name: 'L-Sit Holds (or progressions)', targetWeight: 'Bodyweight', unit: 's', isCore: true, isSkill: true,
+        description: 'Core compression and arm support strength. Progress from tucked L-sit if needed.',
+        videoUrl: 'https://www.youtube.com/embed/PzAmVcjY2X8', muscleGroups: ['Core', 'Abs', 'Hip Flexors', 'Triceps'],
+        sets: [
+          { id: 'ogcb-d4-ex1-lsit-s1', targetReps: '10-20', unit: 's' },
+          { id: 'ogcb-d4-ex1-lsit-s2', targetReps: '10-20', unit: 's' },
+          { id: 'ogcb-d4-ex1-lsit-s3', targetReps: '10-20', unit: 's' },
+        ],
+        notes: 'Part of Calisthenics Strength Circuit.',
+      },
+      {
+        id: 'ogcb-d4-core1', name: 'Core: Side Plank', targetWeight: 'Bodyweight', unit: 's', isCore: true,
+        description: 'Oblique stability.',
+        videoUrl: 'https://www.youtube.com/embed/1h4g9sQxV0A', muscleGroups: ['Obliques', 'Core'],
+        sets: [
+          { id: 'ogcb-d4-core1-s1', targetReps: '30-45 per side', unit: 's' },
+          { id: 'ogcb-d4-core1-s2', targetReps: '30-45 per side', unit: 's' },
+          { id: 'ogcb-d4-core1-s3', targetReps: '30-45 per side', unit: 's' },
+        ],
+        notes: 'Dedicated Core Work (Choose 2-3).',
+      },
+      {
+        id: 'ogcb-d4-core2', name: 'Core: Bird-Dog', targetWeight: 'Bodyweight', unit: 'reps', isCore: true,
+        description: 'Core stability and coordination.',
+        videoUrl: 'https://www.youtube.com/embed/wiFNA3sqjCA', muscleGroups: ['Core', 'Glutes', 'Lower Back'],
+        sets: [
+          { id: 'ogcb-d4-core2-s1', targetReps: '10-12 per side' },
+          { id: 'ogcb-d4-core2-s2', targetReps: '10-12 per side' },
+          { id: 'ogcb-d4-core2-s3', targetReps: '10-12 per side' },
+        ],
+        notes: 'Dedicated Core Work (Choose 2-3).',
+      },
+      {
+        id: 'ogcb-d4-core3', name: 'Core: Flutter Kicks', targetWeight: 'Bodyweight', unit: 'reps', isCore: true,
+        description: 'Lower abs endurance.',
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['Abs (Lower)', 'Hip Flexors'],
+        sets: [
+          { id: 'ogcb-d4-core3-s1', targetReps: '20-30 per leg' },
+          { id: 'ogcb-d4-core3-s2', targetReps: '20-30 per leg' },
+          { id: 'ogcb-d4-core3-s3', targetReps: '20-30 per leg' },
+        ],
+        notes: 'Dedicated Core Work (Choose 2-3).',
+      },
+    ],
+  },
+  {
+    id: 'ogcb-day5',
+    dayName: 'Friday',
+    title: 'Hybrid Strength & Active Recovery',
+    mapsToActualDayOfWeek: 5,
+    notes: 'Warm-up: 5-10 min light cardio & dynamic stretches. Cool-down: 5-10 min static stretches. Focus on controlled form.',
+    exercises: [
+      {
+        id: 'ogcb-d5-ex1', name: 'Goblet Squats or Dumbbell RDLs', targetWeight: 'Light-Moderate', unit: 'reps',
+        description: 'Focus on controlled movement and form, not max weight.',
+        videoUrl: 'https://www.youtube.com/embed/MeW1bB741zY', muscleGroups: ['Quads', 'Glutes', 'Hamstrings', 'Core'],
+        sets: [
+          { id: 'ogcb-d5-ex1-s1', targetReps: '12-15' },
+          { id: 'ogcb-d5-ex1-s2', targetReps: '12-15' },
+          { id: 'ogcb-d5-ex1-s3', targetReps: '12-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d5-ex2', name: 'Single-Arm Dumbbell Rows', targetWeight: 'Moderate', unit: 'reps',
+        description: 'Unilateral back and core stability.',
+        videoUrl: 'https://www.youtube.com/embed/pYcpY20QaE8', muscleGroups: ['Lats', 'Rhomboids', 'Biceps', 'Core'],
+        sets: [
+          { id: 'ogcb-d5-ex2-s1', targetReps: '10-12 per arm' },
+          { id: 'ogcb-d5-ex2-s2', targetReps: '10-12 per arm' },
+          { id: 'ogcb-d5-ex2-s3', targetReps: '10-12 per arm' },
+        ],
+      },
+      {
+        id: 'ogcb-d5-ex3', name: 'Push-up Progression (Kneeling, Standard, or Incline)', targetWeight: 'Bodyweight', unit: 'reps',
+        description: 'Focus on good form, stop before true muscle failure.',
+        videoUrl: 'https://www.youtube.com/embed/IODxDxX7oi4', muscleGroups: ['Chest', 'Triceps', 'Shoulders'],
+        sets: [
+          { id: 'ogcb-d5-ex3-s1', targetReps: 'Comfortable Failure' },
+          { id: 'ogcb-d5-ex3-s2', targetReps: 'Comfortable Failure' },
+          { id: 'ogcb-d5-ex3-s3', targetReps: 'Comfortable Failure' },
+        ],
+      },
+      {
+        id: 'ogcb-d5-ex4', name: 'Inverted Rows (Bodyweight Rows)', targetWeight: 'Bodyweight', unit: 'reps',
+        description: 'Controlled bodyweight back exercise.',
+        videoUrl: 'https://www.youtube.com/embed/D7jvi0tN84U', muscleGroups: ['Upper Back', 'Lats', 'Biceps'],
+        sets: [
+          { id: 'ogcb-d5-ex4-s1', targetReps: '10-15' },
+          { id: 'ogcb-d5-ex4-s2', targetReps: '10-15' },
+          { id: 'ogcb-d5-ex4-s3', targetReps: '10-15' },
+        ],
+      },
+      {
+        id: 'ogcb-d5-ex5', name: 'Core: Dead Bug', targetWeight: 'Bodyweight', unit: 'reps', isCore: true,
+        description: 'Core stability and anti-extension.',
+        videoUrl: 'https://www.youtube.com/embed/g_BYB4vAoqs', muscleGroups: ['Core', 'Abs'],
+        sets: [
+          { id: 'ogcb-d5-ex5-s1', targetReps: '10-12 per side' },
+          { id: 'ogcb-d5-ex5-s2', targetReps: '10-12 per side' },
+          { id: 'ogcb-d5-ex5-s3', targetReps: '10-12 per side' },
+        ],
+      },
+      {
+        id: 'ogcb-d5-ex6', name: 'Flexibility & Mobility Session', targetWeight: 'Bodyweight', unit: 'min', isActivity: true, isMobility: true, isStretch: true,
+        description: '10-15 minutes on static stretches, focusing on areas that feel tight (hips, hamstrings, chest, shoulders) and/or foam rolling.',
+        videoUrl: 'https://www.youtube.com/embed/Sj_N63D0Zck', muscleGroups: ['Full Body'],
+        sets: [{ id: 'ogcb-d5-ex6-s1', targetReps: '10-15', unit: 'min' }],
+      },
+    ],
+  },
+  {
+    id: 'ogcb-day6',
+    dayName: 'Saturday',
+    title: 'Football',
+    mapsToActualDayOfWeek: 6,
+    notes: 'Focus on the game! Ensure proper warm-up and cool-down.',
+    exercises: [
+      {
+        id: 'ogcb-d6-ex1', name: 'Football Game', targetWeight: 'N/A', unit: 'min', isMatch: true, isActivity: true,
+        description: 'Competitive football match.',
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['Full Body', 'Cardio', 'Agility'],
+        sets: [{ id: 'ogcb-d6-ex1-s1', targetReps: '90', unit: 'min' }],
+      },
+    ],
+  },
+  {
+    id: 'ogcb-day7',
+    dayName: 'Sunday',
+    title: 'Complete Rest',
+    mapsToActualDayOfWeek: 0,
+    isRecovery: true,
+    notes: 'Allow your body to fully recover and rebuild. Focus on good nutrition and hydration. Light walking or stretching is fine.',
+    exercises: [
+      {
+        id: 'ogcb-d7-ex1', name: 'Rest Day Activities', targetWeight: 'N/A', unit: 'min', isActivity: true, isRecovery: true,
+        description: 'Complete rest from intense training. Light activities like walking are okay.',
+        videoUrl: 'https://www.youtube.com/embed/placeholder', muscleGroups: ['N/A'],
+        sets: [{ id: 'ogcb-d7-ex1-s1', targetReps: 'Full Day' }],
+      },
+    ],
+  },
+];
+
+
 export const defaultNamedPlans: NamedWorkoutPlan[] = [
+  {
+    id: 'optimized-gym-calisthenics-blended-plan',
+    name: 'Optimized Gym & Calisthenics Blend',
+    description: 'A balanced plan incorporating gym equipment and calisthenics for strength, skill, and conditioning, with integrated core work.',
+    plan: optimizedGymCalisthenicsPlan,
+    isActive: true,
+  },
   {
     id: 'default-strength-plan',
     name: 'Original Strength Plan',
     description: 'A balanced strength training program focusing on major compound lifts and accessory work.',
     plan: defaultStrengthPlan,
-    isActive: true, // By default, the first plan is active
+    isActive: false,
   },
   {
     id: 'calisthenics-beast-plan',
@@ -1238,15 +1689,9 @@ export const getWorkoutByDayFromPlan = (plan: WeeklyPlan, dayIdOrNumericDay: str
   } else if (typeof dayIdOrNumericDay === 'string' && dayStringToNumberMap.hasOwnProperty(dayIdOrNumericDay.toLowerCase())) {
     numericDayOfWeek = dayStringToNumberMap[dayIdOrNumericDay.toLowerCase()];
   } else {
-    // If it's a string that's not a known day name (e.g., a custom ID like "cal-monday" from a direct URL navigation),
-    // and we didn't find a direct ID match above, we can't use mapsToActualDayOfWeek for this lookup.
-    // The initial directMatch handles finding custom IDs like "cal-monday".
-    // This path is mainly for when "Today's Session" tries to resolve "monday" to a numeric day of week.
     return undefined;
   }
 
-  // If direct ID match failed (e.g. "Today's Session" is looking for "monday" but active plan uses "cal-monday"),
-  // try to find by mapsToActualDayOfWeek
   const mappedDay = plan.find(day => day.mapsToActualDayOfWeek === numericDayOfWeek);
   return mappedDay;
 };
@@ -1255,7 +1700,7 @@ export const getWorkoutByDayFromPlan = (plan: WeeklyPlan, dayIdOrNumericDay: str
 // Helper function to get all unique exercises from a specific WeeklyPlan or all default plans
 export const getAllExercisesFromPlan = (specificPlan?: WeeklyPlan): Exercise[] => {
   const allExercisesMap = new Map<string, Exercise>();
-  const plansToSearch = specificPlan ? [ { id: 'custom', name: 'Custom', plan: specificPlan, isActive: true} ] : defaultNamedPlans;
+  const plansToSearch = specificPlan ? [ { id: 'custom', name: 'Custom', plan: specificPlan, isActive: true, description: 'Custom Plan'} ] : defaultNamedPlans;
 
   plansToSearch.forEach(namedPlan => {
     namedPlan.plan.forEach(day => {
@@ -1276,7 +1721,7 @@ export const getAllExercisesFromPlan = (specificPlan?: WeeklyPlan): Exercise[] =
 };
 
 export const getExerciseById = (exerciseId: string, specificPlan?: WeeklyPlan): Exercise | undefined => {
-  const plansToSearch = specificPlan ? [{ plan: specificPlan, name: "Specific", id:"specific", isActive: true }] : defaultNamedPlans;
+  const plansToSearch = specificPlan ? [{ plan: specificPlan, name: "Specific", id:"specific", isActive: true, description: "Specific Plan" }] : defaultNamedPlans;
   
   for (const namedPlan of plansToSearch) {
     for (const day of namedPlan.plan) {
@@ -1303,3 +1748,4 @@ export const getDaysForPlan = (plan: WeeklyPlan) => plan.filter(day => day.id !=
 export const weeklyPlan: WeeklyPlan = defaultStrengthPlan; // Kept for any direct legacy imports, but should be phased out.
 
 export { defaultStrengthPlan as originalWeeklyPlan }; // Exporting with a more specific name if needed
+
