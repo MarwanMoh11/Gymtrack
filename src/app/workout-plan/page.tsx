@@ -3,7 +3,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation'; // Import useRouter
 import { getAllNamedWorkoutPlans, setActiveWorkoutPlan, getActiveNamedWorkoutPlan, updateActiveWorkoutPlan, createNewWorkoutPlan } from '@/lib/workout-plan-service';
+import { setTodayWorkoutOverride } from '@/lib/session-override-service'; // Import override service
 import type { WorkoutDay, Exercise, NamedWorkoutPlan } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowRight, CalendarDays, Edit, Save, XCircle, PlusCircle, Trash2, ArrowUp, ArrowDown, Info, CheckCircle, WandSparkles } from 'lucide-react';
+import { ArrowRight, CalendarDays, Edit, Save, XCircle, PlusCircle, Trash2, ArrowUp, ArrowDown, Info, CheckCircle, WandSparkles, PlayCircle } from 'lucide-react';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import AddExerciseModal from '@/components/workout-plan/add-exercise-modal';
@@ -48,6 +50,7 @@ export default function WorkoutPlanPage() {
   const allExercisesForModalAutocomplete = useMemo(() => getAllExercisesForAutocompleteGlobal(), []);
 
   const { toast } = useToast();
+  const router = useRouter(); // Initialize router
 
   const refreshPlans = () => {
     const plans = getAllNamedWorkoutPlans();
@@ -71,11 +74,10 @@ export default function WorkoutPlanPage() {
   const handleSetPlanActive = (planId: string) => {
     setActiveWorkoutPlan(planId);
     refreshPlans();
-    setIsEditMode(false); // Exit edit mode when switching active plan
+    setIsEditMode(false); 
     toast({ title: "Active Plan Switched", description: `The active workout plan has been updated.` });
   };
 
-  // --- Editing logic for the *active* plan ---
   const handleDayDetailChange = (dayId: string, field: keyof WorkoutDay, value: string | number | undefined) => {
     setEditableActivePlan(
       produce(editableActivePlan, draft => {
@@ -83,7 +85,6 @@ export default function WorkoutPlanPage() {
         if (day) {
           if (field === 'mapsToActualDayOfWeek') {
             (day as any)[field] = value;
-            // Also update dayName based on the selected day of the week
             const selectedDayObj = daysOfWeekMap.find(d => d.value === value);
             day.dayName = selectedDayObj && selectedDayObj.value !== -1 ? selectedDayObj.name : "Unassigned Day";
           } else {
@@ -132,7 +133,7 @@ export default function WorkoutPlanPage() {
         }
       })
     );
-    toast({ title: "Exercise Removed", description: `Exercise removed from ${dayId}. Save changes to apply.`});
+    toast({ title: "Exercise Removed", description: `Exercise removed from plan. Save changes to apply.`});
   };
    
   const handleSaveExerciseToActivePlan = (dayId: string, savedExercise: Exercise) => {
@@ -141,9 +142,9 @@ export default function WorkoutPlanPage() {
         const day = draft.find(d => d.id === dayId);
         if (day) {
           const existingExerciseIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
-          if (existingExerciseIndex !== -1) { // Editing existing
+          if (existingExerciseIndex !== -1) { 
             day.exercises[existingExerciseIndex] = savedExercise;
-          } else { // Adding new
+          } else { 
             day.exercises.push(savedExercise);
           }
         }
@@ -198,26 +199,35 @@ export default function WorkoutPlanPage() {
     const newDayId = `custom-day-${Date.now()}`;
     const newDay: WorkoutDay = {
       id: newDayId,
-      dayName: 'New Day', // This will be updated if assigned via dropdown
-      title: 'Workout Title (Click to Edit)',
+      dayName: 'Unassigned Day', 
+      title: 'New Workout Focus',
       exercises: [],
       notes: 'Add exercises and notes for this day.',
-      mapsToActualDayOfWeek: -1, // Default to Unassigned
+      mapsToActualDayOfWeek: -1, 
     };
     setEditableActivePlan(
       produce(editableActivePlan, draft => {
         draft.push(newDay);
       })
     );
-    toast({ title: "New Day Added", description: "A new day has been added to the plan. Edit its details and add exercises. Don't forget to save plan changes." });
+    toast({ title: "New Day Added", description: "A new day has been added. Edit its details. Save plan changes when done." });
   };
 
   const getDisplayDayName = (day: WorkoutDay): string => {
     if (day.mapsToActualDayOfWeek !== undefined && day.mapsToActualDayOfWeek !== -1) {
       const mapped = daysOfWeekMap.find(d => d.value === day.mapsToActualDayOfWeek);
-      return mapped ? mapped.name : day.dayName;
+      return mapped ? mapped.name : day.dayName; // Fallback to dayName if map somehow fails
     }
-    return day.dayName;
+    return day.dayName; // Should be "Unassigned Day" or similar if not mapped
+  };
+
+  const handleStartSessionOverride = (dayId: string) => {
+    setTodayWorkoutOverride(dayId);
+    toast({
+      title: "Session Override Set",
+      description: `Today's session will be '${getDisplayDayName(editableActivePlan.find(d => d.id === dayId)!)}'. Go to 'Today's Session' to log.`,
+    });
+    router.push('/dashboard/today');
   };
 
   return (
@@ -274,10 +284,10 @@ export default function WorkoutPlanPage() {
                 <div>
                 <h2 className="text-2xl font-semibold text-primary flex items-center">
                     <CalendarDays className="mr-3 h-7 w-7" />
-                    Editing: {activePlanDetails.name}
+                    {isEditMode ? "Editing: " : "Active Plan: "} {activePlanDetails.name}
                 </h2>
                 <p className="text-muted-foreground mt-1">
-                    {isEditMode ? "Customize your weekly schedule for the active plan." : "Browse the active workout plan."}
+                    {isEditMode ? "Customize your weekly schedule for the active plan." : "Browse the active workout plan. Click 'Start Session' to log a specific day."}
                 </p>
                 </div>
                 <div className="flex gap-2">
@@ -403,13 +413,16 @@ export default function WorkoutPlanPage() {
                         )}
                     </CardContent>
                     {!isEditMode && (
-                        <CardContent className="pt-0 pb-4">
-                        <Button asChild variant="ghost" className="w-full justify-start text-primary hover:bg-primary/10">
-                            <Link href={`/workout/${day.id}`}>
-                            View {getDisplayDayName(day)}'s Workout <ArrowRight className="ml-auto h-4 w-4" />
-                            </Link>
-                        </Button>
-                        </CardContent>
+                        <CardFooter className="flex flex-col sm:flex-row gap-2 items-stretch pt-0 pb-4">
+                            <Button asChild variant="ghost" className="flex-1 justify-start text-primary hover:bg-primary/10">
+                                <Link href={`/workout/${day.id}`}>
+                                View Day Details <ArrowRight className="ml-auto h-4 w-4" />
+                                </Link>
+                            </Button>
+                            <Button variant="default" size="sm" className="flex-1" onClick={() => handleStartSessionOverride(day.id)}>
+                                <PlayCircle className="mr-2 h-4 w-4" /> Start This Session
+                            </Button>
+                        </CardFooter>
                     )}
                     </Card>
                 ))}
@@ -468,4 +481,3 @@ export default function WorkoutPlanPage() {
     </div>
   );
 }
-

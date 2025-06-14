@@ -4,14 +4,16 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { getWorkoutByDay as getWorkoutByDayFromActivePlan, getActiveWorkoutPlan } from '@/lib/workout-plan-service'; // Updated import
+import { useRouter } from 'next/navigation'; // Import useRouter
+import { getWorkoutByDay as getWorkoutByDayFromActivePlan, getActiveWorkoutPlan } from '@/lib/workout-plan-service';
+import { getTodayWorkoutOverride, clearTodayWorkoutOverride, setTodayWorkoutOverride } from '@/lib/session-override-service';
 import type { WorkoutDay, DailyLog, Exercise as ExerciseType } from '@/types/workout';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading'; 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import DayProgress from '@/components/workout/day-progress';
 import { useToast } from '@/hooks/use-toast';
-import { AlertTriangle, CheckSquare, ArrowRight, Info } from 'lucide-react';
+import { AlertTriangle, CheckSquare, ArrowRight, Info, RefreshCcw, ShieldAlert } from 'lucide-react';
 import { getUserTargetWeight } from '@/lib/user-settings'; 
 
 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -21,12 +23,6 @@ const getCurrentDateString = (): string => {
 };
 
 function getLocalStorageKey(dayId: string, date: string): string {
-  // Append active plan ID to localStorage key to separate logs for different plans
-  // This part needs activePlanId to be available. For now, assuming a simpler key or needs rework if planId is part of key.
-  // For simplicity, let's assume dayId and date is enough if logs are not plan-specific or active plan is global for logs.
-  // If logs MUST be plan-specific, this key generation needs active plan context.
-  // const activePlan = getActiveNamedWorkoutPlan(); // This might be too much for a simple key function
-  // const planPrefix = activePlan ? `${activePlan.id}_` : '';
   return `gymtrack_log_${dayId}_${date}`;
 }
 
@@ -61,44 +57,79 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: Daily
 
 export default function TodaysWorkoutDashboardPage() {
   const [workoutDay, setWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
-  const [currentDayId, setCurrentDayId] = useState<string | null>(null);
+  const [currentDayId, setCurrentDayId] = useState<string | null>(null); // Used for scheduled day
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isClient, setIsClient] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
+  const [isOverrideActive, setIsOverrideActive] = useState(false);
+  const [overrideDayId, setOverrideDayId] = useState<string | null>(null);
   const { toast } = useToast();
+  const router = useRouter();
 
-  useEffect(() => {
-    setIsClient(true);
+  const loadWorkoutForDisplay = useCallback(() => {
     const date = new Date();
-    const dayId = days[date.getDay()];
-    setCurrentDayId(dayId);
-    
-    // Fetch workout day from the *active* plan
-    const fetchedWorkoutDay = getWorkoutByDayFromActivePlan(dayId);
-    setWorkoutDay(fetchedWorkoutDay);
+    const scheduledDayId = days[date.getDay()];
+    setCurrentDayId(scheduledDayId); // Store the *scheduled* dayId
 
+    const overrideId = getTodayWorkoutOverride();
+    let finalDayIdToLoad = scheduledDayId;
+
+    if (overrideId) {
+      const overriddenWorkoutDay = getWorkoutByDayFromActivePlan(overrideId);
+      if (overriddenWorkoutDay) {
+        setWorkoutDay(overriddenWorkoutDay);
+        setIsOverrideActive(true);
+        setOverrideDayId(overrideId);
+        finalDayIdToLoad = overrideId; // This is the day we are actually loading and logging against
+      } else {
+        // Override ID is invalid or day not found, clear it and load scheduled
+        clearTodayWorkoutOverride();
+        setIsOverrideActive(false);
+        setOverrideDayId(null);
+        setWorkoutDay(getWorkoutByDayFromActivePlan(scheduledDayId));
+        toast({ variant: "destructive", title: "Override Error", description: "Could not find the overridden workout. Loading scheduled session."});
+      }
+    } else {
+      setIsOverrideActive(false);
+      setOverrideDayId(null);
+      setWorkoutDay(getWorkoutByDayFromActivePlan(scheduledDayId));
+    }
+    
     const dateStr = getCurrentDateString();
     setCurrentDate(dateStr);
 
-    if (typeof window !== 'undefined' && fetchedWorkoutDay) {
-      const key = getLocalStorageKey(fetchedWorkoutDay.id, dateStr); // Key might need active plan ID
-      const storedLog = localStorage.getItem(key);
-      if (storedLog) {
-        try {
-          setDailyLog(JSON.parse(storedLog));
-        } catch (error) {
-          console.error("Failed to parse stored log for today:", error);
+    // Load log for the day being displayed (scheduled or overridden)
+    if (typeof window !== 'undefined') {
+      const activeWorkout = overrideId ? getWorkoutByDayFromActivePlan(overrideId) : getWorkoutByDayFromActivePlan(scheduledDayId);
+      if (activeWorkout) {
+        const key = getLocalStorageKey(activeWorkout.id, dateStr);
+        const storedLog = localStorage.getItem(key);
+        if (storedLog) {
+          try {
+            setDailyLog(JSON.parse(storedLog));
+          } catch (error) {
+            console.error("Failed to parse stored log for today:", error);
+            setDailyLog({});
+          }
+        } else {
           setDailyLog({});
         }
       } else {
-        setDailyLog({});
+         setDailyLog({}); // No active workout to load log for
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+  }, [toast]); // toast is stable
 
   useEffect(() => {
+    setIsClient(true);
+    loadWorkoutForDisplay();
+  }, [loadWorkoutForDisplay]); 
+
+  // This effect handles log updates if the workoutDay context (e.g. overrideDayId or scheduledDayId) changes
+  useEffect(() => {
     if (typeof window !== 'undefined' && workoutDay && currentDate) {
+      // The key for localStorage MUST be based on the workoutDay.id that is *actually being displayed and logged*
       const key = getLocalStorageKey(workoutDay.id, currentDate);
       const storedLog = localStorage.getItem(key);
       if (storedLog) {
@@ -111,20 +142,22 @@ export default function TodaysWorkoutDashboardPage() {
           console.error("Failed to parse stored log on update:", error);
         }
       } else {
+        // If no log exists for the current workoutDay.id, ensure dailyLog is empty
         if (Object.keys(dailyLog).length > 0) { 
           setDailyLog({});
         }
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workoutDay, currentDate]); 
+  }, [workoutDay, currentDate]); // dailyLog removed from deps to avoid loop
 
 
   const handleClearDayLog = useCallback(() => {
     if (!workoutDay || !currentDate) return;
     setDailyLog({});
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(getLocalStorageKey(workoutDay.id, currentDate));
+      // Use workoutDay.id which reflects the currently loaded day (scheduled or overridden)
+      localStorage.removeItem(getLocalStorageKey(workoutDay.id, currentDate)); 
     }
     toast({
       title: "Log Cleared",
@@ -137,22 +170,41 @@ export default function TodaysWorkoutDashboardPage() {
     [workoutDay, dailyLog]
   );
 
+  const handleClearOverride = () => {
+    clearTodayWorkoutOverride();
+    setIsOverrideActive(false);
+    setOverrideDayId(null);
+    // Reload the page or just the workout data for the scheduled day
+    loadWorkoutForDisplay(); // This will re-evaluate and load the scheduled day
+    toast({ title: "Override Cleared", description: "Now showing your regularly scheduled workout."});
+  };
+
   if (!isClient || workoutDay === undefined) {
     return <LoadingWorkoutPage />;
   }
-
+  
   if (!workoutDay) {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="border-destructive">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle /> Workout Not Found for Today
+              <AlertTriangle /> 
+              {isOverrideActive && overrideDayId ? `Overridden Workout Not Found` : `Workout Not Found for Today`}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p>No workout plan found for {currentDayId || 'today'} in the active plan. Enjoy your rest day or check your plan!</p>
-            <Button asChild variant="link" className="mt-2">
+            <p>
+              {isOverrideActive && overrideDayId 
+                ? `Could not find the overridden workout (ID: ${overrideDayId}). Try clearing the override.` 
+                : `No workout plan found for ${currentDayId || 'today'} in the active plan. Enjoy your rest day or check your plan!`}
+            </p>
+            {isOverrideActive && (
+              <Button onClick={handleClearOverride} variant="outline" className="mt-4 mr-2">
+                <RefreshCcw className="mr-2 h-4 w-4" /> Clear Override
+              </Button>
+            )}
+            <Button asChild variant="link" className="mt-4">
                 <Link href="/workout-plan">Manage Workout Plans</Link>
             </Button>
           </CardContent>
@@ -169,6 +221,20 @@ export default function TodaysWorkoutDashboardPage() {
 
   return (
     <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8">
+      {isOverrideActive && (
+        <Card className="mb-6 bg-accent/20 border-accent shadow-md">
+          <CardHeader className="flex-row items-center justify-between pb-3 pt-3">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5 text-accent-foreground" />
+              <CardTitle className="text-base text-accent-foreground">Session Override Active</CardTitle>
+            </div>
+            <Button variant="ghost" size="sm" onClick={handleClearOverride} className="text-accent-foreground hover:bg-accent/30">
+              <RefreshCcw className="mr-1.5 h-4 w-4" /> Revert to Scheduled
+            </Button>
+          </CardHeader>
+        </Card>
+      )}
+
       <Card className="mb-8 bg-card shadow-lg border-none">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
