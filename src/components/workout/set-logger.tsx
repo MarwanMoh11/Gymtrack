@@ -36,11 +36,7 @@ export default function SetLogger({
 
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined && loggedSetData.reps !== null && String(loggedSetData.reps).trim() !== '') return String(loggedSetData.reps);
-    
-    if (lastSessionSetPerformance?.reps !== undefined) {
-      return String(lastSessionSetPerformance.reps);
-    }
-    
+    if (lastSessionSetPerformance?.reps !== undefined) return String(lastSessionSetPerformance.reps);
     return '';
   };
 
@@ -49,9 +45,10 @@ export default function SetLogger({
 
   useEffect(() => {
     setIsEditing(isEditingInitially);
-    setCurrentReps(getInitialReps());
-   // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [isEditingInitially, loggedSetData, lastSessionSetPerformance]);
+    if (isEditingInitially) {
+      setCurrentReps(getInitialReps());
+    }
+  }, [isEditingInitially, loggedSetData, lastSessionSetPerformance]);
 
 
   const handleLog = () => {

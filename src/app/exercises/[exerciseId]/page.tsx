@@ -91,7 +91,6 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [manualTargetWeight, setManualTargetWeight] = useState('');
-  const [forceSetEditKey, setForceSetEditKey] = useState(0);
   const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
 
   const [isEditExerciseModalOpen, setIsEditExerciseModalOpen] = useState(false);
@@ -227,7 +226,6 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       setLoggedExerciseData({}); // Clear the state
       updateFullDailyLog(null); // Remove the exercise entry from today's daily log in localStorage
       
-      setForceSetEditKey(prev => prev + 1); // Force re-render of SetLogger components
       setCanSuggestWeightIncrease(false); 
       toast({
         title: "Target Weight Updated",
@@ -258,7 +256,6 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     updateFullDailyLog(skippedLog);
     setIsEditingTarget(false);
     setCanSuggestWeightIncrease(false);
-    setForceSetEditKey(prev => prev + 1);
     toast({ variant: "default", title: "Exercise Skipped", description: `"${baseExercise?.name}" marked as skipped.`});
   };
 
@@ -266,7 +263,6 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     setLoggedExerciseData({});
     updateFullDailyLog(null);
     setIsEditingTarget(false);
-    setForceSetEditKey(prev => prev + 1);
     toast({ title: "Exercise Unskipped", description: `"${baseExercise?.name}" is no longer skipped.`});
   };
 
@@ -471,7 +467,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
               const lastSessionSetPerformance = getPreviousSetPerformance(exerciseId, set.id, exerciseForLogging.sets);
               return (
                 <SetLogger
-                  key={`${set.id}-${forceSetEditKey}`}
+                  key={set.id}
                   setNumber={index + 1}
                   setData={set}
                   loggedSetData={loggedExerciseData?.[set.id]}
@@ -480,7 +476,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                   onLogSet={(logData) => handleLogSet(set.id, logData)}
                   exerciseUnit={exerciseForLogging.unit || baseExercise.unit}
                   isSimpleLog={isSpecialActivity}
-                  isEditingInitially={!loggedExerciseData?.[set.id]?.isCompleted || (forceSetEditKey > 0 && !!loggedExerciseData?.[set.id]?.isCompleted)}
+                  isEditingInitially={!loggedExerciseData?.[set.id]?.isCompleted}
                 />
               );
             })}
