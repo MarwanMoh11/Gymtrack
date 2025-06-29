@@ -6,7 +6,7 @@ import { ArrowLeft, Dumbbell } from "lucide-react";
 
 export default function LoadingExercisePage() {
   return (
-    <div className="container mx-auto max-w-3xl px-4 py-8 space-y-6">
+    <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8 space-y-6">
       <div className="flex items-center">
         <Skeleton className="h-9 w-24 mr-4" /> {/* Back Button */}
       </div>
@@ -67,10 +67,9 @@ export default function LoadingExercisePage() {
           ))}
         </CardContent>
          <CardFooter className="pt-4 flex flex-row justify-end">
-             <Skeleton className="h-8 w-32" /> {/* AI Button */}
+             <Skeleton className="h-9 w-32" /> {/* AI Button */}
           </CardFooter>
       </Card>
     </div>
   );
 }
-    

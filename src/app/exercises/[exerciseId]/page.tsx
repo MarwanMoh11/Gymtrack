@@ -227,7 +227,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       exerciseForLogging?.sets.forEach(setDef => {
         resetExerciseLog[setDef.id] = {
           weight: manualTargetWeight,
-          reps: '8', 
+          reps: '', 
           isCompleted: false
         };
       });
@@ -236,8 +236,8 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       setForceSetEditKey(prev => prev + 1);
       setCanSuggestWeightIncrease(false); 
       toast({
-        title: "Plan Updated",
-        description: `Target weight for ${baseExercise?.name} updated to ${manualTargetWeight}. Reps for this session reset to 8.`,
+        title: "Target Weight Updated",
+        description: `New weight for ${baseExercise?.name} is ${manualTargetWeight}. Your sets for this session have been reset.`,
       });
     }
     setIsEditingTarget(false);
@@ -334,7 +334,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const canShowAISuggestionButton = dayIdFromQuery && !isSpecialActivity && !displayExercise.isCore && !isSkipped;
 
   return (
-    <div className="container mx-auto max-w-3xl px-4 py-8 space-y-6">
+    <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8 space-y-6">
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={() => dayIdFromQuery ? router.push('/dashboard/today') : router.back()} className="mr-auto">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to {dayIdFromQuery ? "Workout" : "Previous"}

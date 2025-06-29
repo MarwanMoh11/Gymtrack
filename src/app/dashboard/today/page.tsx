@@ -1,20 +1,19 @@
-
 // src/app/dashboard/today/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation'; // Import useRouter
-import { getWorkoutByDay as getWorkoutByDayFromActivePlan, getActiveWorkoutPlan } from '@/lib/workout-plan-service';
-import { getTodayWorkoutOverride, clearTodayWorkoutOverride, setTodayWorkoutOverride } from '@/lib/session-override-service';
+import { useRouter } from 'next/navigation';
+import { getWorkoutByDay as getWorkoutByDayFromActivePlan } from '@/lib/workout-plan-service';
+import { getTodayWorkoutOverride, clearTodayWorkoutOverride } from '@/lib/session-override-service';
 import type { WorkoutDay, DailyLog, Exercise as ExerciseType } from '@/types/workout';
-import LoadingWorkoutPage from '@/app/workout/[day]/loading'; 
+import LoadingWorkoutPage from '@/app/workout/[day]/loading';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import DayProgress from '@/components/workout/day-progress';
 import { useToast } from '@/hooks/use-toast';
-import { AlertTriangle, CheckSquare, ArrowRight, Info, RefreshCcw, ShieldAlert } from 'lucide-react';
-import { getUserTargetWeight } from '@/lib/user-settings'; 
+import { AlertTriangle, CheckSquare, ArrowRight, RefreshCcw, ShieldAlert } from 'lucide-react';
+import { getUserTargetWeight } from '@/lib/user-settings';
 
 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
@@ -34,7 +33,7 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: Daily
 
   workoutDay.exercises.forEach(exercise => {
     const exerciseLog = dailyLog[exercise.id];
-    const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+    const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
 
     if (!isSkipped) {
       exercise.sets.forEach(() => {
@@ -54,10 +53,9 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: Daily
   return { completedSets, totalSets, score };
 };
 
-
 export default function TodaysWorkoutDashboardPage() {
   const [workoutDay, setWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
-  const [currentDayId, setCurrentDayId] = useState<string | null>(null); // Used for scheduled day
+  const [currentDayId, setCurrentDayId] = useState<string | null>(null);
   const [dailyLog, setDailyLog] = useState<DailyLog>({});
   const [isClient, setIsClient] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
@@ -69,10 +67,10 @@ export default function TodaysWorkoutDashboardPage() {
   const loadWorkoutForDisplay = useCallback(() => {
     const date = new Date();
     const scheduledDayId = days[date.getDay()];
-    setCurrentDayId(scheduledDayId); // Store the *scheduled* dayId
+    setCurrentDayId(scheduledDayId);
 
     const overrideId = getTodayWorkoutOverride();
-    let finalDayIdToLoad = scheduledDayId;
+    let dayIdToLoad = scheduledDayId;
 
     if (overrideId) {
       const overriddenWorkoutDay = getWorkoutByDayFromActivePlan(overrideId);
@@ -80,9 +78,8 @@ export default function TodaysWorkoutDashboardPage() {
         setWorkoutDay(overriddenWorkoutDay);
         setIsOverrideActive(true);
         setOverrideDayId(overrideId);
-        finalDayIdToLoad = overrideId; // This is the day we are actually loading and logging against
+        dayIdToLoad = overrideId;
       } else {
-        // Override ID is invalid or day not found, clear it and load scheduled
         clearTodayWorkoutOverride();
         setIsOverrideActive(false);
         setOverrideDayId(null);
@@ -98,66 +95,39 @@ export default function TodaysWorkoutDashboardPage() {
     const dateStr = getCurrentDateString();
     setCurrentDate(dateStr);
 
-    // Load log for the day being displayed (scheduled or overridden)
     if (typeof window !== 'undefined') {
-      const activeWorkout = overrideId ? getWorkoutByDayFromActivePlan(overrideId) : getWorkoutByDayFromActivePlan(scheduledDayId);
-      if (activeWorkout) {
-        const key = getLocalStorageKey(activeWorkout.id, dateStr);
+      const activeWorkoutForLog = getWorkoutByDayFromActivePlan(dayIdToLoad);
+      if (activeWorkoutForLog) {
+        const key = getLocalStorageKey(activeWorkoutForLog.id, dateStr);
         const storedLog = localStorage.getItem(key);
-        if (storedLog) {
-          try {
-            setDailyLog(JSON.parse(storedLog));
-          } catch (error) {
-            console.error("Failed to parse stored log for today:", error);
-            setDailyLog({});
-          }
-        } else {
-          setDailyLog({});
-        }
+        setDailyLog(storedLog ? JSON.parse(storedLog) : {});
       } else {
-         setDailyLog({}); // No active workout to load log for
+         setDailyLog({});
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // toast is stable
+  }, [toast]);
 
   useEffect(() => {
     setIsClient(true);
     loadWorkoutForDisplay();
-  }, [loadWorkoutForDisplay]); 
+  }, [loadWorkoutForDisplay]);
 
-  // This effect handles log updates if the workoutDay context (e.g. overrideDayId or scheduledDayId) changes
   useEffect(() => {
     if (typeof window !== 'undefined' && workoutDay && currentDate) {
-      // The key for localStorage MUST be based on the workoutDay.id that is *actually being displayed and logged*
       const key = getLocalStorageKey(workoutDay.id, currentDate);
       const storedLog = localStorage.getItem(key);
-      if (storedLog) {
-        try {
-          const parsedLog = JSON.parse(storedLog);
-          if (JSON.stringify(parsedLog) !== JSON.stringify(dailyLog)) {
-            setDailyLog(parsedLog);
-          }
-        } catch (error) {
-          console.error("Failed to parse stored log on update:", error);
-        }
-      } else {
-        // If no log exists for the current workoutDay.id, ensure dailyLog is empty
-        if (Object.keys(dailyLog).length > 0) { 
-          setDailyLog({});
-        }
+      const currentLog = storedLog ? JSON.parse(storedLog) : {};
+      if (JSON.stringify(currentLog) !== JSON.stringify(dailyLog)) {
+          setDailyLog(currentLog);
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workoutDay, currentDate]); // dailyLog removed from deps to avoid loop
-
+  }, [workoutDay, currentDate, dailyLog]);
 
   const handleClearDayLog = useCallback(() => {
     if (!workoutDay || !currentDate) return;
     setDailyLog({});
     if (typeof window !== 'undefined') {
-      // Use workoutDay.id which reflects the currently loaded day (scheduled or overridden)
-      localStorage.removeItem(getLocalStorageKey(workoutDay.id, currentDate)); 
+      localStorage.removeItem(getLocalStorageKey(workoutDay.id, currentDate));
     }
     toast({
       title: "Log Cleared",
@@ -174,8 +144,7 @@ export default function TodaysWorkoutDashboardPage() {
     clearTodayWorkoutOverride();
     setIsOverrideActive(false);
     setOverrideDayId(null);
-    // Reload the page or just the workout data for the scheduled day
-    loadWorkoutForDisplay(); // This will re-evaluate and load the scheduled day
+    loadWorkoutForDisplay();
     toast({ title: "Override Cleared", description: "Now showing your regularly scheduled workout."});
   };
 
@@ -189,14 +158,14 @@ export default function TodaysWorkoutDashboardPage() {
         <Card className="border-destructive">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle /> 
+              <AlertTriangle />
               {isOverrideActive && overrideDayId ? `Overridden Workout Not Found` : `Workout Not Found for Today`}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p>
-              {isOverrideActive && overrideDayId 
-                ? `Could not find the overridden workout (ID: ${overrideDayId}). Try clearing the override.` 
+              {isOverrideActive && overrideDayId
+                ? `Could not find the overridden workout (ID: ${overrideDayId}). Try clearing the override.`
                 : `No workout plan found for ${currentDayId || 'today'} in the active plan. Enjoy your rest day or check your plan!`}
             </p>
             {isOverrideActive && (
@@ -205,7 +174,7 @@ export default function TodaysWorkoutDashboardPage() {
               </Button>
             )}
             <Button asChild variant="link" className="mt-4">
-                <Link href="/workout-plan">Manage Workout Plans</Link>
+              <Link href="/workout-plan">Manage Workout Plans</Link>
             </Button>
           </CardContent>
         </Card>
@@ -242,7 +211,7 @@ export default function TodaysWorkoutDashboardPage() {
               <CardTitle className="text-3xl font-bold text-primary mb-1">{workoutDay.dayName}</CardTitle>
               <CardDescription className="text-lg text-muted-foreground">{workoutDay.title} - {currentDate}</CardDescription>
             </div>
-             <Button variant="outline" onClick={handleClearDayLog} size="sm" className="rounded-full shrink-0">
+            <Button variant="outline" onClick={handleClearDayLog} size="sm" className="rounded-full shrink-0">
               Clear Today's Full Log
             </Button>
           </div>
@@ -251,17 +220,17 @@ export default function TodaysWorkoutDashboardPage() {
           )}
         </CardHeader>
         <CardFooter className="flex flex-col sm:flex-row justify-between items-center pt-3 pb-4 px-6 gap-4">
-             <div className="w-full sm:w-auto">
-                <h3 className="text-sm font-medium text-muted-foreground flex items-center">
-                    <CheckSquare className="h-4 w-4 mr-1.5 text-primary/80" />
-                    Session Score
-                </h3>
-                <p className="text-2xl font-bold text-primary">{score}%</p>
-                <p className="text-xs text-muted-foreground">{completedSets} of {totalSets} sets completed</p>
-             </div>
-             <div className="w-full sm:w-auto flex-grow max-w-xs">
-                 <DayProgress completedSets={completedSets} totalSets={totalSets} />
-             </div>
+          <div className="w-full sm:w-auto">
+            <h3 className="text-sm font-medium text-muted-foreground flex items-center">
+              <CheckSquare className="h-4 w-4 mr-1.5 text-primary/80" />
+              Session Score
+            </h3>
+            <p className="text-2xl font-bold text-primary">{score}%</p>
+            <p className="text-xs text-muted-foreground">{completedSets} of {totalSets} sets completed</p>
+          </div>
+          <div className="w-full sm:w-auto flex-grow max-w-xs">
+            <DayProgress completedSets={completedSets} totalSets={totalSets} />
+          </div>
         </CardFooter>
       </Card>
 
@@ -271,7 +240,7 @@ export default function TodaysWorkoutDashboardPage() {
           const effectiveWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
           const exerciseCompleted = isExerciseCompleted(exercise);
           const exerciseLog = dailyLog[exercise.id];
-          const isSkipped = exerciseLog && exercise.sets.length > 0 && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+          const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
 
           return (
             <Card key={exercise.id} className="shadow-md hover:shadow-lg transition-shadow duration-300">
@@ -285,22 +254,22 @@ export default function TodaysWorkoutDashboardPage() {
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                    {isSkipped && (
-                        <span className="text-xs text-destructive font-medium">(Skipped)</span>
-                    )}
-                    {exerciseCompleted && !isSkipped && (
-                        <CheckSquare className="h-5 w-5 text-primary" />
-                    )}
-                    <Button asChild variant="ghost" size="sm">
-                        <Link href={`/exercises/${exercise.id}?dayId=${workoutDay.id}`}>
-                            Log / View <ArrowRight className="ml-2 h-4 w-4" />
-                        </Link>
-                    </Button>
+                  {isSkipped && (
+                    <span className="text-xs text-destructive font-medium">(Skipped)</span>
+                  )}
+                  {exerciseCompleted && !isSkipped && (
+                    <CheckSquare className="h-5 w-5 text-primary" />
+                  )}
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`/exercises/${exercise.id}?dayId=${workoutDay.id}`}>
+                      Log / View <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
                 </div>
               </CardHeader>
               {exercise.notes && (
                 <CardContent className="pb-3 pt-0">
-                    <p className="text-xs italic text-muted-foreground bg-secondary/30 p-2 rounded-md">{exercise.notes}</p>
+                  <p className="text-xs italic text-muted-foreground bg-secondary/30 p-2 rounded-md">{exercise.notes}</p>
                 </CardContent>
               )}
             </Card>
