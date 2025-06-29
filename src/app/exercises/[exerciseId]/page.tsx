@@ -223,17 +223,11 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     if (manualTargetWeight !== (currentWeight || '')) {
       setTargetWeightOverride(exerciseId, manualTargetWeight);
       
-      const resetExerciseLog: LoggedExerciseData = {};
-      exerciseForLogging?.sets.forEach(setDef => {
-        resetExerciseLog[setDef.id] = {
-          weight: manualTargetWeight,
-          reps: '', 
-          isCompleted: false
-        };
-      });
-      setLoggedExerciseData(resetExerciseLog);
-      updateFullDailyLog(resetExerciseLog);
-      setForceSetEditKey(prev => prev + 1);
+      // Reset the log for this specific exercise for today's session
+      setLoggedExerciseData({}); // Clear the state
+      updateFullDailyLog(null); // Remove the exercise entry from today's daily log in localStorage
+      
+      setForceSetEditKey(prev => prev + 1); // Force re-render of SetLogger components
       setCanSuggestWeightIncrease(false); 
       toast({
         title: "Target Weight Updated",

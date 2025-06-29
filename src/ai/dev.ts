@@ -4,6 +4,3 @@ config();
 
 import '@/ai/flows/adjust-weight-recommendation.ts';
 import '@/ai/flows/next-session-recommendation.ts';
-// import '@/ai/flows/coaching-tips-flow.ts'; // Removed import for the coaching flow
-
-    

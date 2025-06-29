@@ -1,7 +1,7 @@
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
-import { CalendarDays, History } from "lucide-react"; // Removed Lightbulb
+import { CalendarDays, History } from "lucide-react";
 
 export default function LoadingProgressiveOverloadDashboard() {
   return (
@@ -37,5 +37,3 @@ export default function LoadingProgressiveOverloadDashboard() {
     </div>
   );
 }
-
-    

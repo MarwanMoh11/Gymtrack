@@ -5,7 +5,7 @@ import type { SetData, LoggedSetData } from '@/types/workout';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Check, Edit3, Plus, Minus, History, Sparkles } from 'lucide-react'; // Added History, Sparkles
+import { Check, Edit3, Plus, Minus, History, Sparkles } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -37,12 +37,10 @@ export default function SetLogger({
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined && loggedSetData.reps !== null && String(loggedSetData.reps).trim() !== '') return String(loggedSetData.reps);
     
-    // If not logged but there's past performance, suggest that as a starting point.
     if (lastSessionSetPerformance?.reps !== undefined) {
       return String(lastSessionSetPerformance.reps);
     }
     
-    // Fallback to empty string if no data exists, encouraging user input.
     return '';
   };
 
@@ -57,7 +55,6 @@ export default function SetLogger({
 
 
   const handleLog = () => {
-    // If user leaves input blank but there was a previous log, use that. Otherwise use the placeholder.
     const repsToLog = String(currentReps).trim() !== '' 
       ? currentReps 
       : (lastSessionSetPerformance?.reps !== undefined ? String(lastSessionSetPerformance.reps) : String(setData.targetReps));
@@ -109,14 +106,12 @@ export default function SetLogger({
     return String(setData.targetReps); // Fallback to plan's target
   };
   
-  // Gamification: Check if current performance beats last session
   const performanceBeatLast = useMemo(() => {
     if (!loggedSetData?.isCompleted || !lastSessionSetPerformance?.isCompleted) return null;
 
     const currentRepsNum = parseInt(String(loggedSetData.reps), 10);
     const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
     
-    // For now, let's assume weight is the same. A more complex check could be added.
     if (!isNaN(currentRepsNum) && !isNaN(lastRepsNum) && currentRepsNum > lastRepsNum) {
         return { type: 'reps', diff: currentRepsNum - lastRepsNum };
     }
@@ -150,7 +145,7 @@ export default function SetLogger({
     return (
       <div className={cn(
         "flex items-center justify-between p-3 border-t border-border/50",
-        performanceBeatLast ? "bg-primary/10" : "bg-secondary/30" // Highlight if PR
+        performanceBeatLast ? "bg-primary/10" : "bg-secondary/30"
       )}>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span className="font-medium w-12">Set {setNumber}:</span>
@@ -190,9 +185,8 @@ export default function SetLogger({
             {unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1)} (Plan: {setData.targetReps})
           </Label>
           <div className="flex items-center gap-1 mt-1">
-             <Button onClick={decrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0">
+             <Button onClick={decrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Decrement reps">
               <Minus className="h-4 w-4" />
-              <span className="sr-only">Decrement reps</span>
             </Button>
             <Input
               id={`set-${setNumber}-reps`}
@@ -205,9 +199,8 @@ export default function SetLogger({
               className="h-9 text-lg font-semibold text-center appearance-none w-16 flex-shrink-0"
               style={{ MozAppearance: 'textfield' }} 
             />
-             <Button onClick={incrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0">
+             <Button onClick={incrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Increment reps">
               <Plus className="h-4 w-4" />
-              <span className="sr-only">Increment reps</span>
             </Button>
           </div>
         </div>
@@ -217,7 +210,7 @@ export default function SetLogger({
         </Button>
       </div>
       {lastSessionSetPerformance && (
-        <div className="pl-[calc(3rem+0.5rem)] text-xs text-muted-foreground/70 flex items-center"> {/* Align with input field */}
+        <div className="pl-[calc(3rem+0.5rem)] text-xs text-muted-foreground/70 flex items-center">
             <History className="h-3 w-3 mr-1 opacity-60" />
             Last time: {lastSessionSetPerformance.reps} {unitLabel}
             {lastSessionSetPerformance.weight && ` @ ${lastSessionSetPerformance.weight}`}
