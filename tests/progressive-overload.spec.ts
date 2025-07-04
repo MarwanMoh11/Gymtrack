@@ -1,3 +1,4 @@
+
 import { test, expect } from '@playwright/test';
 
 test.describe('Progressive Overload Weight Change', () => {
@@ -45,7 +46,7 @@ test.describe('Progressive Overload Weight Change', () => {
     await expect(weightInput).not.toBeVisible();
 
     // 9. Verify that the exercise log was reset by checking if the first rep input is empty.
-    const firstRepInput = page.locator('#set-1-reps');
+    const firstRepInput = page.getByLabel('Reps for set 1');
     await expect(firstRepInput).toHaveValue('');
 
     // 10. Bonus: Confirm logging works after the weight change.

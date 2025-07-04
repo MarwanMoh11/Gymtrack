@@ -195,6 +195,7 @@ export default function SetLogger({
               onChange={(e) => setCurrentReps(e.target.value.replace(/[^0-9]/g, ''))}
               className="h-9 text-lg font-semibold text-center appearance-none w-16 flex-shrink-0"
               style={{ MozAppearance: 'textfield' }} 
+              aria-label={`Reps for set ${setNumber}`}
             />
              <Button onClick={incrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Increment reps">
               <Plus className="h-4 w-4" />
