@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -10,11 +10,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, Wand2 } from 'lucide-react';
+import { Loader2, Wand2, ArrowRight } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { Exercise, LoggedExerciseData } from '@/types/workout';
-import { adjustWeightRecommendation, AdjustWeightRecommendationInput } from '@/ai/flows/adjust-weight-recommendation';
+import { nextSessionRecommendation, NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
 import { useToast } from '@/hooks/use-toast';
+import { transformHistoricalDataForAI } from '@/lib/workout-utils';
 
 interface AIRecommendationModalProps {
   exercise: Exercise;
@@ -30,54 +31,33 @@ export default function AIRecommendationModal({
   onOpenChange,
 }: AIRecommendationModalProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [recommendation, setRecommendation] = useState<string | null>(null);
+  const [recommendation, setRecommendation] = useState<NextSessionRecommendationOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
-
-  const getRepsString = (isLogged: boolean): string => {
-    return exercise.sets
-      .map(set => {
-        if (isLogged) {
-          return loggedExerciseData?.[set.id]?.reps?.toString() || set.targetReps.toString();
-        }
-        return set.targetReps.toString();
-      })
-      .join(', ');
-  };
 
   const handleGetRecommendation = async () => {
     setIsLoading(true);
     setError(null);
     setRecommendation(null);
 
-    if (!loggedExerciseData || Object.keys(loggedExerciseData).length === 0) {
-        setError("Please log at least one set for this exercise to get a recommendation.");
+    const historicalData = transformHistoricalDataForAI(exercise.id);
+
+    if (historicalData.length === 0) {
+        setError("Not enough historical data for a meaningful recommendation. Log a few sessions first.");
         setIsLoading(false);
         return;
     }
-
-    const loggedSetsCount = exercise.sets.filter(s => loggedExerciseData[s.id]?.isCompleted).length;
-    if (loggedSetsCount === 0) {
-        setError("Ensure you have marked sets as completed by logging them.");
-        setIsLoading(false);
-        return;
-    }
-
-
-    const input: AdjustWeightRecommendationInput = {
-      exerciseName: exercise.name,
-      previousWeight: exercise.targetWeight || 'N/A',
-      previousReps: getRepsString(false), // Target reps
-      currentReps: getRepsString(true),   // Logged reps
-      userGoal: 'Achieve progressive overload for strength and hypertrophy.', // Example goal
-    };
 
     try {
-      const result = await adjustWeightRecommendation(input);
-      setRecommendation(result.recommendation);
+      const result = await nextSessionRecommendation({
+          exerciseName: exercise.name,
+          recentPerformance: historicalData,
+          userGoal: 'strength and hypertrophy',
+      });
+      setRecommendation(result);
     } catch (e) {
       console.error('AI Recommendation Error:', e);
-      setError('Failed to get recommendation. Please try again.');
+      setError('Failed to get recommendation. The AI may be busy or an error occurred.');
       toast({
         variant: 'destructive',
         title: 'AI Error',
@@ -88,14 +68,12 @@ export default function AIRecommendationModal({
     }
   };
 
-  // Reset state when dialog is closed/opened
-  useState(() => {
+  useEffect(() => {
     if (isOpen) {
       setRecommendation(null);
       setError(null);
       setIsLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
 
@@ -108,7 +86,7 @@ export default function AIRecommendationModal({
             AI Recommendation for {exercise.name}
           </DialogTitle>
           <DialogDescription>
-            Get AI-powered advice to adjust your weight or reps for the next workout.
+            Get AI-powered advice for your next session based on your performance trend.
           </DialogDescription>
         </DialogHeader>
 
@@ -120,16 +98,26 @@ export default function AIRecommendationModal({
         )}
 
         {recommendation && !isLoading && (
-          <div className="my-4 p-4 bg-accent/30 rounded-md border border-accent">
-            <h4 className="font-semibold mb-2 text-foreground">Suggestion for your next session:</h4>
-            <p className="text-sm text-foreground/80">{recommendation}</p>
+          <div className="my-4 p-4 bg-accent/30 rounded-md border border-accent space-y-3 text-sm">
+            <div>
+              <h4 className="font-semibold text-foreground mb-1">Suggested Weight:</h4>
+              <p className="p-2 bg-background/50 rounded-md text-base font-bold text-primary">{recommendation.suggestedWeight}</p>
+            </div>
+             <div>
+              <h4 className="font-semibold text-foreground mb-1">Suggested Reps:</h4>
+              <p className="p-2 bg-background/50 rounded-md">{recommendation.suggestedReps}</p>
+            </div>
+             <div>
+              <h4 className="font-semibold text-foreground mb-1">Reasoning:</h4>
+              <p className="text-foreground/80">{recommendation.reasoning}</p>
+            </div>
           </div>
         )}
         
         {isLoading && (
           <div className="flex justify-center items-center my-8">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="ml-2">Getting your recommendation...</p>
+            <p className="ml-2">Analyzing your progress...</p>
           </div>
         )}
 
@@ -138,7 +126,6 @@ export default function AIRecommendationModal({
                 <p className="text-sm text-muted-foreground">Click "Get Recommendation" to see AI advice.</p>
             </div>
         )}
-
 
         <DialogFooter className="sm:justify-between gap-2">
            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

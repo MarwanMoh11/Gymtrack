@@ -1,19 +1,22 @@
 
 // src/app/dashboard/progressive-overload/page.tsx
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { getWorkoutByDay } from '@/lib/workout-plan-service'; // Corrected import
 import type { DailyLog, WorkoutDay } from '@/types/workout';
-import { History, CalendarDays, Flame } from 'lucide-react';
+import { History, CalendarDays, Flame, BarChart } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading';
-import { calculateStreaks } from '@/lib/workout-utils';
+import { calculateStreaks, getAllExercises, calculateProgressDataForChart, ChartData } from '@/lib/workout-utils';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import PastWorkoutLogView from '@/components/dashboard/past-workout-log-view';
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartStyle } from '@/components/ui/chart';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
 
 const getLoggedDays = (): Date[] => {
   if (typeof window === 'undefined') return [];
@@ -26,7 +29,7 @@ const getLoggedDays = (): Date[] => {
       const match = key.match(/^gymtrack_log_[a-zA-Z0-9-]+_(\d{4}-\d{2}-\d{2})$/);
       if (match && match[1]) {
         const dateString = match[1];
-        if (!dateString) { // Added check for undefined dateString
+        if (!dateString) { 
             console.warn("Found log key with undefined date string:", key);
             continue;
         }
@@ -53,7 +56,7 @@ const getLoggedDays = (): Date[] => {
   return Array.from(loggedDates)
     .filter(dateStr => typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr))
     .map(dateStr => {
-       if (!dateStr) return null; // Should be caught by filter, but defensive
+       if (!dateStr) return null;
       const [year, month, day] = dateStr.split('-').map(Number);
       if (isNaN(year) || isNaN(month) || isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) {
          console.error("Failed to parse valid date components from string:", dateStr);
@@ -64,18 +67,12 @@ const getLoggedDays = (): Date[] => {
     .filter((date): date is Date => date !== null);
 };
 
-
 const formatDateLocal = (date: Date): string => {
   const year = date.getUTCFullYear();
   const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
   const day = date.getUTCDate().toString().padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
-
-function getLocalStorageKey(dayId: string, date: Date): string {
-  const dateStr = formatDateLocal(date);
-  return `gymtrack_log_${dayId}_${dateStr}`;
-}
 
 export default function ProgressiveOverloadDashboardPage() {
   const [isClient, setIsClient] = useState(false);
@@ -86,6 +83,13 @@ export default function ProgressiveOverloadDashboardPage() {
   const [selectedDateLog, setSelectedDateLog] = useState<DailyLog | null>(null);
   const [selectedWorkoutDay, setSelectedWorkoutDay] = useState<WorkoutDay | null>(null);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+
+  // State for progress chart
+  const [trackableExercises, setTrackableExercises] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
+  const [chartData, setChartData] = useState<ChartData[]>([]);
+  const [exerciseName, setExerciseName] = useState<string>('');
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -97,107 +101,31 @@ export default function ProgressiveOverloadDashboardPage() {
       setLoggedDays(days);
       const calculatedStreaks = calculateStreaks(days);
       setStreaks(calculatedStreaks);
+
+      // Load data for chart
+      const exercises = getAllExercises();
+      setTrackableExercises(exercises);
+      if (exercises.length > 0) {
+        const firstExerciseId = exercises[0].id;
+        setSelectedExerciseId(firstExerciseId);
+        setExerciseName(exercises[0].name);
+        const data = calculateProgressDataForChart(firstExerciseId);
+        setChartData(data);
+      }
     }
   }, []);
 
+  const handleExerciseSelectForChart = (exerciseId: string) => {
+    setSelectedExerciseId(exerciseId);
+    const data = calculateProgressDataForChart(exerciseId);
+    setChartData(data);
+    const exercise = trackableExercises.find(ex => ex.id === exerciseId);
+    if(exercise) setExerciseName(exercise.name);
+  };
 
-  const handleDateSelect = useCallback((date: Date | undefined) => {
-    if (!date || typeof window === 'undefined') return;
-
-    const selectedDateUTC = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dateStr = formatDateLocal(selectedDateUTC);
-    const isLogged = loggedDays.some(d => formatDateLocal(d) === dateStr);
-
-    if (!isLogged) {
-        toast({ variant: "default", title: "No Log", description: "No workout logged on this day." });
-        setSelectedDate(undefined);
-        setIsLogModalOpen(false);
-        setSelectedDateLog(null);
-        setSelectedWorkoutDay(null);
-        return;
-    }
-
-    setSelectedDate(selectedDateUTC);
-
-    const dayIndex = selectedDateUTC.getUTCDay();
-    const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-    const dayIdFromDayOfWeek = daysOfWeek[dayIndex]; // This is a generic day ID like "monday"
-    
-    // Attempt to get workout day from the active plan using the generic day of the week ID
-    const workoutForDayFromActivePlan = getWorkoutByDay(dayIdFromDayOfWeek);
-    setSelectedWorkoutDay(workoutForDayFromActivePlan);
-
-    // Try to find the specific log for this date. The key might contain a more specific dayId.
-    let foundLogKey = null;
-    let specificDayIdFromLog: string | null = null;
-
-    try {
-        for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k) {
-                const match = k.match(/^gymtrack_log_([a-zA-Z0-9-]+)_(\d{4}-\d{2}-\d{2})$/);
-                if (match && match[1] && match[2] === dateStr) {
-                    foundLogKey = k;
-                    specificDayIdFromLog = match[1]; // This is the dayId used when the workout was logged
-                    break;
-                }
-            }
-        }
-    } catch (error) {
-        console.error("Error accessing localStorage keys:", error);
-        toast({ variant: "destructive", title: "Storage Error", description: "Could not access log data." });
-        setIsLogModalOpen(false);
-        return;
-    }
-
-    if (foundLogKey) {
-        const storedLog = localStorage.getItem(foundLogKey);
-        if (storedLog) {
-            try {
-                setSelectedDateLog(JSON.parse(storedLog));
-                // If we found a specificDayIdFromLog, try to get its structure.
-                // This is more accurate than relying on workoutForDayFromActivePlan if plans changed.
-                if (specificDayIdFromLog) {
-                    const historicalWorkoutDay = getWorkoutByDay(specificDayIdFromLog); // This will search active plan, but could be expanded
-                    setSelectedWorkoutDay(historicalWorkoutDay); // May still be null if not in active plan
-                }
-                setIsLogModalOpen(true);
-            } catch (error) {
-                console.error("Failed to parse stored log for selected date:", error);
-                toast({ variant: "destructive", title: "Error", description: "Could not load the log for the selected date." });
-                setSelectedDateLog(null);
-                setIsLogModalOpen(false);
-            }
-        } else {
-            toast({ variant: "default", title: "Log Data Missing", description: "Log data seems missing for this logged day." });
-            setSelectedDateLog(null);
-            setIsLogModalOpen(false);
-        }
-    } else {
-        // This case means the day was marked as "logged" by getLoggedDays, but we couldn't find the actual log item by iterating keys.
-        // This might indicate an issue in getLoggedDays or if a log was partially deleted.
-        toast({ variant: "default", title: "Log Inconsistency", description: "Could not retrieve specific log details for this day." });
-        setSelectedDateLog(null);
-        setIsLogModalOpen(false);
-    }
-
-  }, [loggedDays, toast]);
-
-   const handleMonthChange = (month: Date) => {
-     if (month instanceof Date && !isNaN(month.getTime())) {
-        const year = month.getUTCFullYear();
-        const monthIndex = month.getUTCMonth();
-        setDisplayMonth(new Date(Date.UTC(year, monthIndex, 1)));
-     } else {
-         console.error("Invalid date received for month change:", month);
-         const today = new Date();
-         setDisplayMonth(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)));
-     }
-   };
-
-  if (!isClient) {
-    return <LoadingProgressiveOverloadDashboard />;
-  }
+  const chartConfig = {
+    weight: { label: 'Weight (kg)', color: 'hsl(var(--primary))' },
+  };
 
   return (
     <div className="container mx-auto py-8 px-4 md:px-6 space-y-8">
@@ -209,6 +137,72 @@ export default function ProgressiveOverloadDashboardPage() {
         </div>
 
         <div className="space-y-8">
+          {/* Progress Chart Card */}
+          <Card className="shadow-lg rounded-2xl">
+            <CardHeader>
+               <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
+                 <div>
+                    <CardTitle className="text-xl font-semibold flex items-center mb-1">
+                      <BarChart className="mr-2 h-5 w-5 text-primary" />
+                      Strength Progression
+                    </CardTitle>
+                    <CardDescription>Visualize your gains over time. Select an exercise to see your history.</CardDescription>
+                 </div>
+                 <div className="w-full sm:w-64">
+                    <Select onValueChange={handleExerciseSelectForChart} defaultValue={selectedExerciseId ?? undefined}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select an exercise..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {trackableExercises.map(ex => (
+                          <SelectItem key={ex.id} value={ex.id}>{ex.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                 </div>
+               </div>
+            </CardHeader>
+            <CardContent>
+              {chartData.length > 1 ? (
+                 <ChartContainer config={chartConfig} className="min-h-[200px] w-full">
+                    <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+                      <XAxis dataKey="date" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} tickLine={false} axisLine={false} />
+                      <YAxis domain={['dataMin - 5', 'dataMax + 5']} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} tickLine={false} axisLine={false} label={{ value: "Weight (kg)", angle: -90, position: 'insideLeft', fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} />
+                      <ChartTooltip
+                        cursor={{ stroke: 'hsl(var(--accent))', strokeWidth: 2, strokeDasharray: '3 3' }}
+                        content={
+                            <ChartTooltipContent
+                                formatter={(value, name, props) => (
+                                    <div className="text-sm">
+                                        <div className="font-bold">{props.payload.date}</div>
+                                        <div>Weight: {value} kg</div>
+                                        <div>Reps: {props.payload.reps}</div>
+                                        {props.payload.isPR && <div className="text-primary font-bold">Personal Record!</div>}
+                                    </div>
+                                )}
+                            />
+                        }
+                       />
+                      <Line type="monotone" dataKey="weight" stroke="hsl(var(--primary))" strokeWidth={2} dot={(props) => {
+                          const { cx, cy, payload } = props;
+                          if (payload.isPR) {
+                              return <circle cx={cx} cy={cy} r={5} fill="hsl(var(--primary))" stroke="hsl(var(--background))" strokeWidth={2} className="pr-dot" />;
+                          }
+                          return <circle cx={cx} cy={cy} r={3} fill="hsl(var(--primary))" />;
+                      }} />
+                    </LineChart>
+                 </ChartContainer>
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64">
+                  <BarChart className="h-12 w-12 mb-2" />
+                  <p className="font-semibold">{selectedExerciseId ? `Not enough data to show a chart for ${exerciseName}.` : "Select an exercise to view its progress."}</p>
+                  <p className="text-sm">Log at least two sessions for an exercise to see its progression here.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        
           <Card className="shadow-lg rounded-2xl flex flex-col overflow-hidden">
             <CardHeader className="flex-shrink-0">
               <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
@@ -230,27 +224,27 @@ export default function ProgressiveOverloadDashboardPage() {
             <CardContent className="flex-grow flex items-center justify-center p-1 sm:p-2">
               <Calendar
                 mode="single"
-                selected={selectedDate}
-                onSelect={handleDateSelect}
+                onSelect={() => {}} // No action on select, handled by day render
                 month={displayMonth}
-                onMonthChange={handleMonthChange}
+                onMonthChange={setDisplayMonth}
                 className="rounded-md border p-0 w-full max-w-full h-auto"
-                 modifiers={{
-                  logged: loggedDays,
-                 }}
+                 modifiers={{ logged: loggedDays }}
                  modifiersStyles={{
                     logged: {
                         backgroundColor: 'hsl(var(--primary) / 0.2)',
                         color: 'hsl(var(--foreground))',
                         borderRadius: 'var(--radius)',
                         position: 'relative',
-                    },
-                    selected: {
-                         backgroundColor: 'hsl(var(--primary))',
-                         color: 'hsl(var(--primary-foreground))',
-                         borderRadius: 'var(--radius)',
-                         fontWeight: 'bold',
                     }
+                 }}
+                 components={{
+                     DayContent: (props) => {
+                        const isLogged = loggedDays.some(d => d.getTime() === props.date.getTime());
+                        if (isLogged) {
+                            return <button className="w-full h-full flex items-center justify-center relative">{props.date.getDate()}</button>
+                        }
+                        return <div className="w-full h-full flex items-center justify-center relative">{props.date.getDate()}</div>
+                     }
                  }}
                  disabled={{ after: new Date() }}
                  classNames={{
@@ -299,7 +293,7 @@ export default function ProgressiveOverloadDashboardPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="flex-grow overflow-y-auto pr-2 -mr-6 pl-6">
-              {selectedDateLog ? ( // selectedWorkoutDay might be null if plan changed
+              {selectedDateLog ? ( 
                  <PastWorkoutLogView workoutDay={selectedWorkoutDay} dailyLog={selectedDateLog} />
               ) : (
                  <p className="text-muted-foreground text-center mt-8">Log details could not be loaded.</p>
