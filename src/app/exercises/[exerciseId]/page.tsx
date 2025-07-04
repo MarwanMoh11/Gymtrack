@@ -43,9 +43,6 @@ const getCurrentDateString = (): string => {
 };
 
 function getDailyLogLocalStorageKey(dayId: string, date: string): string {
-  // Potentially include activePlanId if logs are strictly plan-specific
-  // const activePlan = getActiveNamedWorkoutPlan();
-  // const planPrefix = activePlan ? `${activePlan.id}_` : '';
   return `gymtrack_log_${dayId}_${date}`;
 }
 
@@ -78,7 +75,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const router = useRouter();
   const searchParams = useSearchParams();
   const dayIdFromQuery = searchParams.get('dayId');
-  const planIdFromQuery = searchParams.get('planId'); // For context if not using global active plan
+  const planIdFromQuery = searchParams.get('planId');
   
   const [baseExercise, setBaseExercise] = useState<ExerciseType | null | undefined>(undefined);
   const [currentWorkoutDay, setCurrentWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
@@ -90,7 +87,12 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   
   const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
-  const [manualTargetWeight, setManualTargetWeight] = useState('');
+  
+  // NEW: State to manage the effective weight for the current session directly
+  const [sessionTargetWeight, setSessionTargetWeight] = useState('');
+  // State for the input field value during editing
+  const [manualTargetWeightInput, setManualTargetWeightInput] = useState('');
+
   const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
 
   const [isEditExerciseModalOpen, setIsEditExerciseModalOpen] = useState(false);
@@ -103,13 +105,11 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     const dateStr = getCurrentDateString();
     setCurrentDate(dateStr);
 
-    // Fetch base exercise details (globally or from specified plan)
     const fetchedBaseExercise = getBaseExerciseByIdFromService(exerciseId, planIdFromQuery ? getPlanById(planIdFromQuery)?.plan : undefined);
     setBaseExercise(fetchedBaseExercise);
-    setAllExercisesForModal(getAllExercisesForAutocompleteGlobal()); // For modal autocomplete
+    setAllExercisesForModal(getAllExercisesForAutocompleteGlobal());
 
     if (dayIdFromQuery) {
-      // Determine the plan to use: specific if planId is in query, otherwise active plan
       const planToUse = planIdFromQuery ? getPlanById(planIdFromQuery)?.plan : getActiveNamedWorkoutPlan()?.plan;
 
       if (planToUse) {
@@ -119,34 +119,25 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
             const specificExerciseFromDay = fetchedWorkoutDay.exercises.find(ex => ex.id === exerciseId);
             setExerciseForLogging(specificExerciseFromDay);
             
+            // NEW: Initialize session weight state on load
             const initialEffectiveWeight = getUserTargetWeight(exerciseId, specificExerciseFromDay?.targetWeight || fetchedBaseExercise?.targetWeight);
-            setManualTargetWeight(initialEffectiveWeight || '');
+            setSessionTargetWeight(initialEffectiveWeight || '');
+            setManualTargetWeightInput(initialEffectiveWeight || '');
 
             if (typeof window !== 'undefined') {
-              const dailyLogKey = getDailyLogLocalStorageKey(dayIdFromQuery, dateStr); // Key might need planId if logs are plan-specific
+              const dailyLogKey = getDailyLogLocalStorageKey(dayIdFromQuery, dateStr);
               const storedDailyLog = localStorage.getItem(dailyLogKey);
-              if (storedDailyLog) {
-                try {
-                  const dailyLog: DailyLog = JSON.parse(storedDailyLog);
-                  setLoggedExerciseData(dailyLog[exerciseId] || {});
-                } catch (e) {
-                  console.error("Failed to parse daily log for exercise detail:", e);
-                  setLoggedExerciseData({});
-                }
-              } else {
-                setLoggedExerciseData({});
-              }
+              setLoggedExerciseData(storedDailyLog ? JSON.parse(storedDailyLog)[exerciseId] || {} : {});
             }
           } else {
-             setExerciseForLogging(null); // Exercise not found in this day's plan
+             setExerciseForLogging(null);
           }
       } else {
-         setCurrentWorkoutDay(null); // Plan not found
+         setCurrentWorkoutDay(null);
          setExerciseForLogging(null);
       }
     } else {
-        // If no dayId, this page is likely for viewing library exercise, not logging
-        setExerciseForLogging(fetchedBaseExercise); // Show base exercise, no logging context
+        setExerciseForLogging(fetchedBaseExercise);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exerciseId, dayIdFromQuery, planIdFromQuery]);
@@ -195,8 +186,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   }, [loggedExerciseData, checkCompletionAndPlanReps]);
   
   const handleLogSet = (setId: string, log: LoggedSetData) => {
-    const effectiveWeightForLog = manualTargetWeight || exerciseForLogging?.targetWeight || baseExercise?.targetWeight || 'N/A';
-    const newLogEntry = { ...log, weight: effectiveWeightForLog };
+    const newLogEntry = { ...log, weight: sessionTargetWeight };
     
     setLoggedExerciseData(prev => {
       const updatedLog = { ...prev, [setId]: newLogEntry };
@@ -204,32 +194,22 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       return updatedLog;
     });
   };
-  
-  const effectiveTargetWeightDisplay = useMemo(() => {
-     return getUserTargetWeight(exerciseId, exerciseForLogging?.targetWeight || baseExercise?.targetWeight);
-  }, [exerciseId, exerciseForLogging, baseExercise]);
-
-
-  useEffect(() => {
-    if (!isEditingTarget) {
-        setManualTargetWeight(effectiveTargetWeightDisplay || '');
-    }
-  }, [effectiveTargetWeightDisplay, isEditingTarget]);
-
 
   const handleSaveManualTarget = () => {
-    const currentWeight = getUserTargetWeight(exerciseId, exerciseForLogging?.targetWeight || baseExercise?.targetWeight);
-    if (manualTargetWeight !== (currentWeight || '')) {
-      setTargetWeightOverride(exerciseId, manualTargetWeight);
+    if (manualTargetWeightInput !== sessionTargetWeight) {
+      // 1. Persist to localStorage for next page load
+      setTargetWeightOverride(exerciseId, manualTargetWeightInput);
+      // 2. Update the session state immediately for current re-render
+      setSessionTargetWeight(manualTargetWeightInput);
       
-      // Reset the log for this specific exercise for today's session
+      // 3. Reset the log for this specific exercise for this session
       setLoggedExerciseData({}); // Clear the state
       updateFullDailyLog(null); // Remove the exercise entry from today's daily log in localStorage
       
       setCanSuggestWeightIncrease(false); 
       toast({
         title: "Target Weight Updated",
-        description: `New weight for ${baseExercise?.name} is ${manualTargetWeight}. Your sets for this session have been reset.`,
+        description: `New weight for ${baseExercise?.name} is ${manualTargetWeightInput}. Your sets for this session have been reset.`,
       });
     }
     setIsEditingTarget(false);
@@ -237,12 +217,18 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   const handleCancelEditTarget = () => {
     setIsEditingTarget(false);
-    const currentWeight = getUserTargetWeight(exerciseId, exerciseForLogging?.targetWeight || baseExercise?.targetWeight);
-    setManualTargetWeight(currentWeight || '');
+    // Reset input field to the current active session weight
+    setManualTargetWeightInput(sessionTargetWeight);
   };
 
+  const handleEditClick = () => {
+    // Ensure input field starts with the current session weight when editing begins
+    setManualTargetWeightInput(sessionTargetWeight);
+    setIsEditingTarget(true);
+  }
+
   const isSkipped = useMemo(() => {
-    if (!exerciseForLogging || exerciseForLogging.sets.length === 0 || !dayIdFromQuery) return false; // Skipping only relevant in logging context
+    if (!exerciseForLogging || exerciseForLogging.sets.length === 0 || !dayIdFromQuery) return false;
     return exerciseForLogging.sets.every(set => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length > 0;
   }, [exerciseForLogging, loggedExerciseData, dayIdFromQuery]);
 
@@ -267,13 +253,10 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   };
 
   const handleSaveEditedExercise = (updatedExercise: ExerciseType) => {
-    // This function is now more complex as it needs to update the plan in workout-plan-service
-    // For now, it will update the local view. Persisting plan changes is a larger task.
     setExerciseForLogging(updatedExercise);
     if (baseExercise && baseExercise.id === updatedExercise.id) {
       setBaseExercise(updatedExercise);
     }
-    // TODO: Integrate with workout-plan-service to update the exercise definition in the active plan
     toast({
       title: "Exercise Updated (View)",
       description: `${updatedExercise.name} details updated for this view. For plan-wide changes, use 'Manage Workout Plans'.`,
@@ -282,7 +265,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   };
 
 
-  if (!isClient || baseExercise === undefined || (dayIdFromQuery && exerciseForLogging === undefined && currentWorkoutDay !== null /* check if day was actually loaded */)) {
+  if (!isClient || baseExercise === undefined || (dayIdFromQuery && exerciseForLogging === undefined && currentWorkoutDay !== null)) {
     return <LoadingExercisePage />;
   }
 
@@ -301,7 +284,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     );
   }
   
-  if (dayIdFromQuery && !exerciseForLogging && currentWorkoutDay) { // currentWorkoutDay exists but exercise not found in it
+  if (dayIdFromQuery && !exerciseForLogging && currentWorkoutDay) {
      return (
       <div className="container mx-auto px-4 py-8 flex flex-col items-center text-center">
         <Dumbbell className="h-16 w-16 text-destructive mb-4" />
@@ -316,7 +299,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     );
   }
   
-  const displayExercise = exerciseForLogging || baseExercise; // Fallback to base if no specific logging context
+  const displayExercise = exerciseForLogging || baseExercise;
   const hasVideo = displayExercise.videoUrl && displayExercise.videoUrl.includes('youtube.com/embed');
   const allSetsCompletedCheck = dayIdFromQuery && exerciseForLogging?.sets.every(set => loggedExerciseData?.[set.id]?.isCompleted);
   
@@ -437,10 +420,10 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                   <div className="flex items-center gap-2 mt-1">
                     <Input
                       type="text"
-                      value={manualTargetWeight}
-                      onChange={(e) => setManualTargetWeight(e.target.value)}
+                      value={manualTargetWeightInput}
+                      onChange={(e) => setManualTargetWeightInput(e.target.value)}
                       className="h-8 text-sm flex-grow"
-                      placeholder="e.g. 80 kg"
+                      placeholder="e.g. 80 kg or Bodyweight"
                       aria-label="Edit target weight"
                     />
                     <Button size="icon" variant="ghost" onClick={handleSaveManualTarget} className="h-8 w-8 text-primary shrink-0" aria-label="Save weight"><Save className="h-4 w-4" /></Button>
@@ -449,14 +432,14 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                 ) : (
                   <div className="flex items-center justify-between mt-1">
                     <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-foreground">{manualTargetWeight || 'Not set'}</p>
+                        <p className="text-sm font-semibold text-foreground">{sessionTargetWeight || 'Not set'}</p>
                         {canSuggestWeightIncrease && (
                            <Badge variant="default" className="px-1.5 py-0.5 text-xs bg-green-600 hover:bg-green-700 text-white">
                               <ArrowUpCircle className="h-3 w-3 mr-0.5" /> Suggest Inc.
                            </Badge>
                         )}
                     </div>
-                    <Button size="icon" variant="ghost" onClick={() => setIsEditingTarget(true)} className="h-8 w-8 shrink-0" aria-label="Edit weight"><Edit className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={handleEditClick} className="h-8 w-8 shrink-0" aria-label="Edit weight"><Edit className="h-4 w-4" /></Button>
                   </div>
                 )}
               </div>
@@ -472,7 +455,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                   setData={set}
                   loggedSetData={loggedExerciseData?.[set.id]}
                   lastSessionSetPerformance={lastSessionSetPerformance}
-                  effectiveTargetWeight={manualTargetWeight}
+                  effectiveTargetWeight={sessionTargetWeight}
                   onLogSet={(logData) => handleLogSet(set.id, logData)}
                   exerciseUnit={exerciseForLogging.unit || baseExercise.unit}
                   isSimpleLog={isSpecialActivity}
