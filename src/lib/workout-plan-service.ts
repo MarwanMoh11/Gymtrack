@@ -7,7 +7,7 @@ import { defaultNamedPlans, getWorkoutByDayFromPlan as getWorkoutByDayFromPlanDa
 import { produce } from 'immer'; // Using immer for easier immutable updates
 
 const WORKOUT_PLANS_STORAGE_KEY = 'gymtrack_workout_plans';
-const OPTIMIZED_PLAN_ID = 'optimized-gym-calisthenics-blended-plan'; // ID of the new default plan
+const OPTIMIZED_PLAN_ID = 'jeff-nippard-plan'; // ID of the new default plan
 
 let clientSidePlans: NamedWorkoutPlan[] | null = null;
 
