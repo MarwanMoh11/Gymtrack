@@ -1,6 +1,7 @@
 
 // src/lib/firebase.ts
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // This configuration is correct and verified.
@@ -17,8 +18,8 @@ const firebaseConfig = {
 const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // Initialize other Firebase services
+const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Export the initialized app and db for use in other parts of the application.
-// Auth will be initialized within the AuthContext to ensure stability.
-export { app, db };
+// Export the initialized services for use in other parts of the application.
+export { app, auth, db };

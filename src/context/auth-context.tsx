@@ -8,12 +8,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  getAuth, // Import getAuth
 } from 'firebase/auth';
-import { app } from '@/lib/firebase'; // Import the initialized app
-
-// Initialize auth directly within the context module scope, tied to the app instance.
-const auth = getAuth(app);
+import { auth } from '@/lib/firebase'; // Import the initialized auth service
 
 interface AuthContextType {
   user: User | null;
@@ -30,11 +26,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // This listener handles all auth state changes, keeping our app in sync.
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
     });
 
+    // Cleanup subscription on unmount
     return () => unsubscribe();
   }, []);
 

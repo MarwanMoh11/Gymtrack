@@ -46,7 +46,6 @@ type SignupFormValues = z.infer<typeof signupSchema>;
 
 export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
   const { toast } = useToast();
   const { signup } = useAuth();
 
@@ -83,7 +82,7 @@ export default function SignupPage() {
           errorMessage = 'The password is too weak. Please choose a stronger one.';
           break;
         case 'auth/configuration-not-found':
-          errorMessage = 'Firebase configuration is missing or invalid. Please contact support.';
+          errorMessage = 'There was a problem connecting to the authentication service. Please check the configuration.';
           break;
       }
       toast({

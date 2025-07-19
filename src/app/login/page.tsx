@@ -38,7 +38,6 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
   const { toast } = useToast();
   const { login } = useAuth();
 
@@ -76,8 +75,8 @@ export default function LoginPage() {
           errorMessage = 'Access to this account has been temporarily disabled due to many failed login attempts. You can immediately restore it by resetting your password or you can try again later.';
           break;
         case 'auth/configuration-not-found':
-          errorMessage = 'Firebase configuration is missing or invalid. Please contact support.';
-          break;
+            errorMessage = 'There was a problem connecting to the authentication service. Please check the configuration.';
+            break;
       }
       toast({
         variant: 'destructive',
