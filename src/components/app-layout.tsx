@@ -1,9 +1,10 @@
+
 'use client';
 
-import { use, useEffect } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogIn, LogOut, UserPlus } from 'lucide-react';
+import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogOut } from 'lucide-react';
 import {
   Sidebar,
   SidebarHeader,
@@ -21,7 +22,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Logo } from '@/components/icons/logo';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-context';
-import { Skeleton } from './ui/skeleton';
 
 const todayNavItem = {
   href: '/dashboard/today',
