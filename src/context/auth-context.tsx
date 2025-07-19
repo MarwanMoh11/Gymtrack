@@ -28,23 +28,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log("AuthContext: Setting up onAuthStateChanged listener.");
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("AuthContext: onAuthStateChanged triggered. User:", user ? user.email : null);
       setUser(user);
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      console.log("AuthContext: Cleaning up onAuthStateChanged listener.");
+      unsubscribe();
+    }
   }, []);
 
   const login = (email: string, password: string) => {
+    console.log("AuthContext: Attempting login for email:", email);
     return signInWithEmailAndPassword(auth, email, password);
   };
 
   const signup = (email: string, password: string) => {
+    console.log("AuthContext: Attempting signup for email:", email);
+    console.log("AuthContext: Using auth object:", auth);
     return createUserWithEmailAndPassword(auth, email, password);
   };
 
   const logout = () => {
+    console.log("AuthContext: Attempting logout.");
     return signOut(auth);
   };
 
