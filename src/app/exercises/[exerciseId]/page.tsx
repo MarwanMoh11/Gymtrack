@@ -1,26 +1,23 @@
-
 // src/app/exercises/[exerciseId]/page.tsx
 'use client';
 
-import { use, useState, useEffect, useCallback, useMemo } from 'react'; 
+import { use, useState, useEffect, useMemo } from 'react'; 
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-// Import service functions
-import { getExerciseById as getBaseExerciseByIdFromService, getActiveNamedWorkoutPlan, getPlanById } from '@/lib/workout-plan-service';
-import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal, getWorkoutByDayFromPlan } from '@/data/workout-data'; // For modal
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/context/auth-context';
 
-import type { Exercise as ExerciseType, SetData, LoggedSetData, DailyLog, WorkoutDay, LoggedExerciseData, WeeklyPlan } from '@/types/workout';
+import type { Exercise as ExerciseType, SetData, LoggedSetData, DailyLog, WorkoutDay } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, Dumbbell, Sparkles, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle, Pencil } from 'lucide-react'; 
+import { ArrowLeft, Dumbbell, Sparkles, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle, Pencil, Loader2 } from 'lucide-react'; 
 import SetLogger from '@/components/workout/set-logger';
 import AIRecommendationModal from '@/components/workout/ai-recommendation-modal';
 import AddExerciseModal from '@/components/workout-plan/add-exercise-modal'; 
-import { getUserTargetWeight, setTargetWeightOverride } from '@/lib/user-settings';
 import { useToast } from '@/hooks/use-toast';
 import LoadingExercisePage from './loading';
 import { getPreviousSetPerformance } from '@/lib/workout-utils'; 
@@ -36,15 +33,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from '@/lib/utils';
-
+import { getAllUserWorkoutPlans, getPlanById as getPlanByIdFromService, saveUserWorkoutPlan } from '@/lib/firestore-workout-plan-service';
+import { getDailyLog, saveDailyLog } from '@/lib/firestore-log-service';
+import { getTargetWeightOverrides, setTargetWeightOverride as saveTargetWeightOverride } from '@/lib/firestore-settings-service';
+import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data';
 
 const getCurrentDateString = (): string => {
   return new Date().toISOString().split('T')[0];
 };
-
-function getDailyLogLocalStorageKey(dayId: string, date: string): string {
-  return `gymtrack_log_${dayId}_${date}`;
-}
 
 const parseMaxTargetReps = (target: string | number): number | null => {
     if (typeof target === 'number') return target;
@@ -61,111 +57,89 @@ const parseMaxTargetReps = (target: string | number): number | null => {
     return isNaN(parsed) ? null : parsed;
 };
 
-
 type ExercisePageProps = {
-  params: { 
-    exerciseId: string;
-  };
+  params: { exerciseId: string; };
 };
 
 export default function ExerciseDetailPage({ params: paramsFromProps }: ExercisePageProps) {
   const resolvedParams = use(paramsFromProps as any);
   const { exerciseId } = resolvedParams;
-
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   const dayIdFromQuery = searchParams.get('dayId');
   const planIdFromQuery = searchParams.get('planId');
-  
-  const [baseExercise, setBaseExercise] = useState<ExerciseType | null | undefined>(undefined);
-  const [currentWorkoutDay, setCurrentWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
-  const [exerciseForLogging, setExerciseForLogging] = useState<ExerciseType | null | undefined>(undefined);
-  
-  const [loggedExerciseData, setLoggedExerciseData] = useState<LoggedExerciseData>({});
-  const [isClient, setIsClient] = useState(false);
-  const [currentDate, setCurrentDate] = useState('');
-  
-  const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
-  const [isEditingTarget, setIsEditingTarget] = useState(false);
-  
-  // NEW: State to manage the effective weight for the current session directly
-  const [sessionTargetWeight, setSessionTargetWeight] = useState('');
-  // State for the input field value during editing
-  const [manualTargetWeightInput, setManualTargetWeightInput] = useState('');
-
-  const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
-
-  const [isEditExerciseModalOpen, setIsEditExerciseModalOpen] = useState(false);
-  const [allExercisesForModal, setAllExercisesForModal] = useState<ExerciseType[]>([]);
-
   const { toast } = useToast();
 
-  useEffect(() => {
-    setIsClient(true);
-    const dateStr = getCurrentDateString();
-    setCurrentDate(dateStr);
+  const [sessionTargetWeight, setSessionTargetWeight] = useState('');
+  const [manualTargetWeightInput, setManualTargetWeightInput] = useState('');
+  const [isEditingTarget, setIsEditingTarget] = useState(false);
+  const [isEditExerciseModalOpen, setIsEditExerciseModalOpen] = useState(false);
+  const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
+  const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
+  
+  const currentDate = getCurrentDateString();
 
-    const fetchedBaseExercise = getBaseExerciseByIdFromService(exerciseId, planIdFromQuery ? getPlanById(planIdFromQuery)?.plan : undefined);
-    setBaseExercise(fetchedBaseExercise);
-    setAllExercisesForModal(getAllExercisesForAutocompleteGlobal());
+  // --- Data Fetching with React Query ---
+  const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
+    queryKey: ['workoutPlans', user?.uid],
+    queryFn: () => getAllUserWorkoutPlans(user!.uid),
+    enabled: !!user,
+  });
 
-    if (dayIdFromQuery) {
-      const planToUse = planIdFromQuery ? getPlanById(planIdFromQuery)?.plan : getActiveNamedWorkoutPlan()?.plan;
+  const { data: weightOverrides, isLoading: isLoadingOverrides } = useQuery({
+    queryKey: ['weightOverrides', user?.uid],
+    queryFn: () => getTargetWeightOverrides(user!.uid),
+    enabled: !!user,
+  });
 
-      if (planToUse) {
-          const fetchedWorkoutDay = getWorkoutByDayFromPlan(planToUse, dayIdFromQuery);
-          setCurrentWorkoutDay(fetchedWorkoutDay);
-          if (fetchedWorkoutDay) {
-            const specificExerciseFromDay = fetchedWorkoutDay.exercises.find(ex => ex.id === exerciseId);
-            setExerciseForLogging(specificExerciseFromDay);
-            
-            // NEW: Initialize session weight state on load
-            const initialEffectiveWeight = getUserTargetWeight(exerciseId, specificExerciseFromDay?.targetWeight || fetchedBaseExercise?.targetWeight);
-            setSessionTargetWeight(initialEffectiveWeight || '');
-            setManualTargetWeightInput(initialEffectiveWeight || '');
+  const { data: dailyLog, isLoading: isLoadingLog } = useQuery({
+    queryKey: ['dailyLog', user?.uid, currentDate, dayIdFromQuery],
+    queryFn: () => getDailyLog(user!.uid, currentDate),
+    enabled: !!user && !!dayIdFromQuery,
+  });
+  
+  const { data: allExercisesForModal, isLoading: isLoadingAllExercises } = useQuery({
+      queryKey: ['allExercisesForAutocomplete'],
+      queryFn: getAllExercisesForAutocompleteGlobal,
+  });
 
-            if (typeof window !== 'undefined') {
-              const dailyLogKey = getDailyLogLocalStorageKey(dayIdFromQuery, dateStr);
-              const storedDailyLog = localStorage.getItem(dailyLogKey);
-              setLoggedExerciseData(storedDailyLog ? JSON.parse(storedDailyLog)[exerciseId] || {} : {});
+  // --- Memos to derive state from queries ---
+  const { baseExercise, currentWorkoutDay, exerciseForLogging, activePlan } = useMemo(() => {
+    if (!allPlans) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
+    const plan = planIdFromQuery ? allPlans.find(p => p.id === planIdFromQuery) : allPlans.find(p => p.isActive);
+    if (!plan) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
+    
+    let baseEx, workoutDay, exerciseForLog;
+
+    for(const day of plan.plan) {
+        const found = day.exercises.find(ex => ex.id === exerciseId);
+        if (found) {
+            baseEx = found; // Found in the context of a plan
+            if (day.id === dayIdFromQuery) {
+                workoutDay = day;
+                exerciseForLog = found;
             }
-          } else {
-             setExerciseForLogging(null);
-          }
-      } else {
-         setCurrentWorkoutDay(null);
-         setExerciseForLogging(null);
-      }
-    } else {
-        setExerciseForLogging(fetchedBaseExercise);
+        }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exerciseId, dayIdFromQuery, planIdFromQuery]);
+    // Fallback if not in the specific day or plan
+    if (!baseEx) baseEx = allExercisesForModal?.find(ex => ex.id === exerciseId);
 
-  const updateFullDailyLog = (updatedExerciseLog: LoggedExerciseData | null) => {
-    if (typeof window === 'undefined' || !dayIdFromQuery || !currentDate) return;
-    const dailyLogKey = getDailyLogLocalStorageKey(dayIdFromQuery, currentDate);
-    let currentDailyLog: DailyLog = {};
-    const storedLog = localStorage.getItem(dailyLogKey);
-    if (storedLog) {
-      try {
-        currentDailyLog = JSON.parse(storedLog);
-      } catch (e) { /* ignore parsing error, start fresh */ }
+    return { baseExercise: baseEx, currentWorkoutDay: workoutDay, exerciseForLogging: exerciseForLog, activePlan: plan };
+  }, [allPlans, planIdFromQuery, dayIdFromQuery, exerciseId, allExercisesForModal]);
+  
+  const loggedExerciseData = useMemo(() => dailyLog?.[exerciseId] || {}, [dailyLog, exerciseId]);
+
+  // --- Effects to sync state with fetched data ---
+  useEffect(() => {
+    if (exerciseForLogging && weightOverrides) {
+        const initialEffectiveWeight = weightOverrides[exerciseId] ?? exerciseForLogging.targetWeight ?? '';
+        setSessionTargetWeight(initialEffectiveWeight);
+        setManualTargetWeightInput(initialEffectiveWeight);
     }
-
-    if (updatedExerciseLog === null || Object.keys(updatedExerciseLog).length === 0) {
-      const { [exerciseId]: _, ...restDailyLog } = currentDailyLog;
-      if (Object.keys(restDailyLog).length === 0) {
-        localStorage.removeItem(dailyLogKey);
-      } else {
-        localStorage.setItem(dailyLogKey, JSON.stringify(restDailyLog));
-      }
-    } else {
-      const newDailyLog = { ...currentDailyLog, [exerciseId]: updatedExerciseLog };
-      localStorage.setItem(dailyLogKey, JSON.stringify(newDailyLog));
-    }
-  };
-
+  }, [exerciseForLogging, weightOverrides, exerciseId]);
+  
   const checkCompletionAndPlanReps = useCallback((currentLogData?: LoggedExerciseData) => {
     if (!currentLogData || !exerciseForLogging || exerciseForLogging.sets.length === 0) return false;
     const allSetsCompleted = exerciseForLogging.sets.every(set => currentLogData[set.id]?.isCompleted);
@@ -185,44 +159,97 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     setCanSuggestWeightIncrease(checkCompletionAndPlanReps(loggedExerciseData));
   }, [loggedExerciseData, checkCompletionAndPlanReps]);
   
+  // --- Mutations ---
+  const saveLogMutation = useMutation({
+    mutationFn: (newLog: LoggedExerciseData) => {
+        const newDailyLog = { ...(dailyLog || {}), [exerciseId]: newLog };
+        return saveDailyLog(user!.uid, currentDate, newDailyLog);
+    },
+    onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['dailyLog', user?.uid, currentDate] });
+    },
+    onError: () => {
+        toast({ variant: 'destructive', title: "Save Error", description: "Could not save your log." });
+    }
+  });
+  
+  const saveWeightOverrideMutation = useMutation({
+    mutationFn: (newWeight: string) => saveTargetWeightOverride(user!.uid, exerciseId, newWeight),
+    onSuccess: (data, newWeight) => {
+      queryClient.invalidateQueries({ queryKey: ['weightOverrides', user?.uid]});
+      queryClient.setQueryData(['dailyLog', user?.uid, currentDate], (oldData: DailyLog | undefined) => {
+          if (!oldData) return { [exerciseId]: {} };
+          const { [exerciseId]: _, ...rest } = oldData;
+          return rest;
+      });
+      setSessionTargetWeight(newWeight);
+      setCanSuggestWeightIncrease(false);
+      toast({ title: "Target Weight Updated", description: `New weight for ${baseExercise?.name} is ${newWeight}. Sets reset.` });
+      setIsEditingTarget(false);
+    },
+    onError: () => {
+       toast({ variant: 'destructive', title: "Save Error", description: "Could not save weight override." });
+    }
+  });
+
+  const saveEditedExerciseMutation = useMutation({
+    mutationFn: (updatedExercise: ExerciseType) => {
+        if (!activePlan) throw new Error("No active plan to update");
+        const newPlan = { ...activePlan };
+        const dayIndex = newPlan.plan.findIndex(d => d.id === dayIdFromQuery);
+        if (dayIndex === -1) throw new Error("Day not found in plan");
+        const exIndex = newPlan.plan[dayIndex].exercises.findIndex(ex => ex.id === updatedExercise.id);
+        if (exIndex === -1) throw new Error("Exercise not found in day");
+        
+        newPlan.plan[dayIndex].exercises[exIndex] = updatedExercise;
+        return saveUserWorkoutPlan(user!.uid, newPlan);
+    },
+    onSuccess: (data, updatedExercise) => {
+        queryClient.invalidateQueries({ queryKey: ['workoutPlans', user?.uid] });
+        toast({ title: "Exercise Updated", description: `${updatedExercise.name} has been updated in your plan.`});
+        setIsEditExerciseModalOpen(false);
+    },
+    onError: (error) => {
+        toast({ variant: 'destructive', title: "Save Error", description: `Could not save exercise changes. ${error.message}` });
+    }
+  });
+
+  // --- Event Handlers ---
   const handleLogSet = (setId: string, log: LoggedSetData) => {
     const newLogEntry = { ...log, weight: sessionTargetWeight };
-    
-    setLoggedExerciseData(prev => {
-      const updatedLog = { ...prev, [setId]: newLogEntry };
-      updateFullDailyLog(updatedLog);
-      return updatedLog;
+    const newLoggedExerciseData = { ...loggedExerciseData, [setId]: newLogEntry };
+    saveLogMutation.mutate(newLoggedExerciseData);
+  };
+  
+  const handleSkipExercise = () => {
+    if (!exerciseForLogging) return;
+    const skippedLog: LoggedExerciseData = {};
+    exerciseForLogging.sets.forEach(set => {
+      skippedLog[set.id] = { reps: loggedExerciseData[set.id]?.reps || '', weight: loggedExerciseData[set.id]?.weight, isCompleted: false };
     });
+    saveLogMutation.mutate(skippedLog);
+    toast({ variant: "default", title: "Exercise Skipped", description: `"${baseExercise?.name}" marked as skipped.`});
+  };
+
+  const handleUnskipExercise = () => {
+    saveLogMutation.mutate({});
+    toast({ title: "Exercise Unskipped", description: `"${baseExercise?.name}" is no longer skipped.`});
   };
 
   const handleSaveManualTarget = () => {
     if (manualTargetWeightInput !== sessionTargetWeight) {
-      // 1. Persist to localStorage for next page load
-      setTargetWeightOverride(exerciseId, manualTargetWeightInput);
-      // 2. Update the session state immediately for current re-render
-      setSessionTargetWeight(manualTargetWeightInput);
-      
-      // 3. Reset the log for this specific exercise for this session
-      setLoggedExerciseData({}); // Clear the state
-      updateFullDailyLog(null); // Remove the exercise entry from today's daily log in localStorage
-      
-      setCanSuggestWeightIncrease(false); 
-      toast({
-        title: "Target Weight Updated",
-        description: `New weight for ${baseExercise?.name} is ${manualTargetWeightInput}. Your sets for this session have been reset.`,
-      });
+      saveWeightOverrideMutation.mutate(manualTargetWeightInput);
+    } else {
+      setIsEditingTarget(false);
     }
-    setIsEditingTarget(false);
   };
 
   const handleCancelEditTarget = () => {
     setIsEditingTarget(false);
-    // Reset input field to the current active session weight
     setManualTargetWeightInput(sessionTargetWeight);
   };
 
   const handleEditClick = () => {
-    // Ensure input field starts with the current session weight when editing begins
     setManualTargetWeightInput(sessionTargetWeight);
     setIsEditingTarget(true);
   }
@@ -232,40 +259,9 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     return exerciseForLogging.sets.every(set => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length > 0;
   }, [exerciseForLogging, loggedExerciseData, dayIdFromQuery]);
 
-  const handleSkipExercise = () => {
-    if (!exerciseForLogging) return;
-    const skippedLog: LoggedExerciseData = {};
-    exerciseForLogging.sets.forEach(set => {
-      skippedLog[set.id] = { reps: loggedExerciseData[set.id]?.reps || '', weight: loggedExerciseData[set.id]?.weight, isCompleted: false };
-    });
-    setLoggedExerciseData(skippedLog);
-    updateFullDailyLog(skippedLog);
-    setIsEditingTarget(false);
-    setCanSuggestWeightIncrease(false);
-    toast({ variant: "default", title: "Exercise Skipped", description: `"${baseExercise?.name}" marked as skipped.`});
-  };
+  const isLoading = isLoadingPlans || isLoadingLog || isLoadingOverrides || isLoadingAllExercises;
 
-  const handleUnskipExercise = () => {
-    setLoggedExerciseData({});
-    updateFullDailyLog(null);
-    setIsEditingTarget(false);
-    toast({ title: "Exercise Unskipped", description: `"${baseExercise?.name}" is no longer skipped.`});
-  };
-
-  const handleSaveEditedExercise = (updatedExercise: ExerciseType) => {
-    setExerciseForLogging(updatedExercise);
-    if (baseExercise && baseExercise.id === updatedExercise.id) {
-      setBaseExercise(updatedExercise);
-    }
-    toast({
-      title: "Exercise Updated (View)",
-      description: `${updatedExercise.name} details updated for this view. For plan-wide changes, use 'Manage Workout Plans'.`,
-    });
-    setIsEditExerciseModalOpen(false);
-  };
-
-
-  if (!isClient || baseExercise === undefined || (dayIdFromQuery && exerciseForLogging === undefined && currentWorkoutDay !== null)) {
+  if (isLoading) {
     return <LoadingExercisePage />;
   }
 
@@ -384,7 +380,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
         </CardContent>
       </Card>
 
-      {exerciseForLogging && dayIdFromQuery && ( // Only show logging if in context of a workout day
+      {exerciseForLogging && dayIdFromQuery && (
         <Card className={cn("shadow-lg rounded-2xl", isSkipped && "bg-card/60")}>
           <CardHeader className="pb-3">
             <div className="flex justify-between items-center">
@@ -425,9 +421,12 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                       className="h-8 text-sm flex-grow"
                       placeholder="e.g. 80 kg or Bodyweight"
                       aria-label="Edit target weight"
+                      disabled={saveWeightOverrideMutation.isPending}
                     />
-                    <Button size="icon" variant="ghost" onClick={handleSaveManualTarget} className="h-8 w-8 text-primary shrink-0" aria-label="Save weight"><Save className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" onClick={handleCancelEditTarget} className="h-8 w-8 shrink-0" aria-label="Cancel edit weight"><XCircle className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={handleSaveManualTarget} className="h-8 w-8 text-primary shrink-0" aria-label="Save weight" disabled={saveWeightOverrideMutation.isPending}>
+                        {saveWeightOverrideMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin"/> : <Save className="h-4 w-4" />}
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={handleCancelEditTarget} className="h-8 w-8 shrink-0" aria-label="Cancel edit weight" disabled={saveWeightOverrideMutation.isPending}><XCircle className="h-4 w-4" /></Button>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between mt-1">
@@ -483,18 +482,17 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       {canShowAISuggestionButton && exerciseForLogging && dayIdFromQuery && (
          <AIRecommendationModal
             exercise={exerciseForLogging}
-            loggedExerciseData={loggedExerciseData}
             isOpen={isAIRecModalOpen}
             onOpenChange={setIsAIRecModalOpen}
         />
       )}
-      {exerciseForLogging && dayIdFromQuery && ( // Only allow editing if in context of a day's plan
+      {exerciseForLogging && dayIdFromQuery && allExercisesForModal && (
         <AddExerciseModal
           isOpen={isEditExerciseModalOpen}
           onOpenChange={setIsEditExerciseModalOpen}
-          onSave={handleSaveEditedExercise}
+          onSave={(exercise) => saveEditedExerciseMutation.mutate(exercise)}
           allExercises={allExercisesForModal}
-          dayId={dayIdFromQuery} // This is crucial
+          dayId={dayIdFromQuery}
           initialData={exerciseForLogging} 
         />
       )}

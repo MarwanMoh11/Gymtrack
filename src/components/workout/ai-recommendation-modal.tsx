@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/context/auth-context';
 import {
   Dialog,
   DialogContent,
@@ -12,35 +14,46 @@ import {
 import { Button } from '@/components/ui/button';
 import { Loader2, Wand2, ArrowRight } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import type { Exercise, LoggedExerciseData } from '@/types/workout';
+import type { Exercise, DailyLog } from '@/types/workout';
 import { nextSessionRecommendation, NextSessionRecommendationOutput } from '@/ai/flows/next-session-recommendation';
 import { useToast } from '@/hooks/use-toast';
 import { transformHistoricalDataForAI } from '@/lib/workout-utils';
+import { getAllUserLogs } from '@/lib/firestore-log-service';
 
 interface AIRecommendationModalProps {
   exercise: Exercise;
-  loggedExerciseData?: LoggedExerciseData;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 export default function AIRecommendationModal({
   exercise,
-  loggedExerciseData,
   isOpen,
   onOpenChange,
 }: AIRecommendationModalProps) {
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [recommendation, setRecommendation] = useState<NextSessionRecommendationOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+  
+  const { data: allLogs, isLoading: isLoadingLogs } = useQuery({
+    queryKey: ['allUserLogs', user?.uid],
+    queryFn: () => getAllUserLogs(user!.uid),
+    enabled: !!user && isOpen, // Only fetch when the modal is open
+  });
 
   const handleGetRecommendation = async () => {
+    if (!allLogs) {
+      setError("Log data is not available yet. Please try again in a moment.");
+      return;
+    }
+    
     setIsLoading(true);
     setError(null);
     setRecommendation(null);
 
-    const historicalData = transformHistoricalDataForAI(exercise.id);
+    const historicalData = transformHistoricalDataForAI(exercise.id, allLogs);
 
     if (historicalData.length === 0) {
         setError("Not enough historical data for a meaningful recommendation. Log a few sessions first.");
@@ -114,14 +127,14 @@ export default function AIRecommendationModal({
           </div>
         )}
         
-        {isLoading && (
+        {(isLoading || isLoadingLogs) && (
           <div className="flex justify-center items-center my-8">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <p className="ml-2">Analyzing your progress...</p>
           </div>
         )}
 
-        {!recommendation && !isLoading && !error && (
+        {!recommendation && !isLoading && !error && !isLoadingLogs && (
              <div className="my-4 p-4 bg-secondary/50 rounded-md text-center">
                 <p className="text-sm text-muted-foreground">Click "Get Recommendation" to see AI advice.</p>
             </div>
@@ -131,8 +144,8 @@ export default function AIRecommendationModal({
            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button type="button" onClick={handleGetRecommendation} disabled={isLoading}>
-            {isLoading ? (
+          <Button type="button" onClick={handleGetRecommendation} disabled={isLoading || isLoadingLogs}>
+            {isLoading || isLoadingLogs ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Wand2 className="mr-2 h-4 w-4" />

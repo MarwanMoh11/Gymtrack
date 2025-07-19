@@ -4,8 +4,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getWorkoutByDay as getWorkoutByDayFromActivePlan } from '@/lib/workout-plan-service';
-import { getTodayWorkoutOverride, clearTodayWorkoutOverride } from '@/lib/session-override-service';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/context/auth-context';
+import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
+import { getDailyLog, deleteDailyLog } from '@/lib/firestore-log-service';
+import { getTodayWorkoutOverride, clearTodayWorkoutOverride as clearOverrideService } from '@/lib/firestore-settings-service';
 import type { WorkoutDay, DailyLog, Exercise as ExerciseType } from '@/types/workout';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -13,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import DayProgress from '@/components/workout/day-progress';
 import { useToast } from '@/hooks/use-toast';
 import { AlertTriangle, CheckSquare, ArrowRight, RefreshCcw, ShieldAlert } from 'lucide-react';
-import { getUserTargetWeight } from '@/lib/user-settings';
+import { getTargetWeightOverrides } from '@/lib/firestore-settings-service';
 
 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
@@ -21,26 +24,16 @@ const getCurrentDateString = (): string => {
   return new Date().toISOString().split('T')[0];
 };
 
-function getLocalStorageKey(dayId: string, date: string): string {
-  return `gymtrack_log_${dayId}_${date}`;
-}
-
 const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: DailyLog) => {
   if (!workoutDay) return { completedSets: 0, totalSets: 0, score: 0 };
-
   let totalSets = 0;
   let completedSets = 0;
-
   workoutDay.exercises.forEach(exercise => {
     const exerciseLog = dailyLog[exercise.id];
     const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
-
     if (!isSkipped) {
-      exercise.sets.forEach(() => {
-        totalSets++;
-      });
+      exercise.sets.forEach(() => { totalSets++; });
     }
-    
     if (exerciseLog) {
       exercise.sets.forEach(set => {
         if (exerciseLog[set.id]?.isCompleted) {
@@ -54,105 +47,123 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: Daily
 };
 
 export default function TodaysWorkoutDashboardPage() {
-  const [workoutDay, setWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
-  const [currentDayId, setCurrentDayId] = useState<string | null>(null);
-  const [dailyLog, setDailyLog] = useState<DailyLog>({});
-  const [isClient, setIsClient] = useState(false);
-  const [currentDate, setCurrentDate] = useState('');
-  const [isOverrideActive, setIsOverrideActive] = useState(false);
-  const [overrideDayId, setOverrideDayId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const router = useRouter();
 
+  const [workoutDay, setWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
+  const [currentDate, setCurrentDate] = useState('');
+  const [isOverrideActive, setIsOverrideActive] = useState(false);
+  const [overrideDayId, setOverrideDayId] = useState<string | null>(null);
+
+  const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
+    queryKey: ['workoutPlans', user?.uid],
+    queryFn: () => getAllUserWorkoutPlans(user!.uid),
+    enabled: !!user,
+  });
+  
+  const { data: weightOverrides, isLoading: isLoadingOverrides } = useQuery({
+    queryKey: ['weightOverrides', user?.uid],
+    queryFn: () => getTargetWeightOverrides(user!.uid),
+    enabled: !!user,
+  });
+
+  const { data: overrideIdFromDB, isLoading: isLoadingOverrideId } = useQuery({
+      queryKey: ['todayOverride', user?.uid],
+      queryFn: () => getTodayWorkoutOverride(user!.uid),
+      enabled: !!user,
+  });
+
   const loadWorkoutForDisplay = useCallback(() => {
+    if (!allPlans) return;
+
     const date = new Date();
     const scheduledDayId = days[date.getDay()];
-    setCurrentDayId(scheduledDayId);
+    const activePlan = allPlans.find(p => p.isActive);
 
-    const overrideId = getTodayWorkoutOverride();
+    if (!activePlan) {
+      setWorkoutDay(null);
+      return;
+    }
+    
     let dayIdToLoad = scheduledDayId;
+    let finalOverrideId = overrideIdFromDB || null;
 
-    if (overrideId) {
-      const overriddenWorkoutDay = getWorkoutByDayFromActivePlan(overrideId);
+    if (finalOverrideId) {
+      const overriddenWorkoutDay = activePlan.plan.find(d => d.id === finalOverrideId);
       if (overriddenWorkoutDay) {
         setWorkoutDay(overriddenWorkoutDay);
         setIsOverrideActive(true);
-        setOverrideDayId(overrideId);
-        dayIdToLoad = overrideId;
+        setOverrideDayId(finalOverrideId);
+        dayIdToLoad = finalOverrideId;
       } else {
-        clearTodayWorkoutOverride();
         setIsOverrideActive(false);
         setOverrideDayId(null);
-        setWorkoutDay(getWorkoutByDayFromActivePlan(scheduledDayId));
+        setWorkoutDay(activePlan.plan.find(d => d.mapsToActualDayOfWeek === date.getDay()));
         toast({ variant: "destructive", title: "Override Error", description: "Could not find the overridden workout. Loading scheduled session."});
       }
     } else {
       setIsOverrideActive(false);
       setOverrideDayId(null);
-      setWorkoutDay(getWorkoutByDayFromActivePlan(scheduledDayId));
+      const scheduledDay = activePlan.plan.find(d => d.mapsToActualDayOfWeek === date.getDay());
+      setWorkoutDay(scheduledDay || null);
     }
     
-    const dateStr = getCurrentDateString();
-    setCurrentDate(dateStr);
-
-    if (typeof window !== 'undefined') {
-      const activeWorkoutForLog = getWorkoutByDayFromActivePlan(dayIdToLoad);
-      if (activeWorkoutForLog) {
-        const key = getLocalStorageKey(activeWorkoutForLog.id, dateStr);
-        const storedLog = localStorage.getItem(key);
-        setDailyLog(storedLog ? JSON.parse(storedLog) : {});
-      } else {
-         setDailyLog({});
-      }
-    }
-  }, [toast]);
-
+    setCurrentDate(getCurrentDateString());
+  }, [allPlans, toast, overrideIdFromDB]);
+  
   useEffect(() => {
-    setIsClient(true);
-    loadWorkoutForDisplay();
-  }, [loadWorkoutForDisplay]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && workoutDay && currentDate) {
-      const key = getLocalStorageKey(workoutDay.id, currentDate);
-      const storedLog = localStorage.getItem(key);
-      const currentLog = storedLog ? JSON.parse(storedLog) : {};
-      if (JSON.stringify(currentLog) !== JSON.stringify(dailyLog)) {
-          setDailyLog(currentLog);
-      }
+    if(!isLoadingPlans && !isLoadingOverrideId) {
+      loadWorkoutForDisplay();
     }
-  }, [workoutDay, currentDate, dailyLog]);
+  }, [isLoadingPlans, isLoadingOverrideId, loadWorkoutForDisplay]);
 
-  const handleClearDayLog = useCallback(() => {
-    if (!workoutDay || !currentDate) return;
-    setDailyLog({});
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(getLocalStorageKey(workoutDay.id, currentDate));
+  const { data: dailyLog = {}, isLoading: isLoadingLog } = useQuery({
+      queryKey: ['dailyLog', user?.uid, currentDate],
+      queryFn: () => getDailyLog(user!.uid, currentDate),
+      enabled: !!user && !!currentDate,
+      initialData: {},
+  });
+
+  const clearLogMutation = useMutation({
+    mutationFn: () => deleteDailyLog(user!.uid, currentDate),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dailyLog', user?.uid, currentDate] });
+      toast({ title: "Log Cleared", description: `Log for ${workoutDay?.dayName} (${currentDate}) has been cleared.` });
+    },
+    onError: () => {
+      toast({ variant: 'destructive', title: "Error", description: "Could not clear the log." });
+    },
+  });
+
+  const clearOverrideMutation = useMutation({
+    mutationFn: () => clearOverrideService(user!.uid),
+    onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['todayOverride', user?.uid]});
+        setIsOverrideActive(false);
+        setOverrideDayId(null);
+        // loadWorkoutForDisplay will be re-triggered by the useEffect dependency on isLoadingOverrideId/data
+        toast({ title: "Override Cleared", description: "Now showing your regularly scheduled workout."});
+    },
+    onError: () => {
+        toast({ variant: 'destructive', title: "Error", description: "Could not clear override."});
     }
-    toast({
-      title: "Log Cleared",
-      description: `Log for ${workoutDay.dayName} (${currentDate}) has been cleared.`,
-    });
-  }, [workoutDay, currentDate, toast]);
+  });
   
   const { completedSets, totalSets, score } = useMemo(
     () => calculateWorkoutProgress(workoutDay, dailyLog),
     [workoutDay, dailyLog]
   );
+  
+  const isLoading = isLoadingPlans || isLoadingLog || isLoadingOverrides || isLoadingOverrideId;
 
-  const handleClearOverride = () => {
-    clearTodayWorkoutOverride();
-    setIsOverrideActive(false);
-    setOverrideDayId(null);
-    loadWorkoutForDisplay();
-    toast({ title: "Override Cleared", description: "Now showing your regularly scheduled workout."});
-  };
-
-  if (!isClient || workoutDay === undefined) {
+  if (isLoading) {
     return <LoadingWorkoutPage />;
   }
   
   if (!workoutDay) {
+    const scheduledDayName = days[new Date().getDay()];
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="border-destructive">
@@ -166,10 +177,10 @@ export default function TodaysWorkoutDashboardPage() {
             <p>
               {isOverrideActive && overrideDayId
                 ? `Could not find the overridden workout (ID: ${overrideDayId}). Try clearing the override.`
-                : `No workout plan found for ${currentDayId || 'today'} in the active plan. Enjoy your rest day or check your plan!`}
+                : `No workout plan found for ${scheduledDayName} in the active plan. Enjoy your rest day or check your plan!`}
             </p>
             {isOverrideActive && (
-              <Button onClick={handleClearOverride} variant="outline" className="mt-4 mr-2">
+              <Button onClick={() => clearOverrideMutation.mutate()} variant="outline" className="mt-4 mr-2">
                 <RefreshCcw className="mr-2 h-4 w-4" /> Clear Override
               </Button>
             )}
@@ -197,7 +208,7 @@ export default function TodaysWorkoutDashboardPage() {
               <ShieldAlert className="h-5 w-5 text-accent-foreground" />
               <CardTitle className="text-base text-accent-foreground">Session Override Active</CardTitle>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleClearOverride} className="text-accent-foreground hover:bg-accent/30">
+            <Button variant="ghost" size="sm" onClick={() => clearOverrideMutation.mutate()} className="text-accent-foreground hover:bg-accent/30">
               <RefreshCcw className="mr-1.5 h-4 w-4" /> Revert to Scheduled
             </Button>
           </CardHeader>
@@ -211,7 +222,7 @@ export default function TodaysWorkoutDashboardPage() {
               <CardTitle className="text-3xl font-bold text-primary mb-1">{workoutDay.dayName}</CardTitle>
               <CardDescription className="text-lg text-muted-foreground">{workoutDay.title} - {currentDate}</CardDescription>
             </div>
-            <Button variant="outline" onClick={handleClearDayLog} size="sm" className="rounded-full shrink-0">
+            <Button variant="outline" onClick={() => clearLogMutation.mutate()} size="sm" className="rounded-full shrink-0">
               Clear Today's Full Log
             </Button>
           </div>
@@ -237,7 +248,7 @@ export default function TodaysWorkoutDashboardPage() {
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground mb-3">Exercises for Today:</h2>
         {workoutDay.exercises.map((exercise) => {
-          const effectiveWeight = getUserTargetWeight(exercise.id, exercise.targetWeight);
+          const effectiveWeight = weightOverrides?.[exercise.id] ?? exercise.targetWeight;
           const exerciseCompleted = isExerciseCompleted(exercise);
           const exerciseLog = dailyLog[exercise.id];
           const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);

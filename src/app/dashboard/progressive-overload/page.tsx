@@ -1,12 +1,15 @@
 // src/app/dashboard/progressive-overload/page.tsx
 'use client';
 import { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/context/auth-context';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import type { DailyLog, WorkoutDay, NamedWorkoutPlan } from '@/types/workout';
 import { History, CalendarDays, Flame, BarChart } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading';
-import { calculateStreaks, getAllExercises, calculateProgressDataForChart, ChartData } from '@/lib/workout-utils';
-import { getActiveNamedWorkoutPlan } from '@/lib/workout-plan-service';
+import { calculateStreaks, calculateProgressDataForChart, ChartData } from '@/lib/workout-utils';
+import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
+import { getAllUserLogs } from '@/lib/firestore-log-service';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -19,48 +22,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 
 type TrackableExercise = { id: string; name: string; dayId: string; dayName: string; hasEnoughData: boolean; };
 
-const getLoggedDays = (): Date[] => {
-  if (typeof window === 'undefined') return [];
-  const loggedDates = new Set<string>();
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith('gymtrack_log_')) continue;
-
-      const match = key.match(/^gymtrack_log_[a-zA-Z0-9-]+_(\d{4}-\d{2}-\d{2})$/);
-      if (match && match[1]) {
-        const dateString = match[1];
-        if (!dateString) continue;
-        const logContent = localStorage.getItem(key);
-        if (logContent && logContent !== '{}') {
-           try {
-             const parsedLog = JSON.parse(logContent);
-             if (Object.values(parsedLog).some((exerciseLog: any) =>
-                 typeof exerciseLog === 'object' && exerciseLog !== null &&
-                 Object.values(exerciseLog).some((set: any) => typeof set === 'object' && set !== null && set.isCompleted)
-             )) {
-                 loggedDates.add(dateString);
-             }
-           } catch (e) {
-               console.error("Error parsing log content for date check:", key, e);
-           }
-        }
-      }
-    }
-  } catch (error) {
-    console.error("Error accessing localStorage:", error);
-  }
-
-  return Array.from(loggedDates)
-    .filter(dateStr => typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr))
-    .map(dateStr => {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      if (isNaN(year) || isNaN(month) || isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) return null;
-      return new Date(Date.UTC(year, month - 1, day));
-    })
-    .filter((date): date is Date => date !== null);
-};
-
 const formatDateLocal = (date: Date): string => {
   const year = date.getUTCFullYear();
   const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
@@ -69,6 +30,10 @@ const formatDateLocal = (date: Date): string => {
 };
 
 export default function ProgressiveOverloadDashboardPage() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  // State
   const [isClient, setIsClient] = useState(false);
   const [loggedDays, setLoggedDays] = useState<Date[]>([]);
   const [streaks, setStreaks] = useState<{ current: number; longest: number }>({ current: 0, longest: 0 });
@@ -77,60 +42,96 @@ export default function ProgressiveOverloadDashboardPage() {
   const [selectedDateLog, setSelectedDateLog] = useState<DailyLog | null>(null);
   const [selectedWorkoutDay, setSelectedWorkoutDay] = useState<WorkoutDay | null>(null);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
-
   const [trackableExercises, setTrackableExercises] = useState<TrackableExercise[]>([]);
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const [chartData, setChartData] = useState<ChartData[]>([]);
   const [exerciseName, setExerciseName] = useState<string>('');
-  const [activePlan, setActivePlan] = useState<NamedWorkoutPlan | null>(null);
-  const { toast } = useToast();
 
+  // Firestore Queries
+  const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
+    queryKey: ['workoutPlans', user?.uid],
+    queryFn: () => getAllUserWorkoutPlans(user!.uid),
+    enabled: !!user,
+  });
+
+  const { data: allLogs, isLoading: isLoadingLogs } = useQuery({
+    queryKey: ['allUserLogs', user?.uid],
+    queryFn: () => getAllUserLogs(user!.uid),
+    enabled: !!user,
+  });
+
+  const activePlan = useMemo(() => allPlans?.find(p => p.isActive), [allPlans]);
+
+  // Effects
   useEffect(() => {
     setIsClient(true);
-    if (typeof window !== 'undefined') {
-      const today = new Date();
-      setDisplayMonth(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)));
-      const days = getLoggedDays();
-      setLoggedDays(days);
-      const calculatedStreaks = calculateStreaks(days);
-      setStreaks(calculatedStreaks);
-      const currentActivePlan = getActiveNamedWorkoutPlan();
-      setActivePlan(currentActivePlan);
-
-      if (currentActivePlan) {
-        const exercisesWithDataCheck: TrackableExercise[] = [];
-        currentActivePlan.plan.forEach(day => {
-          day.exercises.forEach(ex => {
-            if (!ex.isActivity && !ex.isCore && ex.unit === 'reps') {
-              const data = calculateProgressDataForChart(ex.id);
-              exercisesWithDataCheck.push({
-                id: ex.id,
-                name: ex.name,
-                dayId: day.id,
-                dayName: day.title,
-                hasEnoughData: data.length > 1
-              });
-            }
-          });
-        });
-        setTrackableExercises(exercisesWithDataCheck);
-
-        const firstTrackableExercise = exercisesWithDataCheck.find(ex => ex.hasEnoughData);
-        if (firstTrackableExercise) {
-          setSelectedExerciseId(firstTrackableExercise.id);
-          setExerciseName(firstTrackableExercise.name);
-          setChartData(calculateProgressDataForChart(firstTrackableExercise.id));
-        }
-      }
-    }
+    const today = new Date();
+    setDisplayMonth(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)));
   }, []);
 
+  useEffect(() => {
+    if (allLogs) {
+      const dates = Array.from(allLogs.keys()).map(dateStr => {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        return new Date(Date.UTC(year, month - 1, day));
+      });
+      setLoggedDays(dates);
+      setStreaks(calculateStreaks(dates));
+    }
+  }, [allLogs]);
+
+  useEffect(() => {
+    if (activePlan && allLogs) {
+      const exercisesWithDataCheck: TrackableExercise[] = [];
+      activePlan.plan.forEach(day => {
+        day.exercises.forEach(ex => {
+          if (!ex.isActivity && !ex.isCore && ex.unit === 'reps') {
+            const data = calculateProgressDataForChart(ex.id, allLogs);
+            exercisesWithDataCheck.push({
+              id: ex.id,
+              name: ex.name,
+              dayId: day.id,
+              dayName: day.title,
+              hasEnoughData: data.length > 1
+            });
+          }
+        });
+      });
+      setTrackableExercises(exercisesWithDataCheck);
+
+      const firstTrackableExercise = exercisesWithDataCheck.find(ex => ex.hasEnoughData);
+      if (firstTrackableExercise) {
+        setSelectedExerciseId(firstTrackableExercise.id);
+      }
+    }
+  }, [activePlan, allLogs]);
+
+  useEffect(() => {
+    if (selectedExerciseId && allLogs) {
+      const data = calculateProgressDataForChart(selectedExerciseId, allLogs);
+      setChartData(data);
+      const exercise = trackableExercises.find(ex => ex.id === selectedExerciseId);
+      if (exercise) setExerciseName(exercise.name);
+    }
+  }, [selectedExerciseId, allLogs, trackableExercises]);
+
+  const handleDayClick = (date: Date) => {
+    if (!activePlan || !allLogs) return;
+    const dateStr = formatDateLocal(date);
+    const logForDay = allLogs.get(dateStr);
+    
+    if (logForDay) {
+        setSelectedDate(date);
+        setSelectedDateLog(logForDay);
+        // Find which workout day corresponds to this log
+        const workoutDayForLog = activePlan.plan.find(day => day.exercises.some(ex => logForDay[ex.id]));
+        setSelectedWorkoutDay(workoutDayForLog || null);
+        setIsLogModalOpen(true);
+    }
+  };
+  
   const handleExerciseSelectForChart = (exerciseId: string) => {
     setSelectedExerciseId(exerciseId);
-    const data = calculateProgressDataForChart(exerciseId);
-    setChartData(data);
-    const exercise = trackableExercises.find(ex => ex.id === exerciseId);
-    if(exercise) setExerciseName(exercise.name);
   };
 
   const groupedExercises = useMemo(() => {
@@ -147,6 +148,10 @@ export default function ProgressiveOverloadDashboardPage() {
   const chartConfig = {
     weight: { label: 'Weight (kg)', color: 'hsl(var(--primary))' },
   };
+
+  if (!isClient || isLoadingPlans || isLoadingLogs) {
+    return <LoadingProgressiveOverloadDashboard />;
+  }
 
   return (
     <div className="container mx-auto py-8 px-4 md:px-6 space-y-8">
@@ -179,7 +184,9 @@ export default function ProgressiveOverloadDashboardPage() {
           <CardContent className="flex-grow flex items-center justify-center p-1 sm:p-2">
             <Calendar
               mode="single"
-              onSelect={() => {}} // No action on select, handled by day render
+              selected={selectedDate}
+              onSelect={setSelectedDate}
+              onDayClick={handleDayClick}
               month={displayMonth}
               onMonthChange={setDisplayMonth}
               className="rounded-md border p-0 w-full max-w-full h-auto"
@@ -190,15 +197,6 @@ export default function ProgressiveOverloadDashboardPage() {
                   color: 'hsl(var(--foreground))',
                   borderRadius: 'var(--radius)',
                   position: 'relative',
-                }
-              }}
-              components={{
-                DayContent: (props) => {
-                  const isLogged = loggedDays.some(d => d.getTime() === props.date.getTime());
-                  if (isLogged) {
-                    return <button className="w-full h-full flex items-center justify-center relative">{props.date.getDate()}</button>;
-                  }
-                  return <div className="w-full h-full flex items-center justify-center relative">{props.date.getDate()}</div>;
                 }
               }}
               disabled={{ after: new Date() }}
