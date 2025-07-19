@@ -50,6 +50,8 @@ export default function SignupPage() {
   const { toast } = useToast();
   const { signup } = useAuth();
 
+  console.log("SIGNUP_PAGE: Component is mounting/rendering.");
+
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
     defaultValues: {
@@ -60,16 +62,19 @@ export default function SignupPage() {
   });
 
   const onSubmit = async (data: SignupFormValues) => {
+    console.log("SIGNUP_PAGE: Form submitted with email:", data.email);
     setIsLoading(true);
     try {
+      console.log("SIGNUP_PAGE: Calling signup function from useAuth.");
       await signup(data.email, data.password);
+      console.log("SIGNUP_PAGE: Signup call successful.");
       toast({
         title: 'Account Created',
         description: "Welcome! Let's get started.",
       });
       // The redirect is handled by the AppLayout component's effect
     } catch (error: any) {
-      console.error("Sign Up Error:", error);
+      console.error("SIGNUP_PAGE: Sign Up failed. Full error object:", error);
       let errorMessage = 'An unexpected error occurred. Please try again.';
       switch (error.code) {
         case 'auth/email-already-in-use':
@@ -82,6 +87,9 @@ export default function SignupPage() {
         case 'auth/weak-password':
           errorMessage = 'The password is too weak. Please choose a stronger one.';
           break;
+        case 'auth/configuration-not-found':
+          errorMessage = 'Firebase configuration is missing or invalid. Please contact support.';
+          break;
       }
       toast({
         variant: 'destructive',
@@ -90,6 +98,7 @@ export default function SignupPage() {
       });
     } finally {
       setIsLoading(false);
+      console.log("SIGNUP_PAGE: Finished signup attempt.");
     }
   };
 

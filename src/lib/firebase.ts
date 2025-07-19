@@ -1,4 +1,3 @@
-
 // src/lib/firebase.ts
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
@@ -13,25 +12,35 @@ const firebaseConfig = {
   appId: "1:REDACTED_SENDER_ID:web:REDACTED_APP_ID",
 };
 
-
+// --- Singleton Pattern for Firebase Initialization ---
 let app: FirebaseApp;
+let auth: ReturnType<typeof getAuth>;
+let db: ReturnType<typeof getFirestore>;
 
-try {
-  console.log("Attempting to initialize Firebase...");
-  console.log("Using config:", firebaseConfig);
-  // Initialize Firebase
-  // To prevent reinitialization on hot reloads in development, check if an app is already initialized.
-  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-  console.log("Firebase initialized successfully.");
-} catch (error) {
-  console.error("FATAL: Firebase initialization failed.", error);
-  // If initialization fails, we can't proceed. We'll set auth and db to null
-  // so other parts of the app can handle it gracefully if needed, though it's likely
-  // the app will be unusable.
-  app = null as any; // Cast to any to satisfy type checker in error case
+if (getApps().length === 0) {
+  console.log("FIREBASE_INIT: No Firebase apps initialized. Creating a new one.");
+  try {
+    app = initializeApp(firebaseConfig);
+    console.log("FIREBASE_INIT: New app created successfully. Project ID:", app.options.projectId);
+  } catch (error) {
+    console.error("FIREBASE_INIT: FATAL: Firebase initialization failed.", error);
+    app = null as any; // Avoid further errors
+  }
+} else {
+  console.log("FIREBASE_INIT: Firebase app already exists. Getting existing app.");
+  app = getApp();
+  console.log("FIREBASE_INIT: Existing app retrieved. Project ID:", app.options.projectId);
 }
 
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Initialize services only if app is valid
+if (app) {
+    auth = getAuth(app);
+    db = getFirestore(app);
+    console.log("FIREBASE_INIT: Auth and Firestore services initialized for app:", app.name);
+} else {
+    console.error("FIREBASE_INIT: Cannot initialize Auth/Firestore because app is invalid.");
+    auth = null as any;
+    db = null as any;
+}
 
 export { app, auth, db };
