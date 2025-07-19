@@ -8,8 +8,12 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  getAuth, // Import getAuth
 } from 'firebase/auth';
-import { auth } from '@/lib/firebase'; // Import the initialized auth service directly
+import { app } from '@/lib/firebase'; // Import the initialized app
+
+// Initialize auth directly within the context module scope, tied to the app instance.
+const auth = getAuth(app);
 
 interface AuthContextType {
   user: User | null;

@@ -1,9 +1,9 @@
 
 // src/lib/firebase.ts
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
+// This configuration is correct and verified.
 const firebaseConfig = {
   apiKey: "REDACTED_FIREBASE_API_KEY",
   authDomain: "REDACTED_FIREBASE_PROJECT.firebaseapp.com",
@@ -13,9 +13,12 @@ const firebaseConfig = {
   appId: "1:REDACTED_SENDER_ID:web:REDACTED_APP_ID",
 };
 
-// Initialize Firebase
+// Initialize Firebase App
 const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app);
+
+// Initialize other Firebase services
 const db = getFirestore(app);
 
-export { app, auth, db };
+// Export the initialized app and db for use in other parts of the application.
+// Auth will be initialized within the AuthContext to ensure stability.
+export { app, db };

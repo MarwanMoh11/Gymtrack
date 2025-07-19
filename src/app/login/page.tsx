@@ -75,6 +75,9 @@ export default function LoginPage() {
         case 'auth/too-many-requests':
           errorMessage = 'Access to this account has been temporarily disabled due to many failed login attempts. You can immediately restore it by resetting your password or you can try again later.';
           break;
+        case 'auth/configuration-not-found':
+          errorMessage = 'Firebase configuration is missing or invalid. Please contact support.';
+          break;
       }
       toast({
         variant: 'destructive',
