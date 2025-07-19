@@ -50,8 +50,6 @@ export default function SignupPage() {
   const { toast } = useToast();
   const { signup } = useAuth();
 
-  console.log("SIGNUP_PAGE: Component is mounting/rendering.");
-
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
     defaultValues: {
@@ -62,12 +60,9 @@ export default function SignupPage() {
   });
 
   const onSubmit = async (data: SignupFormValues) => {
-    console.log("SIGNUP_PAGE: Form submitted with email:", data.email);
     setIsLoading(true);
     try {
-      console.log("SIGNUP_PAGE: Calling signup function from useAuth.");
       await signup(data.email, data.password);
-      console.log("SIGNUP_PAGE: Signup call successful.");
       toast({
         title: 'Account Created',
         description: "Welcome! Let's get started.",
@@ -98,7 +93,6 @@ export default function SignupPage() {
       });
     } finally {
       setIsLoading(false);
-      console.log("SIGNUP_PAGE: Finished signup attempt.");
     }
   };
 

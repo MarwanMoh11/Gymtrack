@@ -42,8 +42,6 @@ export default function LoginPage() {
   const { toast } = useToast();
   const { login } = useAuth();
 
-  console.log("LOGIN_PAGE: Component is mounting/rendering.");
-
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
@@ -53,12 +51,9 @@ export default function LoginPage() {
   });
 
   const onSubmit = async (data: LoginFormValues) => {
-    console.log("LOGIN_PAGE: Form submitted with email:", data.email);
     setIsLoading(true);
     try {
-      console.log("LOGIN_PAGE: Calling login function from useAuth.");
       await login(data.email, data.password);
-      console.log("LOGIN_PAGE: Login call successful.");
       toast({
         title: 'Login Successful',
         description: "Welcome back! Let's get to work.",
@@ -88,7 +83,6 @@ export default function LoginPage() {
       });
     } finally {
       setIsLoading(false);
-      console.log("LOGIN_PAGE: Finished login attempt.");
     }
   };
 
