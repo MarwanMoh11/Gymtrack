@@ -20,4 +20,5 @@ const nextConfig: NextConfig = {
   },
 };
 
+// This comment is added to force a server restart and load environment variables.
 export default nextConfig;
