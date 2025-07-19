@@ -2,10 +2,7 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
-import { SidebarProvider } from '@/components/ui/sidebar';
-import AppLayout from '@/components/app-layout';
-import { ThemeProvider } from 'next-themes';
-import { AuthProvider } from '@/context/auth-context';
+import { Providers } from '@/components/providers'; // Import the new provider component
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -30,21 +27,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="dark" 
-          enableSystem
-          disableTransitionOnChange
-        >
-          <AuthProvider>
-            <SidebarProvider defaultOpen={true}>
-              <AppLayout>
-                {children}
-              </AppLayout>
-            </SidebarProvider>
-          </AuthProvider>
+        <Providers> {/* Use the new single provider component */}
+          {children}
           <Toaster />
-        </ThemeProvider>
+        </Providers>
       </body>
     </html>
   );
