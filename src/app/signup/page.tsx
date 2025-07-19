@@ -69,6 +69,7 @@ export default function SignupPage() {
       });
       // The redirect is handled by the AppLayout component's effect
     } catch (error: any) {
+      console.error("Sign Up Error:", error);
       let errorMessage = 'An unexpected error occurred. Please try again.';
       switch (error.code) {
         case 'auth/email-already-in-use':
