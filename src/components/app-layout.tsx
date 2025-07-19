@@ -1,9 +1,9 @@
-
 'use client';
 
+import { use, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { CalendarCheck, Dumbbell, Settings, PanelLeft, TrendingUp, LayoutGrid } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogIn, LogOut, UserPlus } from 'lucide-react';
 import {
   Sidebar,
   SidebarHeader,
@@ -11,7 +11,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  // SidebarFooter, // Keep if settings or other footers are planned
+  SidebarFooter,
   SidebarInset,
   SidebarTrigger,
   useSidebar,
@@ -20,7 +20,8 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Logo } from '@/components/icons/logo';
 import { Separator } from '@/components/ui/separator';
-
+import { useAuth } from '@/context/auth-context';
+import { Skeleton } from './ui/skeleton';
 
 const todayNavItem = {
   href: '/dashboard/today',
@@ -44,10 +45,33 @@ const mainDashboardNavItems = [
   }
 ];
 
+// Loading skeleton for when auth state is being determined
+function AuthLoadingSkeleton() {
+  return (
+    <div className="flex h-screen w-full items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-4">
+        <Dumbbell className="h-12 w-12 animate-pulse text-primary" />
+        <p className="text-muted-foreground">Initializing session...</p>
+      </div>
+    </div>
+  );
+}
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+// Layout for unauthenticated pages like login/signup
+function PublicLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="flex h-screen flex-col items-center justify-center bg-background p-4">
+      {children}
+    </main>
+  );
+}
+
+// Full app layout for authenticated users
+function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { open, isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const { user, logout } = useAuth();
+  const router = useRouter();
 
   const handleLinkClick = () => {
     if (isMobile) {
@@ -55,8 +79,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const handleLogout = async () => {
+    await logout();
+    router.push('/login');
+  };
+
   return (
-    <>
+     <>
       <Sidebar variant="sidebar" collapsible="icon">
         <SidebarHeader className="p-4">
             <div className="flex items-center gap-3">
@@ -69,7 +98,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Separator className="bg-sidebar-border group-data-[collapsible=icon]:hidden" />
         <SidebarContent asChild>
           <ScrollArea className="h-full">
-            {/* Today's Session Link - Placed at the top */}
             <SidebarMenu className="p-2 lg:p-4">
               <SidebarMenuItem key={todayNavItem.href}>
                 <SidebarMenuButton
@@ -91,12 +119,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarMenuItem>
             </SidebarMenu>
 
-            {/* Separator before other navigation sections */}
-            {(mainDashboardNavItems.length > 0) && (
-                <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
-            )}
+            <Separator className="my-2 bg-sidebar-border group-data-[collapsible=icon]:hidden" />
 
-            {/* Main Navigation Items (e.g., Progress Dashboard, Full Workout Plan) */}
             {mainDashboardNavItems.length > 0 && (
               <SidebarMenu className="p-2 lg:p-4">
                 {mainDashboardNavItems.map((item) => (
@@ -124,19 +148,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             
           </ScrollArea>
         </SidebarContent>
-        {/* 
         <SidebarFooter className="p-4">
           <SidebarMenuButton
             variant="default"
             size="default"
             className="justify-start"
-            tooltip="Settings"
+            tooltip="Logout"
+            onClick={handleLogout}
           >
-            <Settings />
-            <span>Settings</span>
+            <LogOut />
+            <span>Logout</span>
           </SidebarMenuButton>
+          <p className="text-xs text-sidebar-foreground/50 px-2 pt-2 truncate group-data-[collapsible=icon]:hidden">
+            {user?.email}
+          </p>
         </SidebarFooter>
-        */}
       </Sidebar>
       <SidebarInset className="flex flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:hidden">
@@ -159,3 +185,35 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const publicRoutes = ['/login', '/signup'];
+  const isPublicRoute = publicRoutes.includes(pathname);
+
+  useEffect(() => {
+    if (!loading && !user && !isPublicRoute) {
+      router.push('/login');
+    }
+    if (!loading && user && isPublicRoute) {
+      router.push('/dashboard/today');
+    }
+  }, [user, loading, isPublicRoute, router, pathname]);
+
+  if (loading) {
+    return <AuthLoadingSkeleton />;
+  }
+
+  if (user && !isPublicRoute) {
+    return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
+  }
+  
+  if (!user && isPublicRoute) {
+    return <PublicLayout>{children}</PublicLayout>;
+  }
+
+  // Fallback for edge cases, e.g. navigating between public/private routes
+  return <AuthLoadingSkeleton />;
+}

@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import AppLayout from '@/components/app-layout';
 import { ThemeProvider } from 'next-themes';
+import { AuthProvider } from '@/context/auth-context';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -35,11 +36,13 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <SidebarProvider defaultOpen={true}>
-            <AppLayout>
-              {children}
-            </AppLayout>
-          </SidebarProvider>
+          <AuthProvider>
+            <SidebarProvider defaultOpen={true}>
+              <AppLayout>
+                {children}
+              </AppLayout>
+            </SidebarProvider>
+          </AuthProvider>
           <Toaster />
         </ThemeProvider>
       </body>

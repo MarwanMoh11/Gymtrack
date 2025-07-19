@@ -7,13 +7,13 @@ export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Redirect to the new "Today's Session" dashboard page
-    router.replace('/dashboard/today');
+    // Redirect unauthenticated users to the login page
+    router.replace('/login');
   }, [router]);
 
   return (
-    <div className="flex h-screen items-center justify-center">
-      <p>Loading your workout dashboard...</p>
+    <div className="flex h-screen items-center justify-center bg-background">
+      <p className="text-foreground">Loading...</p>
     </div>
   );
 }
