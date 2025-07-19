@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
@@ -11,6 +12,7 @@ import {
 } from 'firebase/auth';
 import { app } from '@/lib/firebase'; // Ensure your firebase init file is correctly referenced
 
+// Pass the initialized app to getAuth to ensure context is correct.
 const auth = getAuth(app);
 
 interface AuthContextType {
