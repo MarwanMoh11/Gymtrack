@@ -48,6 +48,7 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const { signup } = useAuth();
+  const router = useRouter();
 
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
@@ -68,7 +69,6 @@ export default function SignupPage() {
       });
       // The redirect is handled by the AppLayout component's effect
     } catch (error: any) {
-      console.error("SIGNUP_PAGE: Sign Up failed. Full error object:", error);
       let errorMessage = 'An unexpected error occurred. Please try again.';
       switch (error.code) {
         case 'auth/email-already-in-use':

@@ -40,6 +40,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const { login } = useAuth();
+  const router = useRouter();
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -59,7 +60,6 @@ export default function LoginPage() {
       });
       // The redirect is handled by the AppLayout component's effect
     } catch (error: any) {
-      console.error("LOGIN_PAGE: Login failed. Full error object:", error);
       let errorMessage = 'An unexpected error occurred. Please try again.';
       // Handle specific Firebase auth errors for better UX
       switch (error.code) {
