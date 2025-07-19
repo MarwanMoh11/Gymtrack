@@ -1,7 +1,6 @@
-
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
-import { History, TrendingUp, BarChart } from "lucide-react";
+import { History, BarChart } from "lucide-react";
 
 export default function LoadingProgressiveOverloadDashboard() {
   return (
@@ -12,6 +11,21 @@ export default function LoadingProgressiveOverloadDashboard() {
           Progress & History
         </h1>
       </div>
+
+      {/* Calendar Section Skeleton */}
+      <Card className="shadow-lg rounded-2xl">
+         <CardHeader>
+            <Skeleton className="h-7 w-1/2" />
+            <Skeleton className="h-4 w-3/4 mb-2" />
+            <div className="flex gap-4 mt-1">
+               <Skeleton className="h-4 w-1/4" />
+               <Skeleton className="h-4 w-1/4" />
+            </div>
+         </CardHeader>
+         <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4">
+            <Skeleton className="h-[500px] w-full" />
+         </CardContent>
+       </Card>
 
       {/* Progress Chart Skeleton */}
       <Card className="shadow-lg rounded-2xl">
@@ -33,21 +47,6 @@ export default function LoadingProgressiveOverloadDashboard() {
            <Skeleton className="w-full aspect-video" />
         </CardContent>
       </Card>
-      
-      {/* Calendar Section remains the same */}
-      <Card className="shadow-lg rounded-2xl">
-         <CardHeader>
-            <Skeleton className="h-7 w-1/2" />
-            <Skeleton className="h-4 w-3/4 mb-2" />
-            <div className="flex gap-4 mt-1">
-               <Skeleton className="h-4 w-1/4" />
-               <Skeleton className="h-4 w-1/4" />
-            </div>
-         </CardHeader>
-         <CardContent className="flex-grow flex items-center justify-center p-2 sm:p-4">
-            <Skeleton className="h-[500px] w-full" />
-         </CardContent>
-       </Card>
     </div>
   );
 }
