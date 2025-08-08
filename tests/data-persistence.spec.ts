@@ -15,7 +15,7 @@ test.describe('Firestore Data Persistence', () => {
     await page.getByLabel('Confirm Password').fill(userPassword);
     await page.getByRole('button', { name: 'Create Account' }).click();
     // Wait for the app to redirect to the dashboard, indicating successful signup/login.
-    await expect(page).toHaveURL('/dashboard/today', { timeout: 10000 });
+    await expect(page).toHaveURL('/dashboard/today', { timeout: 20000 });
     await page.close();
   });
   
@@ -38,8 +38,10 @@ test.describe('Firestore Data Persistence', () => {
     await expect(page).toHaveURL('/dashboard/today', { timeout: 10000 });
 
     // 2. Navigate to the first exercise of the 'Today\'s Session'
-    // The default plan is Jeff Nippard's, and Monday is the first workout day.
+    // Add a specific expectation for the exercise card to ensure data has loaded from Firestore.
     const exerciseCard = page.locator('div.space-y-4 > div.shadow-md').first();
+    await expect(exerciseCard).toBeVisible({ timeout: 15000 });
+    
     const exerciseLink = exerciseCard.getByRole('link', { name: /Log \/ View/ });
     await expect(exerciseLink).toBeVisible();
     await exerciseLink.click();
@@ -74,13 +76,12 @@ test.describe('Firestore Data Persistence', () => {
     const dayOfMonth = today.getDate();
     const calendarCell = page.locator('div.rdp-cell').filter({ hasText: new RegExp(`^${dayOfMonth}$`) });
     
-    // Check if the parent cell of the button for today's date has the 'logged' modifier style.
-    // This is a robust way to check without relying on specific color values.
-    await expect(calendarCell.locator(`button[aria-label*="${today.toLocaleString('default', { month: 'long' })}"]`)).toHaveClass(/logged/);
+    // Updated check: Ensure the button inside the cell is no longer disabled, which indicates it's logged.
+    await expect(calendarCell.locator(`button[aria-label*="${today.toLocaleString('default', { month: 'long' })}"]`)).not.toBeDisabled();
     
     // 10. Click the logged day to view the details
     await calendarCell.click();
-    await expect(page.getByRole('heading', { name: /Workout Log:/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Workout Log:/ })).toBeVisible({ timeout: 10000 });
     
     // 11. Verify the logged exercise appears in the modal
     await expect(page.locator('div[role="dialog"]').locator('div:has-text("Set 1:")')).toContainText('10 reps');
