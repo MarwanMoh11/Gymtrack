@@ -1,38 +1,52 @@
 
 'use client';
 
-import type { SetData, LoggedSetData } from '@/types/workout';
+import type { LoggedSetData, SetData } from '@/types/workout';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Check, Edit3, Plus, Minus, History, Sparkles } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getAllUserLogs } from '@/lib/firestore-log-service';
+import { useAuth } from '@/context/auth-context';
+import { getPreviousSetPerformance } from '@/lib/workout-utils';
 
 interface SetLoggerProps {
   setNumber: number;
-  setData: SetData; // Includes target reps/weight for the set definition
-  loggedSetData?: LoggedSetData; // Data logged specifically for this set instance
-  lastSessionSetPerformance?: LoggedSetData; // Performance for THIS set from the LAST session
-  effectiveTargetWeight?: string; // The weight planned for this exercise today
-  onLogSet: (log: LoggedSetData) => void;
+  setData: SetData; 
+  loggedSetData?: LoggedSetData;
+  effectiveTargetWeight?: string;
+  onLogSet: (logData: { reps: string; isCompleted: boolean; }) => void;
   exerciseUnit?: 'reps' | 's' | 'min';
-  isSimpleLog?: boolean; // For exercises like conditioning, warmups etc.
-  isEditingInitially?: boolean; // Control initial edit state
+  isSimpleLog?: boolean; 
+  isEditingInitially?: boolean; 
 }
 
 export default function SetLogger({
   setNumber,
   setData,
   loggedSetData,
-  lastSessionSetPerformance,
   effectiveTargetWeight,
   onLogSet,
   exerciseUnit,
   isSimpleLog = false,
   isEditingInitially = !loggedSetData?.isCompleted,
 }: SetLoggerProps) {
+  const { user } = useAuth();
   const unitLabel = setData.unit || exerciseUnit || 'reps';
+
+  const { data: allLogs, isLoading: isLoadingLogs } = useQuery({
+    queryKey: ['allUserLogs', user?.uid],
+    queryFn: () => getAllUserLogs(user!.uid),
+    enabled: !!user,
+  });
+
+  const lastSessionSetPerformance = useMemo(() => {
+    if (!allLogs || !setData.exerciseId) return undefined;
+    return getPreviousSetPerformance(setData.exerciseId, setData.id, allLogs);
+  }, [allLogs, setData.exerciseId, setData.id]);
 
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined && loggedSetData.reps !== null && String(loggedSetData.reps).trim() !== '') return String(loggedSetData.reps);
@@ -58,7 +72,6 @@ export default function SetLogger({
 
     onLogSet({
       reps: repsToLog,
-      weight: effectiveTargetWeight || setData.targetWeight, 
       isCompleted: true
     });
     setIsEditing(false);
@@ -71,15 +84,14 @@ export default function SetLogger({
 
   const handleMarkAsDone = () => {
      onLogSet({
-        reps: setData.targetReps, 
-        weight: effectiveTargetWeight || setData.targetWeight,
+        reps: String(setData.targetReps), 
         isCompleted: true
     });
      setIsEditing(false);
   }
 
   const handleMarkAsNotDone = () => {
-    onLogSet({ reps: loggedSetData?.reps, weight: loggedSetData?.weight, isCompleted: false });
+    onLogSet({ reps: String(loggedSetData?.reps), isCompleted: false });
     setIsEditing(true);
     setCurrentReps(loggedSetData?.reps !== undefined ? String(loggedSetData.reps) : '');
   }
@@ -96,11 +108,11 @@ export default function SetLogger({
     if (lastSessionSetPerformance?.reps !== undefined) {
         const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
         if (!isNaN(lastRepsNum)) {
-            return String(lastRepsNum); // Suggest what they did last time
+            return String(lastRepsNum);
         }
-        return String(lastSessionSetPerformance.reps); // If not numeric, show as is
+        return String(lastSessionSetPerformance.reps);
     }
-    return String(setData.targetReps); // Fallback to plan's target
+    return String(setData.targetReps);
   };
   
   const performanceBeatLast = useMemo(() => {

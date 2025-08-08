@@ -2,11 +2,9 @@
 export type SetData = {
   targetReps: string | number;
   targetWeight?: string;
-  loggedReps?: string | number;
-  loggedWeight?: string;
   unit?: 'reps' | 's' | 'min';
-  isCompleted?: boolean;
   id: string;
+  exerciseId?: string; // Add exerciseId to associate set with its parent
 };
 
 export type Exercise = {
@@ -73,4 +71,3 @@ export type NewSetData = {
   targetWeight: string;
   unit: 'reps' | 's' | 'min';
 };
-

@@ -1,13 +1,13 @@
 // src/app/exercises/[exerciseId]/page.tsx
 'use client';
 
-import { use, useState, useEffect, useMemo } from 'react'; 
+import { use, useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
 
-import type { Exercise as ExerciseType, SetData, LoggedSetData, DailyLog, WorkoutDay } from '@/types/workout';
+import type { Exercise as ExerciseType, LoggedExerciseData, WorkoutDay, NamedWorkoutPlan, SetData } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,7 +33,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from '@/lib/utils';
-import { getAllUserWorkoutPlans, getPlanById as getPlanByIdFromService, saveUserWorkoutPlan } from '@/lib/firestore-workout-plan-service';
+import { getAllUserWorkoutPlans, saveUserWorkoutPlan } from '@/lib/firestore-workout-plan-service';
 import { getDailyLog, saveDailyLog } from '@/lib/firestore-log-service';
 import { getTargetWeightOverrides, setTargetWeightOverride as saveTargetWeightOverride } from '@/lib/firestore-settings-service';
 import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data';
@@ -95,9 +95,9 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   });
 
   const { data: dailyLog, isLoading: isLoadingLog } = useQuery({
-    queryKey: ['dailyLog', user?.uid, currentDate, dayIdFromQuery],
+    queryKey: ['dailyLog', user?.uid, currentDate],
     queryFn: () => getDailyLog(user!.uid, currentDate),
-    enabled: !!user && !!dayIdFromQuery,
+    enabled: !!user && !!dayIdFromQuery, // Only enable if we're on a specific workout day
   });
   
   const { data: allExercisesForModal, isLoading: isLoadingAllExercises } = useQuery({
@@ -116,20 +116,19 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     for(const day of plan.plan) {
         const found = day.exercises.find(ex => ex.id === exerciseId);
         if (found) {
-            baseEx = found; // Found in the context of a plan
+            baseEx = found;
             if (day.id === dayIdFromQuery) {
                 workoutDay = day;
                 exerciseForLog = found;
             }
         }
     }
-    // Fallback if not in the specific day or plan
     if (!baseEx) baseEx = allExercisesForModal?.find(ex => ex.id === exerciseId);
 
     return { baseExercise: baseEx, currentWorkoutDay: workoutDay, exerciseForLogging: exerciseForLog, activePlan: plan };
   }, [allPlans, planIdFromQuery, dayIdFromQuery, exerciseId, allExercisesForModal]);
   
-  const loggedExerciseData = useMemo(() => dailyLog?.[exerciseId] || {}, [dailyLog, exerciseId]);
+  const loggedExerciseData = useMemo(() => (dailyLog?.[exerciseId] || {}) as LoggedExerciseData, [dailyLog, exerciseId]);
 
   // --- Effects to sync state with fetched data ---
   useEffect(() => {
@@ -162,8 +161,9 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   // --- Mutations ---
   const saveLogMutation = useMutation({
     mutationFn: (newLog: LoggedExerciseData) => {
+        if (!user) throw new Error("User not authenticated");
         const newDailyLog = { ...(dailyLog || {}), [exerciseId]: newLog };
-        return saveDailyLog(user!.uid, currentDate, newDailyLog);
+        return saveDailyLog(user.uid, currentDate, newDailyLog);
     },
     onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ['dailyLog', user?.uid, currentDate] });
@@ -194,7 +194,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   const saveEditedExerciseMutation = useMutation({
     mutationFn: (updatedExercise: ExerciseType) => {
-        if (!activePlan) throw new Error("No active plan to update");
+        if (!activePlan || !dayIdFromQuery) throw new Error("No active plan or day to update");
         const newPlan = { ...activePlan };
         const dayIndex = newPlan.plan.findIndex(d => d.id === dayIdFromQuery);
         if (dayIndex === -1) throw new Error("Day not found in plan");
@@ -215,8 +215,8 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   });
 
   // --- Event Handlers ---
-  const handleLogSet = (setId: string, log: LoggedSetData) => {
-    const newLogEntry = { ...log, weight: sessionTargetWeight };
+  const handleLogSet = (setId: string, logData: { reps: string; isCompleted: boolean; }) => {
+    const newLogEntry = { ...logData, weight: sessionTargetWeight };
     const newLoggedExerciseData = { ...loggedExerciseData, [setId]: newLogEntry };
     saveLogMutation.mutate(newLoggedExerciseData);
   };
@@ -232,7 +232,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   };
 
   const handleUnskipExercise = () => {
-    saveLogMutation.mutate({});
+    saveLogMutation.mutate({}); // Passing empty object resets the log for this exercise
     toast({ title: "Exercise Unskipped", description: `"${baseExercise?.name}" is no longer skipped.`});
   };
 
@@ -256,7 +256,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   const isSkipped = useMemo(() => {
     if (!exerciseForLogging || exerciseForLogging.sets.length === 0 || !dayIdFromQuery) return false;
-    return exerciseForLogging.sets.every(set => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length > 0;
+    return exerciseForLogging.sets.every(set => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length >= exerciseForLogging.sets.length;
   }, [exerciseForLogging, loggedExerciseData, dayIdFromQuery]);
 
   const isLoading = isLoadingPlans || isLoadingLog || isLoadingOverrides || isLoadingAllExercises;
@@ -445,23 +445,19 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
             )}
           </CardHeader>
           <CardContent className={cn("p-0", isSkipped && "opacity-40 pointer-events-none")}>
-            {exerciseForLogging.sets.map((set, index) => {
-              const lastSessionSetPerformance = getPreviousSetPerformance(exerciseId, set.id, exerciseForLogging.sets);
-              return (
+            {exerciseForLogging.sets.map((set, index) => (
                 <SetLogger
                   key={set.id}
                   setNumber={index + 1}
                   setData={set}
                   loggedSetData={loggedExerciseData?.[set.id]}
-                  lastSessionSetPerformance={lastSessionSetPerformance}
-                  effectiveTargetWeight={sessionTargetWeight}
                   onLogSet={(logData) => handleLogSet(set.id, logData)}
                   exerciseUnit={exerciseForLogging.unit || baseExercise.unit}
                   isSimpleLog={isSpecialActivity}
                   isEditingInitially={!loggedExerciseData?.[set.id]?.isCompleted}
+                  effectiveTargetWeight={sessionTargetWeight}
                 />
-              );
-            })}
+              ))}
           </CardContent>
           {canShowAISuggestionButton && (
             <CardFooter className="pt-4 justify-end">

@@ -1,4 +1,4 @@
-import type { DailyLog, Exercise, WorkoutDay, LoggedExerciseData, SetData } from '@/types/workout';
+import type { DailyLog, Exercise, WorkoutDay, NamedWorkoutPlan, SetData, LoggedSetData } from '@/types/workout';
 import { defaultNamedPlans } from '@/data/workout-data';
 import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
 
@@ -8,7 +8,7 @@ export const getAllExercises = (allPlans: NamedWorkoutPlan[]): Array<{ id: strin
   allPlans?.forEach(namedPlan => {
     namedPlan.plan.forEach(day => {
       day.exercises.forEach(ex => {
-        if (!ex.isWarmup && !ex.isConditioning && !ex.isStretch && !ex.isFoamRoll && !ex.isActivity && !ex.isMatch && !ex.isRecovery && !ex.isCore && ex.unit === 'reps') {
+        if (!ex.isWarmup && !ex.isConditioning && !ex.stretch && !ex.isFoamRoll && !ex.isActivity && !ex.isMatch && !ex.isRecovery && !ex.isCore && ex.unit === 'reps') {
           if (!exercisesMap.has(ex.id)) {
             exercisesMap.set(ex.id, ex.name);
           }
@@ -55,7 +55,7 @@ export const calculateProgressDataForChart = (exerciseId: string, allLogs: Map<s
                 const loggedSet = exerciseLog[setId];
                 if (loggedSet.isCompleted && loggedSet.weight) {
                     sessionWeight = loggedSet.weight;
-                    break;
+                    break; 
                 }
             }
             if (sessionWeight === undefined) return;
@@ -131,7 +131,7 @@ export const transformHistoricalDataForAI = (exerciseId: string, allLogs: Map<st
             }
         }
     });
-    return relevantLogs.slice(-8); // Return last 8 workouts
+    return relevantLogs.slice(-8);
 };
 
 export const calculateStreaks = (dates: Date[]): { current: number; longest: number } => {
@@ -167,14 +167,28 @@ export const calculateStreaks = (dates: Date[]): { current: number; longest: num
 export const getPreviousSetPerformance = (
     exerciseId: string,
     currentSetId: string,
-    exerciseSetsDefinition: SetData[],
     allLogs: Map<string, DailyLog>
 ): LoggedSetData | undefined => {
     const todayStr = new Date().toISOString().split('T')[0];
     const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-
-    const currentSetIndex = exerciseSetsDefinition.findIndex(set => set.id === currentSetId);
-    if (currentSetIndex === -1) return undefined;
+    
+    // To find the set index, we need the plan definition, which isn't available here.
+    // We make an assumption: set IDs are stable and ordered across sessions.
+    // This is fragile. A better approach would be to pass the set index.
+    // For now, we find the first log of this exercise and determine the index from there.
+    let setIndex = -1;
+    for (const date of sortedDates) {
+        const log = allLogs.get(date);
+        if (log && log[exerciseId]) {
+            const setIds = Object.keys(log[exerciseId]);
+            const idx = setIds.indexOf(currentSetId);
+            if (idx !== -1) {
+                setIndex = idx;
+                break;
+            }
+        }
+    }
+    if (setIndex === -1) return undefined; // Cannot determine set's position.
 
     for (const dateStr of sortedDates) {
         if (dateStr === todayStr) continue;
@@ -185,8 +199,8 @@ export const getPreviousSetPerformance = (
         const historicalExerciseLog = dailyLog[exerciseId];
         if (historicalExerciseLog && typeof historicalExerciseLog === 'object') {
             const historicalSetIds = Object.keys(historicalExerciseLog);
-            if (historicalSetIds.length > currentSetIndex) {
-                const historicalSetKey = historicalSetIds[currentSetIndex];
+            if (historicalSetIds.length > setIndex) {
+                const historicalSetKey = historicalSetIds[setIndex];
                 const previousPerformance = historicalExerciseLog[historicalSetKey];
                 
                 if (previousPerformance && previousPerformance.isCompleted) {

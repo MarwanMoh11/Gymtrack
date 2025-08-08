@@ -2,9 +2,13 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { config } from 'dotenv';
 
-// This configuration is correct and verified.
-// NOTE: These are placeholder keys and will be replaced by environment variables in a real deployment.
+// Ensure environment variables are loaded
+config({ path: '.env.local' });
+
+
+// This configuration is now driven by your .env.local file.
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -15,7 +19,17 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase App
-const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+// Check if all required config values are present before initializing
+let app: FirebaseApp;
+const requiredConfig = [firebaseConfig.apiKey, firebaseConfig.authDomain, firebaseConfig.projectId];
+if (requiredConfig.every(value => Boolean(value))) {
+    app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+} else {
+    console.warn("Firebase configuration is missing or incomplete. Please check your .env.local file. App functionality will be limited.");
+    // Provide a mock app object so the rest of the app doesn't crash on import
+    app = getApps().length ? getApp() : ({ options: {} } as FirebaseApp);
+}
+
 
 // Initialize other Firebase services
 const auth = getAuth(app);

@@ -1,30 +1,77 @@
 
 // src/components/dashboard/past-workout-log-view.tsx
-import type { DailyLog, WorkoutDay, LoggedSetData, Exercise } from '@/types/workout';
+import type { DailyLog, WorkoutDay, NamedWorkoutPlan, Exercise } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { CheckCircle } from 'lucide-react';
-import { getExerciseById } from '@/lib/workout-plan-service'; // Corrected import
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/context/auth-context';
+import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
+import { getExerciseById as getExerciseDefById } from '@/data/workout-data';
+
 
 interface PastWorkoutLogViewProps {
-  workoutDay: WorkoutDay | null; // Allow workoutDay to be null
+  workoutDay: WorkoutDay | null; 
   dailyLog: DailyLog;
 }
 
+// Global cache for exercise definitions
+const exerciseDefCache = new Map<string, Exercise>();
+
+function populateCache(plans: NamedWorkoutPlan[]) {
+    if (exerciseDefCache.size > 0) return; // Cache already populated
+    plans.forEach(plan => {
+        plan.plan.forEach(day => {
+            day.exercises.forEach(ex => {
+                if (!exerciseDefCache.has(ex.id)) {
+                    exerciseDefCache.set(ex.id, ex);
+                }
+            });
+        });
+    });
+}
+
+function getExerciseById(exerciseId: string): Exercise | undefined {
+    if (exerciseDefCache.size > 0) {
+        return exerciseDefCache.get(exerciseId);
+    }
+    // Fallback if cache isn't populated for some reason, though less efficient.
+    return getExerciseDefById(exerciseId);
+}
+
+
 export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkoutLogViewProps) {
+  const { user } = useAuth();
+  const { data: allPlans, isLoading } = useQuery({
+      queryKey: ['workoutPlans', user?.uid],
+      queryFn: () => getAllUserWorkoutPlans(user!.uid),
+      enabled: !!user,
+  });
+
+  if (isLoading) {
+      return <p>Loading exercise definitions...</p>
+  }
+
+  if (allPlans) {
+      populateCache(allPlans);
+  }
+
   if (!dailyLog || Object.keys(dailyLog).length === 0) {
     return <p className="text-muted-foreground text-center mt-8">No log data available for this day.</p>;
   }
 
   const exerciseIdsToRender = workoutDay
-    ? workoutDay.exercises.map(ex => ex.id)
+    ? workoutDay.exercises.map(ex => ex.id).filter(id => dailyLog[id])
     : Object.keys(dailyLog);
+
+  if (exerciseIdsToRender.length === 0) {
+    return <p className="text-muted-foreground text-center mt-8">No exercises logged for this day.</p>;
+  }
 
   return (
     <div className="space-y-4 pt-2 pb-6">
       {exerciseIdsToRender.map((exerciseId) => {
         const exerciseLog = dailyLog[exerciseId];
-        // Find the exercise definition using the global service
-        const exerciseDefinition = workoutDay?.exercises.find(ex => ex.id === exerciseId) || getExerciseById(exerciseId);
+        const exerciseDefinition = getExerciseById(exerciseId);
 
         if (!exerciseLog || typeof exerciseLog !== 'object') return null;
 
@@ -68,9 +115,6 @@ export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkout
           </Card>
         );
       })}
-       {Object.keys(dailyLog).length === 0 && (
-            <p className="text-muted-foreground text-center mt-8">No exercises logged for this day.</p>
-       )}
     </div>
   );
 }

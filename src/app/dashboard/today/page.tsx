@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import DayProgress from '@/components/workout/day-progress';
 import { useToast } from '@/hooks/use-toast';
-import { AlertTriangle, CheckSquare, ArrowRight, RefreshCcw, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CheckSquare, ArrowRight, RefreshCcw, ShieldAlert, Dumbbell } from 'lucide-react';
 import { getTargetWeightOverrides } from '@/lib/firestore-settings-service';
 
 const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -30,7 +30,8 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: Daily
   let completedSets = 0;
   workoutDay.exercises.forEach(exercise => {
     const exerciseLog = dailyLog[exercise.id];
-    const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+    // A set is skipped if ALL sets for that exercise are logged with isCompleted: false
+    const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => set.isCompleted === false);
     if (!isSkipped) {
       exercise.sets.forEach(() => { totalSets++; });
     }
@@ -74,12 +75,18 @@ export default function TodaysWorkoutDashboardPage() {
       queryFn: () => getTodayWorkoutOverride(user!.uid),
       enabled: !!user,
   });
+  
+  const { data: dailyLog = {}, isLoading: isLoadingLog } = useQuery({
+      queryKey: ['dailyLog', user?.uid, currentDate],
+      queryFn: () => getDailyLog(user!.uid, currentDate),
+      enabled: !!user && !!currentDate,
+      initialData: {},
+  });
 
   const loadWorkoutForDisplay = useCallback(() => {
     if (!allPlans) return;
 
     const date = new Date();
-    const scheduledDayId = days[date.getDay()];
     const activePlan = allPlans.find(p => p.isActive);
 
     if (!activePlan) {
@@ -87,7 +94,6 @@ export default function TodaysWorkoutDashboardPage() {
       return;
     }
     
-    let dayIdToLoad = scheduledDayId;
     let finalOverrideId = overrideIdFromDB || null;
 
     if (finalOverrideId) {
@@ -96,7 +102,6 @@ export default function TodaysWorkoutDashboardPage() {
         setWorkoutDay(overriddenWorkoutDay);
         setIsOverrideActive(true);
         setOverrideDayId(finalOverrideId);
-        dayIdToLoad = finalOverrideId;
       } else {
         setIsOverrideActive(false);
         setOverrideDayId(null);
@@ -117,14 +122,8 @@ export default function TodaysWorkoutDashboardPage() {
     if(!isLoadingPlans && !isLoadingOverrideId) {
       loadWorkoutForDisplay();
     }
-  }, [isLoadingPlans, isLoadingOverrideId, loadWorkoutForDisplay]);
+  }, [allPlans, isLoadingPlans, isLoadingOverrideId, loadWorkoutForDisplay]);
 
-  const { data: dailyLog = {}, isLoading: isLoadingLog } = useQuery({
-      queryKey: ['dailyLog', user?.uid, currentDate],
-      queryFn: () => getDailyLog(user!.uid, currentDate),
-      enabled: !!user && !!currentDate,
-      initialData: {},
-  });
 
   const clearLogMutation = useMutation({
     mutationFn: () => deleteDailyLog(user!.uid, currentDate),
@@ -143,7 +142,6 @@ export default function TodaysWorkoutDashboardPage() {
         queryClient.invalidateQueries({ queryKey: ['todayOverride', user?.uid]});
         setIsOverrideActive(false);
         setOverrideDayId(null);
-        // loadWorkoutForDisplay will be re-triggered by the useEffect dependency on isLoadingOverrideId/data
         toast({ title: "Override Cleared", description: "Now showing your regularly scheduled workout."});
     },
     onError: () => {
@@ -201,7 +199,7 @@ export default function TodaysWorkoutDashboardPage() {
 
   return (
     <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8">
-      {isOverrideActive && (
+       {isOverrideActive && (
         <Card className="mb-6 bg-accent/20 border-accent shadow-md">
           <CardHeader className="flex-row items-center justify-between pb-3 pt-3">
             <div className="flex items-center gap-2">
@@ -219,7 +217,10 @@ export default function TodaysWorkoutDashboardPage() {
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
             <div>
-              <CardTitle className="text-3xl font-bold text-primary mb-1">{workoutDay.dayName}</CardTitle>
+              <CardTitle className="text-3xl font-bold text-primary mb-1 flex items-center gap-3">
+                <Dumbbell className="h-8 w-8" />
+                {workoutDay.dayName}
+              </CardTitle>
               <CardDescription className="text-lg text-muted-foreground">{workoutDay.title} - {currentDate}</CardDescription>
             </div>
             <Button variant="outline" onClick={() => clearLogMutation.mutate()} size="sm" className="rounded-full shrink-0">
@@ -251,7 +252,7 @@ export default function TodaysWorkoutDashboardPage() {
           const effectiveWeight = weightOverrides?.[exercise.id] ?? exercise.targetWeight;
           const exerciseCompleted = isExerciseCompleted(exercise);
           const exerciseLog = dailyLog[exercise.id];
-          const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
+          const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => set.isCompleted === false);
 
           return (
             <Card key={exercise.id} className="shadow-md hover:shadow-lg transition-shadow duration-300">
