@@ -55,12 +55,17 @@ export default function ChoosePlanPage() {
 
   const mutation = useMutation({
     mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(user!.uid, plansToSave),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workoutPlans', user?.uid] });
+    onSuccess: (data, variables) => {
+      // Instead of invalidating and causing a refetch loop,
+      // we manually update the query cache with the new data.
+      queryClient.setQueryData(['workoutPlans', user?.uid], variables);
+      
       toast({
         title: "Plan Activated!",
         description: "You're all set. Let's get started with your first workout.",
       });
+      
+      // Now that the local state is correct, we can safely redirect.
       router.push('/dashboard/today');
     },
     onError: () => {
