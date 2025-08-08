@@ -78,12 +78,13 @@ export async function saveUserWorkoutPlan(userId: string, plan: NamedWorkoutPlan
 
 /**
  * Initializes the default workout plans for a new user.
- * None of the plans will be set to active by default.
+ * Sets the 'isActive' flag to false for all plans, forcing the user through onboarding.
  * @param userId The ID of the user.
  * @returns The array of default plans that were just saved.
  */
 async function initializeDefaultPlansForUser(userId: string): Promise<NamedWorkoutPlan[]> {
-  const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false })); // Ensure no plan is active
+  // For new users, ensure no plan is active so they are directed to the onboarding flow.
+  const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
   await saveAllUserWorkoutPlans(userId, plansToSave);
   return plansToSave;
 }

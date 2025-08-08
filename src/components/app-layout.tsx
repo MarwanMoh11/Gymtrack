@@ -22,6 +22,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Logo } from '@/components/icons/logo';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-context';
+import { useQuery } from '@tanstack/react-query';
+import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
 
 const todayNavItem = {
   href: '/dashboard/today',
@@ -186,28 +188,58 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, isNewUser } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
+  const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
+    queryKey: ['workoutPlans', user?.uid],
+    queryFn: () => getAllUserWorkoutPlans(user!.uid),
+    enabled: !!user,
+  });
+
   const publicRoutes = ['/login', '/signup'];
+  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan'];
   const isPublicRoute = publicRoutes.includes(pathname);
+  const isOnboardingRoute = onboardingRoutes.includes(pathname);
 
   useEffect(() => {
-    if (!loading && !user && !isPublicRoute) {
-      router.push('/login');
-    }
-    if (!loading && user && isPublicRoute) {
-      router.push('/dashboard/today');
-    }
-  }, [user, loading, isPublicRoute, router, pathname]);
+    if (loading || isLoadingPlans) return;
 
-  if (loading) {
+    if (!user && !isPublicRoute) {
+      router.push('/login');
+      return;
+    }
+    
+    if (user) {
+      // Check if the user has an active plan.
+      const hasActivePlan = allPlans?.some(p => p.isActive);
+
+      if (!hasActivePlan && !isOnboardingRoute) {
+        // If no active plan and they aren't in onboarding, send them there.
+        router.push('/onboarding/welcome');
+      } else if (hasActivePlan && (isPublicRoute || isOnboardingRoute)) {
+        // If they have a plan but are on a public/onboarding page, send to dashboard.
+        router.push('/dashboard/today');
+      }
+    }
+  }, [user, loading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
+  
+
+  const isContentLoading = loading || (user && !isOnboardingRoute && isLoadingPlans);
+  
+  if (isContentLoading) {
     return <AuthLoadingSkeleton />;
   }
 
-  if (user && !isPublicRoute) {
+  if (user && !isOnboardingRoute) {
+    // Show authenticated layout only if not on an onboarding route
     return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
+  }
+  
+  if (user && isOnboardingRoute) {
+    // Render children directly for onboarding (they have their own full-page layout)
+    return <>{children}</>;
   }
   
   if (!user && isPublicRoute) {

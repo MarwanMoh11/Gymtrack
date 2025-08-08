@@ -7,13 +7,15 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  getAdditionalUserInfo
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { QueryClient, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  isNewUser: boolean;
   login: (email: string, password: string) => Promise<any>;
   signup: (email: string, password: string) => Promise<any>;
   logout: () => Promise<void>;
@@ -24,14 +26,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isNewUser, setIsNewUser] = useState(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       if (!user) {
-        // User logged out, clear any cached data to ensure privacy
         queryClient.clear();
+        setIsNewUser(false);
       }
       setLoading(false);
     });
@@ -40,21 +43,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [queryClient]);
 
   const login = (email: string, password: string) => {
+    setIsNewUser(false); // A login is never a new user
     return signInWithEmailAndPassword(auth, email, password);
   };
 
-  const signup = (email: string, password: string) => {
-    return createUserWithEmailAndPassword(auth, email, password);
+  const signup = async (email: string, password: string) => {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const additionalInfo = getAdditionalUserInfo(userCredential);
+    if (additionalInfo?.isNewUser) {
+        setIsNewUser(true);
+    }
+    // No need to clear cache here, onAuthStateChanged will handle the new user state
+    return userCredential;
   };
 
   const logout = async () => {
     await signOut(auth);
-    // The onAuthStateChanged listener will handle clearing the query cache.
   };
 
   const value = {
     user,
     loading,
+    isNewUser,
     login,
     signup,
     logout,
