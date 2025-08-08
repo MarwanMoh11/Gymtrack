@@ -200,59 +200,85 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // This query will only run if a user is logged in.
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
     queryKey: ['workoutPlans', user?.uid],
-    queryFn: () => getAllUserWorkoutPlans(user!.uid),
+    queryFn: () => {
+      console.log(`[AppLayout] Querying workout plans for user: ${user!.uid}`);
+      return getAllUserWorkoutPlans(user!.uid);
+    },
     enabled: !!user,
   });
 
   useEffect(() => {
-    // Wait until both authentication and plan loading are settled before making decisions
-    if (isAuthLoading || (user && isLoadingPlans)) {
+    console.log('[AppLayout EFFECT] Running effect, dependencies changed.');
+    console.table({
+      pathname,
+      isAuthLoading,
+      isUserPresent: !!user,
+      isLoadingPlans,
+      isPublicRoute,
+      isOnboardingRoute,
+      hasPlans: allPlans?.length,
+    });
+
+    if (isAuthLoading) {
+      console.log('[AppLayout EFFECT] Auth is loading. No action taken.');
       return;
     }
 
-    // If there's no user and we are not on a public route, redirect to login.
-    if (!user && !isPublicRoute) {
-      router.replace('/login');
+    if (!user) {
+      if (!isPublicRoute) {
+        console.log('[AppLayout EFFECT] No user, not on public route. Redirecting to /login.');
+        router.replace('/login');
+      } else {
+        console.log('[AppLayout EFFECT] No user, on public route. Permitting access.');
+      }
       return;
     }
     
-    // If there is a user, handle routing based on their state
-    if (user) {
-      const hasActivePlan = allPlans?.some(p => p.isActive);
-
-      if (!hasActivePlan && !isOnboardingRoute) {
-        // New user without an active plan, force them to onboarding
-        router.replace('/onboarding/welcome');
-      } else if (hasActivePlan && (isPublicRoute || isOnboardingRoute)) {
-        // Existing user with a plan is on a public or onboarding page, move them to the dashboard
-        router.replace('/dashboard/today');
-      }
+    // User is logged in
+    if (isLoadingPlans && !isOnboardingRoute) {
+       console.log('[AppLayout EFFECT] User is logged in, but plans are loading and not on onboarding. Waiting.');
+       return;
     }
+    
+    if (allPlans) { // This block runs only when plan data is available
+        const hasActivePlan = allPlans.some(p => p.isActive);
+        console.log(`[AppLayout EFFECT] Plan data loaded. Has active plan: ${hasActivePlan}`);
+
+        if (!hasActivePlan && !isOnboardingRoute) {
+            console.log('[AppLayout EFFECT] No active plan, not on onboarding. Redirecting to /onboarding/welcome.');
+            router.replace('/onboarding/welcome');
+        } else if (hasActivePlan && (isPublicRoute || isOnboardingRoute)) {
+            console.log('[AppLayout EFFECT] Has active plan, but on public/onboarding route. Redirecting to /dashboard/today.');
+            router.replace('/dashboard/today');
+        } else {
+            console.log('[AppLayout EFFECT] All conditions met, rendering page.');
+        }
+    }
+    
   }, [user, isAuthLoading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
   
-
-  // Determine if we should still be showing the main loading skeleton
   const isContentLoading = isAuthLoading || (user && !isOnboardingRoute && isLoadingPlans);
   
   if (isContentLoading) {
+    console.log('[AppLayout RENDER] Showing AuthLoadingSkeleton.');
     return <AuthLoadingSkeleton />;
   }
 
-  // If a user is logged in and not on an onboarding route, show the full authenticated layout.
   if (user && !isOnboardingRoute) {
+    console.log('[AppLayout RENDER] Showing AuthenticatedLayout.');
     return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
   }
   
-  // If a user is logged in and IS on an onboarding route, just show the page content without the main layout.
   if (user && isOnboardingRoute) {
+    console.log('[AppLayout RENDER] Showing Onboarding route children.');
     return <>{children}</>;
   }
   
-  // If no user is logged in and they are on a public route, show the simple public layout.
   if (!user && isPublicRoute) {
+    console.log('[AppLayout RENDER] Showing PublicLayout.');
     return <PublicLayout>{children}</PublicLayout>;
   }
-
-  // This is the fallback state, typically seen briefly during transitions.
+  
+  console.log('[AppLayout RENDER] Fallback: Showing AuthLoadingSkeleton.');
   return <AuthLoadingSkeleton />;
 }
