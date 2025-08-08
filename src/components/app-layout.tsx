@@ -188,7 +188,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, isNewUser } = useAuth();
+  const { user, loading: isAuthLoading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -204,41 +204,39 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isOnboardingRoute = onboardingRoutes.includes(pathname);
 
   useEffect(() => {
-    if (loading || isLoadingPlans) return;
+    if (isAuthLoading || (user && isLoadingPlans)) {
+        // Still loading auth state or user plans, so don't do anything yet.
+        return;
+    }
 
     if (!user && !isPublicRoute) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
     
     if (user) {
-      // Check if the user has an active plan.
       const hasActivePlan = allPlans?.some(p => p.isActive);
 
       if (!hasActivePlan && !isOnboardingRoute) {
-        // If no active plan and they aren't in onboarding, send them there.
-        router.push('/onboarding/welcome');
+        router.replace('/onboarding/welcome');
       } else if (hasActivePlan && (isPublicRoute || isOnboardingRoute)) {
-        // If they have a plan but are on a public/onboarding page, send to dashboard.
-        router.push('/dashboard/today');
+        router.replace('/dashboard/today');
       }
     }
-  }, [user, loading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
+  }, [user, isAuthLoading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
   
 
-  const isContentLoading = loading || (user && !isOnboardingRoute && isLoadingPlans);
+  const isContentLoading = isAuthLoading || (user && !isOnboardingRoute && isLoadingPlans);
   
   if (isContentLoading) {
     return <AuthLoadingSkeleton />;
   }
 
   if (user && !isOnboardingRoute) {
-    // Show authenticated layout only if not on an onboarding route
     return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
   }
   
   if (user && isOnboardingRoute) {
-    // Render children directly for onboarding (they have their own full-page layout)
     return <>{children}</>;
   }
   

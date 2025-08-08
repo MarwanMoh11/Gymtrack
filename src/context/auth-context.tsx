@@ -15,7 +15,6 @@ import { useQueryClient } from '@tanstack/react-query';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  isNewUser: boolean;
   login: (email: string, password: string) => Promise<any>;
   signup: (email: string, password: string) => Promise<any>;
   logout: () => Promise<void>;
@@ -26,7 +25,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isNewUser, setIsNewUser] = useState(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -34,7 +32,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(user);
       if (!user) {
         queryClient.clear();
-        setIsNewUser(false);
       }
       setLoading(false);
     });
@@ -43,17 +40,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [queryClient]);
 
   const login = (email: string, password: string) => {
-    setIsNewUser(false); // A login is never a new user
     return signInWithEmailAndPassword(auth, email, password);
   };
 
   const signup = async (email: string, password: string) => {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const additionalInfo = getAdditionalUserInfo(userCredential);
-    if (additionalInfo?.isNewUser) {
-        setIsNewUser(true);
-    }
-    // No need to clear cache here, onAuthStateChanged will handle the new user state
+    // After signup, onAuthStateChanged will trigger and update the user state.
+    // The AppLayout component will then handle redirection based on whether an active plan exists.
     return userCredential;
   };
 
@@ -64,7 +57,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const value = {
     user,
     loading,
-    isNewUser,
     login,
     signup,
     logout,
