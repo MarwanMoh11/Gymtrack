@@ -1,4 +1,3 @@
-
 // src/components/dashboard/past-workout-log-view.tsx
 import type { DailyLog, WorkoutDay, NamedWorkoutPlan, Exercise } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';

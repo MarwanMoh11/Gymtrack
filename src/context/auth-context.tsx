@@ -9,9 +9,6 @@ import {
   signOut,
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { migrateLocalStorageLogsToFirestore } from '@/lib/firestore-log-service';
-import { migrateLocalStoragePlansToFirestore } from '@/lib/firestore-workout-plan-service';
-import { migrateLocalStorageSettingsToFirestore } from '@/lib/firestore-settings-service';
 import { QueryClient, useQueryClient } from '@tanstack/react-query';
 
 interface AuthContextType {
@@ -32,13 +29,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
-      if (user) {
-        // User is logged in, trigger data migration from localStorage to Firestore.
-        // These functions are designed to run only if legacy data exists.
-        await migrateLocalStoragePlansToFirestore(user.uid);
-        await migrateLocalStorageLogsToFirestore(user.uid);
-        await migrateLocalStorageSettingsToFirestore(user.uid);
-      } else {
+      if (!user) {
         // User logged out, clear any cached data to ensure privacy
         queryClient.clear();
       }

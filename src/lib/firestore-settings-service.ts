@@ -1,7 +1,7 @@
 // src/lib/firestore-settings-service.ts
 'use server';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 // --- Types ---
 type UserSettings = {
@@ -83,72 +83,11 @@ export async function clearTodayWorkoutOverride(userId: string): Promise<void> {
   if (!userId) return;
   const settingsDocRef = doc(db, 'users', userId, 'settings', 'userSettings');
   try {
-    // To "delete" a field, we can merge with an empty object,
-    // though setting it to null or an empty value works well too.
     await setDoc(settingsDocRef, {
         sessionOverride: null
     }, { merge: true });
   } catch (error) {
     console.error(`Error clearing session override for user ${userId}:`, error);
     throw new Error("Failed to clear session override.");
-  }
-}
-
-
-// --- Migration Logic ---
-
-/**
- * Migrates session and weight overrides from localStorage to Firestore.
- * @param userId The ID of the user.
- */
-export async function migrateLocalStorageSettingsToFirestore(userId: string): Promise<void> {
-  if (typeof window === 'undefined' || !userId) return;
-
-  const USER_TARGET_WEIGHT_OVERRIDES_KEY = 'gymtrack_user_target_weights';
-  const legacyWeightsStr = localStorage.getItem(USER_TARGET_WEIGHT_OVERRIDES_KEY);
-  const legacySessionKey = `gymtrack_today_override_${new Date().toISOString().split('T')[0]}`;
-  const legacySessionDayId = localStorage.getItem(legacySessionKey);
-
-  let settingsToMigrate: UserSettings = {};
-  let needsMigration = false;
-
-  if (legacyWeightsStr) {
-    try {
-      const parsedWeights = JSON.parse(legacyWeightsStr);
-      if (Object.keys(parsedWeights).length > 0) {
-        settingsToMigrate.targetWeightOverrides = parsedWeights;
-        needsMigration = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse legacy weight overrides, skipping.", e);
-    }
-  }
-
-  if (legacySessionDayId) {
-    settingsToMigrate.sessionOverride = {
-      dayId: legacySessionDayId,
-      date: new Date().toISOString().split('T')[0],
-    };
-    needsMigration = true;
-  }
-
-  if (!needsMigration) {
-    console.log("No legacy settings to migrate.");
-    return;
-  }
-
-  console.log("Migrating legacy settings to Firestore...", settingsToMigrate);
-  const settingsDocRef = doc(db, 'users', userId, 'settings', 'userSettings');
-
-  try {
-    // Merge to ensure we don't overwrite any newer data if migration runs twice
-    await setDoc(settingsDocRef, settingsToMigrate, { merge: true });
-    
-    // Clear legacy data on success
-    if (legacyWeightsStr) localStorage.removeItem(USER_TARGET_WEIGHT_OVERRIDES_KEY);
-    if (legacySessionDayId) localStorage.removeItem(legacySessionKey);
-    console.log("Successfully migrated and cleared legacy settings.");
-  } catch (error) {
-    console.error("Error migrating settings to Firestore:", error);
   }
 }

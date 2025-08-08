@@ -1,7 +1,7 @@
 // src/lib/firestore-log-service.ts
 'use server';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import type { DailyLog } from '@/types/workout';
 
 // --- Public Functions ---
@@ -76,68 +76,5 @@ export async function getAllUserLogs(userId: string): Promise<Map<string, DailyL
   } catch (error) {
     console.error(`Error fetching all logs for user ${userId}:`, error);
     throw new Error('Failed to fetch user logs.');
-  }
-}
-
-
-// --- Migration Logic ---
-
-/**
- * Checks for and migrates daily logs from localStorage to Firestore.
- * This should be called once when a user logs in.
- * @param userId The ID of the user.
- */
-export async function migrateLocalStorageLogsToFirestore(userId: string): Promise<void> {
-  if (typeof window === 'undefined' || !userId) return;
-
-  const logsToMigrate: { [key: string]: DailyLog } = {};
-  const keysToRemove: string[] = [];
-
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith('gymtrack_log_')) {
-      const logContent = localStorage.getItem(key);
-      const match = key.match(/_(\d{4}-\d{2}-\d{2})$/);
-      if (logContent && match && match[1]) {
-        const dateStr = match[1];
-        try {
-          const parsedLog = JSON.parse(logContent);
-          // Simple validation to ensure it's not an empty object
-          if (Object.keys(parsedLog).length > 0) {
-            logsToMigrate[dateStr] = parsedLog;
-          }
-          keysToRemove.push(key);
-        } catch (e) {
-          console.error(`Failed to parse legacy log for key ${key}, skipping.`, e);
-          keysToRemove.push(key); // Remove corrupted data
-        }
-      }
-    }
-  }
-
-  if (Object.keys(logsToMigrate).length === 0) {
-    console.log("No legacy logs to migrate.");
-    // Still clean up any keys that were marked for removal (e.g., corrupted ones)
-    keysToRemove.forEach(key => localStorage.removeItem(key));
-    return;
-  }
-
-  console.log(`Migrating ${Object.keys(logsToMigrate).length} daily logs to Firestore...`);
-
-  try {
-    const batch = writeBatch(db);
-    for (const dateStr in logsToMigrate) {
-      const logData = logsToMigrate[dateStr];
-      const logDocRef = doc(db, 'users', userId, 'dailyLogs', dateStr);
-      batch.set(logDocRef, logData, { merge: true }); // Merge to avoid overwriting newer data
-    }
-    await batch.commit();
-
-    // After successful migration, remove from localStorage
-    keysToRemove.forEach(key => localStorage.removeItem(key));
-    console.log("Successfully migrated and cleared legacy logs.");
-  } catch (error) {
-    console.error("Error migrating logs to Firestore:", error);
-    // Do not remove from localStorage if migration fails, to allow for retry
   }
 }
