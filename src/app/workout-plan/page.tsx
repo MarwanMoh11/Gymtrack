@@ -47,9 +47,6 @@ export default function WorkoutPlanPage() {
   const [dayIdForModal, setDayIdForModal] = useState<string | null>(null);
   const [exerciseToEdit, setExerciseToEdit] = useState<Exercise | null>(null);
   
-  const [isNewPlanDialogVisible, setIsNewPlanDialogVisible] = useState(false);
-  const [newPlanNameInput, setNewPlanNameInput] = useState('');
-  
   const { data: userData, isLoading: isLoadingUserData } = useQuery({
     queryKey: ['userData', user?.uid],
     queryFn: () => getUserData(user!.uid),
@@ -139,35 +136,6 @@ export default function WorkoutPlanPage() {
       });
     }
   }, [activePlanDetails, editableActivePlan, userData, saveUserDataMutation, toast, router]);
-
-  const handleActualCreateNewPlan = useCallback(() => {
-    if (!newPlanNameInput.trim() || !userData) {
-      toast({ variant: 'destructive', title: 'Plan Name Required', description: 'Please enter a name for the new plan.' });
-      return;
-    }
-    const newPlanId = `custom-plan-${newPlanNameInput.trim().toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
-    const newPlan: NamedWorkoutPlan = {
-      id: newPlanId,
-      name: newPlanNameInput.trim(),
-      description: "A new custom workout plan.",
-      plan: [],
-      isActive: true, // Make the new plan active immediately
-    };
-    
-    // Deactivate all other plans
-    const updatedOldPlans = userData.plans.map(p => ({ ...p, isActive: false }));
-
-    const newUserData = { ...userData, plans: [...updatedOldPlans, newPlan] };
-    
-    saveUserDataMutation.mutate(newUserData, {
-        onSuccess: () => {
-            toast({ title: "New Plan Created", description: `Plan '${newPlan.name}' is now your active plan. Start building it!` });
-            setIsNewPlanDialogVisible(false);
-            setNewPlanNameInput('');
-            setIsEditMode(true); // Automatically enter edit mode for the new plan
-        }
-    });
-  }, [newPlanNameInput, userData, saveUserDataMutation, toast]);
 
   const handleDayDetailChange = useCallback((dayId: string, field: keyof WorkoutDay, value: string | number | undefined) => {
     setEditableActivePlan(
@@ -291,7 +259,7 @@ export default function WorkoutPlanPage() {
             Switch between workout plans or customize the active one.
           </p>
         </div>
-        <Button onClick={() => setIsNewPlanDialogVisible(true)} variant="outline" size="sm">
+        <Button onClick={() => router.push('/onboarding/create-plan')} variant="outline" size="sm">
           <PlusCircle className="mr-2 h-4 w-4" /> Create New Plan
         </Button>
       </header>
@@ -489,37 +457,6 @@ export default function WorkoutPlanPage() {
             initialData={exerciseToEdit}
         />
        )}
-
-      <Dialog open={isNewPlanDialogVisible} onOpenChange={setIsNewPlanDialogVisible}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create New Workout Plan</DialogTitle>
-            <DialogDescription>
-              Enter a name for your new workout plan. You can add days and exercises after creating it.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="new-plan-name" className="text-right">
-                Plan Name
-              </Label>
-              <Input
-                id="new-plan-name"
-                value={newPlanNameInput}
-                onChange={(e) => setNewPlanNameInput(e.target.value)}
-                className="col-span-3"
-                placeholder="e.g., My Strength Focus"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsNewPlanDialogVisible(false)}>Cancel</Button>
-            <Button onClick={handleActualCreateNewPlan} disabled={saveUserDataMutation.isPending}>
-                {saveUserDataMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : "Create Plan"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

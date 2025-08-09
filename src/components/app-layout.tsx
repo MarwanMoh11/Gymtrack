@@ -211,9 +211,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const publicRoutes = ['/login', '/signup'];
-  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan', '/onboarding/create-plan', '/onboarding/create-plan/configure-days', '/onboarding/create-plan/add-exercises', '/workout-plan'];
+  // Allow access to the create-plan wizard for all users.
+  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan'];
+  const planCreationRoutes = ['/onboarding/create-plan', '/onboarding/create-plan/configure-days', '/onboarding/create-plan/add-exercises'];
+  
   const isPublicRoute = publicRoutes.includes(pathname);
   const isOnboardingRoute = onboardingRoutes.some(route => pathname.startsWith(route));
+  const isPlanCreationRoute = planCreationRoutes.some(route => pathname.startsWith(route));
 
   const { data: userData, isLoading: isLoadingUserData } = useQuery({
     queryKey: ['userData', user?.uid],
@@ -240,11 +244,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // Once user and their data are loaded, perform routing logic.
     if (userData) {
         if (userData.onboardingStatus === 'needs_plan_selection') {
-            if (!isOnboardingRoute) {
+            // New users can be on onboarding or plan creation routes.
+            if (!isOnboardingRoute && !isPlanCreationRoute) {
                 router.replace('/onboarding/welcome');
             }
         } else if (userData.onboardingStatus === 'completed') {
-            if (isPublicRoute || (isOnboardingRoute && pathname !== '/workout-plan')) {
+            // Completed users should be on dashboard routes.
+            // Exception: They can access /workout-plan and the /onboarding/create-plan flow.
+            const isAllowedRouteForCompletedUser = pathname.startsWith('/dashboard') || pathname.startsWith('/workout-plan') || isPlanCreationRoute;
+
+            if (!isAllowedRouteForCompletedUser) {
                 router.replace('/dashboard/today');
             }
         }
@@ -255,7 +264,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         router.replace('/login');
     }
 
-  }, [user, userData, isAuthLoading, isLoadingUserData, pathname, isPublicRoute, isOnboardingRoute, router]);
+  }, [user, userData, isAuthLoading, isLoadingUserData, pathname, isPublicRoute, isOnboardingRoute, isPlanCreationRoute, router]);
   
   // --- Render Logic ---
   const isLoading = isAuthLoading || (!!user && isLoadingUserData);
@@ -266,14 +275,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (user && userData) {
      if (userData.onboardingStatus === 'needs_plan_selection') {
-         // Allow rendering onboarding routes if user needs it
-         return isOnboardingRoute ? <>{children}</> : <AuthLoadingSkeleton />;
+         // Allow rendering onboarding/creation routes if user needs it
+         return (isOnboardingRoute || isPlanCreationRoute) ? <>{children}</> : <AuthLoadingSkeleton />;
      }
      if (userData.onboardingStatus === 'completed') {
-        // If onboarding is done, show authenticated layout unless on a public/onboarding route (redirect is pending)
-        return (isPublicRoute || (isOnboardingRoute && pathname !== '/workout-plan')) 
-            ? <AuthLoadingSkeleton /> 
-            : <AuthenticatedLayout>{children}</AuthenticatedLayout>;
+        const isAllowedRouteForCompletedUser = pathname.startsWith('/dashboard') || pathname.startsWith('/workout-plan') || isPlanCreationRoute;
+        return isAllowedRouteForCompletedUser 
+            ? <AuthenticatedLayout>{children}</AuthenticatedLayout> 
+            : <AuthLoadingSkeleton />;
      }
   }
   
