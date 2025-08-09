@@ -59,26 +59,28 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
 
 
 export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExercises, dayId, initialData }: AddExerciseModalProps) {
-  const [exerciseData, setExerciseData] = useState(getInitialExerciseState(initialData));
-  const [muscleGroupsInput, setMuscleGroupsInput] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
+  // Key change: Initialize state based on initialData directly.
+  // This state is now "local" to each render of the open dialog.
+  const [exerciseData, setExerciseData] = useState(() => getInitialExerciseState(initialData));
+  const [muscleGroupsInput, setMuscleGroupsInput] = useState(() => (initialData?.muscleGroups || []).join(', '));
+  const [searchTerm, setSearchTerm] = useState(() => initialData?.name || '');
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const { toast } = useToast();
-
+  
   const isEditing = !!initialData;
-  console.log('[AddExerciseModal] Render. isOpen:', isOpen, 'isEditing:', isEditing, 'InitialData ID:', initialData?.id);
 
+  // This effect ensures that if the modal is re-opened with different data, the state updates.
   useEffect(() => {
-    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen);
-    if (isOpen) {
-        console.log('[AddExerciseModal] Modal is open, re-initializing state.');
-        const stateToSet = getInitialExerciseState(initialData);
-        setExerciseData(stateToSet);
-        setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
-        setSearchTerm(stateToSet.name || '');
-        setShowAutocomplete(false);
-    }
-  }, [isOpen, initialData, dayId]);
+      console.log('[AddExerciseModal useEffect] isOpen changed to:', isOpen, 'initialData ID:', initialData?.id);
+      if (isOpen) {
+          const stateToSet = getInitialExerciseState(initialData);
+          setExerciseData(stateToSet);
+          setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
+          setSearchTerm(stateToSet.name || '');
+          setShowAutocomplete(false); // Reset autocomplete on open
+      }
+  }, [isOpen, initialData]);
+
 
   const filteredExercises = useMemo(() => {
     if (!searchTerm || isEditing) return [];
@@ -117,8 +119,10 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
 
   const handleAutocompleteSelect = (selectedExercise: Exercise) => {
     console.log('[AddExerciseModal] Autocomplete selected:', selectedExercise.name);
+    // When selecting from autocomplete, we reset the state based on the template,
+    // but ensure it's treated as a "new" exercise by clearing the ID.
     const newState = getInitialExerciseState(selectedExercise);
-    setExerciseData({ ...newState, id: undefined });
+    setExerciseData({ ...newState, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
@@ -136,13 +140,17 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     }
 
     const finalMuscleGroups = muscleGroupsInput.split(',').map(s => s.trim()).filter(s => s);
-    const newExerciseId = exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    
+    // Use the initialData ID if editing, otherwise generate a new one.
+    const newExerciseId = initialData?.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    
     const exerciseToSave: Exercise = {
       ...exerciseData,
       id: newExerciseId,
       muscleGroups: finalMuscleGroups,
       sets: exerciseData.sets.map((s, index) => ({
-        id: s.id || `set-${Date.now()}-final-${index}`,
+        // Preserve existing set IDs if they exist (during edit), otherwise generate new ones.
+        id: (initialData?.sets[index]?.id && s.id.startsWith('set-')) ? initialData.sets[index].id : s.id,
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
         unit: s.unit,
@@ -155,8 +163,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
-      console.log('[AddExerciseModal] onOpenChange called with:', open);
-      if (!open) setShowAutocomplete(false);
       onOpenChange(open);
     }}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
@@ -177,6 +183,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
                   if (!isEditing) setShowAutocomplete(true);
                 }}
                 onFocus={() => { if (!isEditing) setShowAutocomplete(true); }}
+                onBlur={() => setTimeout(() => setShowAutocomplete(false), 200)}
                 placeholder="e.g., Barbell Squat"
               />
               {showAutocomplete && filteredExercises.length > 0 && searchTerm && !isEditing && (
@@ -185,7 +192,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
                     <div
                       key={ex.id}
                       className="p-2 hover:bg-accent cursor-pointer"
-                      onClick={() => handleAutocompleteSelect(ex)}
+                      onMouseDown={() => handleAutocompleteSelect(ex)} // use onMouseDown to fire before onBlur
                     >
                       {ex.name}
                     </div>
@@ -306,11 +313,9 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
           </div>
         </ScrollArea>
         <DialogFooter className="pt-4 border-t">
-          <DialogClose asChild>
-            <Button type="button" variant="outline">
-              Cancel
-            </Button>
-          </DialogClose>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
           <Button type="button" onClick={handleSubmit}>Save Exercise</Button>
         </DialogFooter>
       </DialogContent>

@@ -257,7 +257,7 @@ export default function WorkoutPlanPage() {
   };
 
   const openExerciseModal = (dayId: string, exercise?: Exercise | null) => {
-    console.log('[WorkoutPlanPage] openExerciseModal called.', { dayId, exercise });
+    console.log('[WorkoutPlanPage] openExerciseModal called.', { dayId, exercise: exercise || null });
     setDayIdForModal(dayId);
     setExerciseToEdit(exercise || null);
     setIsExerciseModalOpen(true);
