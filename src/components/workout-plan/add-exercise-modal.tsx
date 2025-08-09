@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PlusCircle, Trash2 } from 'lucide-react';
+import { PlusCircle, Trash2, Edit } from 'lucide-react';
 import type { Exercise, SetData, NewSetData } from '@/types/workout';
 import { ScrollArea } from '../ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
@@ -22,29 +22,29 @@ interface AddExerciseModalProps {
   initialData?: Exercise | null; // For editing
 }
 
-const getInitialExerciseState = (initialData?: Exercise | null, defaultUnit: 'reps' | 's' | 'min' = 'reps'): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
-    console.log('[getInitialExerciseState] Called with initialData:', initialData);
+const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
     if (initialData) {
         return {
-        id: initialData.id,
-        name: initialData.name,
-        targetWeight: initialData.targetWeight || '',
-        notes: initialData.notes || '',
-        description: initialData.description || '',
-        videoUrl: initialData.videoUrl || '',
-        muscleGroups: initialData.muscleGroups || [],
-        isCore: initialData.isCore || false,
-        unit: initialData.unit || 'reps',
-        sets: initialData.sets.length > 0
-            ? initialData.sets.map((s, index) => ({
-                id: s.id || `set-${Date.now()}-${index}`,
-                targetReps: String(s.targetReps),
-                targetWeight: s.targetWeight || '',
-                unit: s.unit || initialData.unit || 'reps',
-            }))
-            : [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: initialData.unit || 'reps' }],
+            id: initialData.id,
+            name: initialData.name,
+            targetWeight: initialData.targetWeight || '',
+            notes: initialData.notes || '',
+            description: initialData.description || '',
+            videoUrl: initialData.videoUrl || '',
+            muscleGroups: initialData.muscleGroups || [],
+            isCore: initialData.isCore || false,
+            unit: initialData.unit || 'reps',
+            sets: initialData.sets.length > 0
+                ? initialData.sets.map((s, index) => ({
+                    id: s.id || `set-${Date.now()}-${index}`,
+                    targetReps: String(s.targetReps),
+                    targetWeight: s.targetWeight || '',
+                    unit: s.unit || initialData.unit || 'reps',
+                }))
+                : [{ id: `set-${Date.now()}-0`, targetReps: '8-12', targetWeight: '', unit: initialData.unit || 'reps' }],
         };
     }
+    // Default state for a brand new exercise
     return {
         name: '',
         targetWeight: '',
@@ -54,7 +54,7 @@ const getInitialExerciseState = (initialData?: Exercise | null, defaultUnit: 're
         muscleGroups: [],
         isCore: false,
         unit: 'reps',
-        sets: [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: 'reps' }],
+        sets: [{ id: `set-${Date.now()}-0`, targetReps: '8-12', targetWeight: '', unit: 'reps' }],
     };
 };
 
@@ -63,32 +63,26 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const [muscleGroupsInput, setMuscleGroupsInput] = useState(() => (initialData?.muscleGroups || []).join(', '));
   const [searchTerm, setSearchTerm] = useState(() => initialData?.name || '');
   const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [isFormVisible, setIsFormVisible] = useState(false);
   const { toast } = useToast();
   
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
-    console.log('[AddExerciseModal useEffect] Running. isOpen:', isOpen, 'InitialData:', initialData);
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
-      console.log('[AddExerciseModal useEffect] Setting new state:', stateToSet);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
-      setShowAutocomplete(false);
+      setIsFormVisible(isEditing); // Show form immediately if editing
+      setShowAutocomplete(!isEditing); // Show autocomplete if creating
     }
-  }, [isOpen, initialData]);
+  }, [isOpen, initialData, isEditing]);
 
   const filteredExercises = useMemo(() => {
-    console.log(`[AddExerciseModal useMemo] Filtering exercises. Search term: "${searchTerm}". Total exercises: ${allExercises.length}`);
-    if (!searchTerm || isEditing) {
-        console.log('[AddExerciseModal useMemo] No search term or in edit mode, returning empty array.');
-        return [];
-    }
-    const results = allExercises.filter(ex => ex.name.toLowerCase().includes(searchTerm.toLowerCase()));
-    console.log(`[AddExerciseModal useMemo] Found ${results.length} matching exercises.`);
-    return results;
-  }, [searchTerm, allExercises, isEditing]);
+    if (!searchTerm) return [];
+    return allExercises.filter(ex => ex.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [searchTerm, allExercises]);
 
   const handleInputChange = (field: keyof Omit<Exercise, 'id' | 'sets' | 'muscleGroups'>, value: string | boolean | undefined) => {
     setExerciseData(prev => ({ ...prev, [field]: value }));
@@ -99,18 +93,19 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleSetChange = (index: number, field: keyof NewSetData, value: string) => {
-    setExerciseData(prev => {
-      const newSets = [...prev.sets];
-      (newSets[index] as any)[field] = value;
-      return { ...prev, sets: newSets };
-    });
+    setExerciseData(
+        produce(draft => {
+            (draft.sets[index] as any)[field] = value;
+        })
+    );
   };
 
   const addSet = () => {
-    setExerciseData(prev => ({
-      ...prev,
-      sets: [...prev.sets, { id: `set-${Date.now()}-${prev.sets.length}`, targetReps: '', targetWeight: '', unit: prev.unit || 'reps' }],
-    }));
+    setExerciseData(
+        produce(draft => {
+            draft.sets.push({ id: `set-${Date.now()}-${draft.sets.length}`, targetReps: '8-12', targetWeight: '', unit: draft.unit || 'reps' });
+        })
+    );
   };
 
   const removeSet = (index: number) => {
@@ -118,25 +113,35 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         toast({variant: 'destructive', title: "Cannot remove last set", description: "An exercise must have at least one set."})
         return;
     }
-    setExerciseData(prev => ({ ...prev, sets: prev.sets.filter((_, i) => i !== index) }));
+    setExerciseData(
+        produce(draft => {
+            draft.sets.splice(index, 1);
+        })
+    );
   };
   
   const handleAutocompleteSelect = useCallback((selectedExercise: Exercise) => {
-    console.log('[AddExerciseModal] handleAutocompleteSelect called with:', selectedExercise.name);
     const stateToSet = getInitialExerciseState(selectedExercise);
     setExerciseData({ ...stateToSet, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
+    setIsFormVisible(false); // Keep form hidden, user might want to one-click add
   }, []);
+  
+  const handleCreateNewFromSearch = () => {
+      const stateToSet = getInitialExerciseState();
+      setExerciseData({ ...stateToSet, name: searchTerm });
+      setShowAutocomplete(false);
+      setIsFormVisible(true);
+  }
 
-  const handleSubmit = () => {
-    console.log('[AddExerciseModal] handleSubmit called. Current exerciseData:', exerciseData);
+  const handleSubmit = (isCustomizing: boolean) => {
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
     }
-    if (exerciseData.sets.some(s => !String(s.targetReps).trim())) {
+    if (isCustomizing && exerciseData.sets.some(s => !String(s.targetReps).trim())) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Target reps/duration are required for all sets.' });
       return;
     }
@@ -156,167 +161,143 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         exerciseId: newExerciseId,
       })),
     };
-    console.log('[AddExerciseModal] Calling onSave with:', exerciseToSave);
     onSave(exerciseToSave);
   };
-
-  console.log('[AddExerciseModal] Rendering. isOpen:', isOpen, 'allExercises count:', allExercises.length);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Edit Exercise' : 'Add New Exercise to Plan'}</DialogTitle>
-          <DialogDescription>Define the details for the exercise. You can search for existing exercises to pre-fill details.</DialogDescription>
+          <DialogTitle>{isEditing ? `Edit: ${initialData?.name}` : 'Add Exercise'}</DialogTitle>
+          <DialogDescription>
+            {isEditing ? "Modify the details for this exercise in your plan." : "Search for an existing exercise or create a new one."}
+          </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="flex-grow pr-6 -mr-6 pl-1">
-          <div className="space-y-4 py-4 pr-1">
-            <div className="relative">
-              <Label htmlFor="exerciseName">Exercise Name*</Label>
-              <Input
-                id="exerciseName"
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  handleInputChange('name', e.target.value);
-                  if (!isEditing) setShowAutocomplete(true);
-                }}
-                onFocus={() => { if (!isEditing) setShowAutocomplete(true); }}
-                onBlur={() => setTimeout(() => setShowAutocomplete(false), 200)}
-                placeholder="e.g., Barbell Squat"
-              />
-              {showAutocomplete && filteredExercises.length > 0 && searchTerm && !isEditing && (
-                <div className="absolute z-10 w-full bg-card border border-border rounded-md mt-1 max-h-40 overflow-y-auto shadow-lg">
-                   {console.log('[AddExerciseModal] Rendering autocomplete dropdown with', filteredExercises.length, 'items.')}
-                  {filteredExercises.map(ex => (
-                    <div
-                      key={ex.id}
-                      className="p-2 hover:bg-accent cursor-pointer"
-                      onMouseDown={() => handleAutocompleteSelect(ex)}
-                    >
-                      {ex.name}
-                    </div>
-                  ))}
+        
+        <div className="relative flex-shrink-0">
+          <Label htmlFor="exerciseName">Exercise Name*</Label>
+          <Input
+            id="exerciseName"
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              if (!isEditing) {
+                setShowAutocomplete(true);
+                // Clear selected exercise if user types again
+                if (exerciseData.description) {
+                   setExerciseData(getInitialExerciseState());
+                   setMuscleGroupsInput('');
+                }
+              }
+              handleInputChange('name', e.target.value);
+            }}
+            onFocus={() => { if (!isEditing) setShowAutocomplete(true); }}
+            onBlur={() => setTimeout(() => setShowAutocomplete(false), 200)}
+            placeholder="e.g., Barbell Squat"
+          />
+          {showAutocomplete && !isEditing && (
+            <div className="absolute z-10 w-full bg-card border border-border rounded-md mt-1 max-h-60 overflow-y-auto shadow-lg">
+              {filteredExercises.length > 0 ? (
+                filteredExercises.map(ex => (
+                  <div key={ex.id} className="p-2 hover:bg-accent cursor-pointer" onMouseDown={() => handleAutocompleteSelect(ex)}>
+                    {ex.name}
+                  </div>
+                ))
+              ) : (
+                <div className="p-2 text-muted-foreground italic">No matches found.</div>
+              )}
+               <div className="p-2 hover:bg-accent cursor-pointer text-primary font-semibold border-t" onMouseDown={handleCreateNewFromSearch}>
+                <PlusCircle className="inline h-4 w-4 mr-2"/>Create new exercise named "{searchTerm}"
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {(isFormVisible || isEditing) ? (
+          <ScrollArea className="flex-grow pr-6 -mr-6 pl-1">
+            <div className="space-y-4 py-4 pr-1">
+                <div>
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea id="description" value={exerciseData.description} onChange={(e) => handleInputChange('description', e.target.value)} placeholder="Detailed explanation of the exercise..." rows={3} />
                 </div>
+                <div>
+                  <Label htmlFor="videoUrl">Video URL (YouTube Embed)</Label>
+                  <Input id="videoUrl" value={exerciseData.videoUrl} onChange={(e) => handleInputChange('videoUrl', e.target.value)} placeholder="https://www.youtube.com/embed/VIDEO_ID" />
+                </div>
+                <div>
+                  <Label htmlFor="targetWeight">Default Target Weight (Optional)</Label>
+                  <Input id="targetWeight" value={exerciseData.targetWeight} onChange={(e) => handleInputChange('targetWeight', e.target.value)} placeholder="e.g., 50 kg, Bodyweight, 5th stack" />
+                </div>
+                <div>
+                  <Label htmlFor="muscleGroups">Muscle Groups (comma-separated)</Label>
+                  <Input id="muscleGroups" value={muscleGroupsInput} onChange={handleMuscleGroupsChange} placeholder="e.g., Quads, Glutes, Hamstrings" />
+                </div>
+                <div>
+                  <Label htmlFor="defaultUnit">Default Unit for Sets</Label>
+                  <Select value={exerciseData.unit} onValueChange={(value: 'reps' | 's' | 'min') => handleInputChange('unit', value)}>
+                    <SelectTrigger id="defaultUnit"><SelectValue placeholder="Select unit" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="reps">Reps</SelectItem>
+                      <SelectItem value="s">Seconds (s)</SelectItem>
+                      <SelectItem value="min">Minutes (min)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                    <Label>Define Sets*</Label>
+                    {exerciseData.sets.map((set, index) => (
+                        <div key={set.id || `temp-${index}`} className="flex items-end gap-2 p-2 border rounded-md bg-secondary/30">
+                            <span className="text-sm font-medium pt-6">Set {index + 1}:</span>
+                            <div className="flex-grow">
+                                <Label htmlFor={`set-reps-${index}`} className="text-xs">Target Reps/Duration*</Label>
+                                <Input id={`set-reps-${index}`} value={set.targetReps} onChange={(e) => handleSetChange(index, 'targetReps', e.target.value)} placeholder="e.g., 8-12 or 60" className="h-9" />
+                            </div>
+                            <div className="flex-grow">
+                                <Label htmlFor={`set-weight-${index}`} className="text-xs">Target Weight (Optional)</Label>
+                                <Input id={`set-weight-${index}`} value={set.targetWeight} onChange={(e) => handleSetChange(index, 'targetWeight', e.target.value)} placeholder="e.g., 80 kg" className="h-9" />
+                            </div>
+                            <div>
+                                <Label htmlFor={`set-unit-${index}`} className="text-xs">Unit</Label>
+                                <Select value={set.unit || exerciseData.unit} onValueChange={(value: 'reps' | 's' | 'min') => handleSetChange(index, 'unit', value)}>
+                                    <SelectTrigger id={`set-unit-${index}`} className="h-9 w-[80px]"><SelectValue placeholder="Unit"/></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="reps">Reps</SelectItem>
+                                        <SelectItem value="s">Secs</SelectItem>
+                                        <SelectItem value="min">Mins</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <Button variant="ghost" size="icon" onClick={() => removeSet(index)} className="text-destructive h-9 w-9"><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                    ))}
+                    <Button type="button" variant="outline" size="sm" onClick={addSet} className="mt-2 w-full"><PlusCircle className="mr-2 h-4 w-4" /> Add Set</Button>
+                </div>
+            </div>
+          </ScrollArea>
+        ) : (
+             <div className="flex-grow flex items-center justify-center text-muted-foreground text-center">
+                 {exerciseData.name && !isEditing ? (
+                     <p>Selected: <span className="font-bold text-primary">{exerciseData.name}</span>.<br/>Add to plan or edit details first.</p>
+                 ) : (
+                    <p>Search for an exercise to begin.</p>
+                 )}
+            </div>
+        )}
+
+        <DialogFooter className="pt-4 border-t flex-col-reverse sm:flex-row sm:justify-between gap-2">
+            <div>
+              {!isFormVisible && !isEditing && exerciseData.name && (
+                <Button variant="outline" onClick={() => setIsFormVisible(true)}>
+                  <Edit className="mr-2 h-4 w-4" /> Customize Details
+                </Button>
               )}
             </div>
-
-            <div>
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                value={exerciseData.description}
-                onChange={(e) => handleInputChange('description', e.target.value)}
-                placeholder="Detailed explanation of the exercise..."
-                rows={3}
-              />
+            <div className="flex justify-end gap-2">
+                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+                 <Button type="button" onClick={() => handleSubmit(isFormVisible || isEditing)} disabled={!exerciseData.name}>
+                    {isEditing ? 'Save Changes' : 'Add to Plan'}
+                 </Button>
             </div>
-
-            <div>
-              <Label htmlFor="videoUrl">Video URL (YouTube Embed)</Label>
-              <Input
-                id="videoUrl"
-                value={exerciseData.videoUrl}
-                onChange={(e) => handleInputChange('videoUrl', e.target.value)}
-                placeholder="https://www.youtube.com/embed/VIDEO_ID"
-              />
-            </div>
-            
-            <div>
-              <Label htmlFor="targetWeight">Default Target Weight (Optional)</Label>
-              <Input
-                id="targetWeight"
-                value={exerciseData.targetWeight}
-                onChange={(e) => handleInputChange('targetWeight', e.target.value)}
-                placeholder="e.g., 50 kg, Bodyweight, 5th stack"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="muscleGroups">Muscle Groups (comma-separated)</Label>
-              <Input
-                id="muscleGroups"
-                value={muscleGroupsInput}
-                onChange={handleMuscleGroupsChange}
-                placeholder="e.g., Quads, Glutes, Hamstrings"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="defaultUnit">Default Unit for Sets</Label>
-              <Select
-                value={exerciseData.unit}
-                onValueChange={(value: 'reps' | 's' | 'min') => handleInputChange('unit', value)}
-              >
-                <SelectTrigger id="defaultUnit">
-                  <SelectValue placeholder="Select unit" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="reps">Reps</SelectItem>
-                  <SelectItem value="s">Seconds (s)</SelectItem>
-                  <SelectItem value="min">Minutes (min)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-1">
-                 <Label>Define Sets*</Label>
-                 {exerciseData.sets.map((set, index) => (
-                    <div key={set.id || `temp-${index}`} className="flex items-end gap-2 p-2 border rounded-md bg-secondary/30">
-                        <span className="text-sm font-medium pt-6">Set {index + 1}:</span>
-                        <div className="flex-grow">
-                            <Label htmlFor={`set-reps-${index}`} className="text-xs">Target Reps/Duration*</Label>
-                            <Input
-                                id={`set-reps-${index}`}
-                                value={set.targetReps}
-                                onChange={(e) => handleSetChange(index, 'targetReps', e.target.value)}
-                                placeholder="e.g., 8-12 or 60"
-                                className="h-9"
-                            />
-                        </div>
-                        <div className="flex-grow">
-                            <Label htmlFor={`set-weight-${index}`} className="text-xs">Target Weight (Optional)</Label>
-                            <Input
-                                id={`set-weight-${index}`}
-                                value={set.targetWeight}
-                                onChange={(e) => handleSetChange(index, 'targetWeight', e.target.value)}
-                                placeholder="e.g., 80 kg"
-                                className="h-9"
-                            />
-                        </div>
-                        <div>
-                             <Label htmlFor={`set-unit-${index}`} className="text-xs">Unit</Label>
-                             <Select
-                                value={set.unit || exerciseData.unit}
-                                onValueChange={(value: 'reps' | 's' | 'min') => handleSetChange(index, 'unit', value)}
-                             >
-                                <SelectTrigger id={`set-unit-${index}`} className="h-9 w-[80px]">
-                                    <SelectValue placeholder="Unit"/>
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="reps">Reps</SelectItem>
-                                    <SelectItem value="s">Secs</SelectItem>
-                                    <SelectItem value="min">Mins</SelectItem>
-                                </SelectContent>
-                             </Select>
-                        </div>
-                        <Button variant="ghost" size="icon" onClick={() => removeSet(index)} className="text-destructive h-9 w-9">
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                    </div>
-                ))}
-                <Button type="button" variant="outline" size="sm" onClick={addSet} className="mt-2 w-full">
-                    <PlusCircle className="mr-2 h-4 w-4" /> Add Set
-                </Button>
-            </div>
-
-          </div>
-        </ScrollArea>
-        <DialogFooter className="pt-4 border-t">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" onClick={handleSubmit}>Save Exercise</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
