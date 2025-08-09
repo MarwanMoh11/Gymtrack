@@ -41,7 +41,6 @@ export default function WorkoutPlanPage() {
   const { toast } = useToast();
 
   const [editableActivePlan, setEditableActivePlan] = useState<WorkoutDay[] | null>(null);
-  const [initialActivePlanForEdit, setInitialActivePlanForEdit] = useState<WorkoutDay[] | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   
   const [isExerciseModalOpen, setIsExerciseModalOpen] = useState(false);
@@ -59,7 +58,12 @@ export default function WorkoutPlanPage() {
 
   const { data: allExercisesForModal, isLoading: isLoadingAllExercises } = useQuery({
       queryKey: ['allExercisesForAutocomplete'],
-      queryFn: getAllExercisesForAutocompleteGlobal,
+      queryFn: () => {
+        console.log('[WorkoutPlanPage] Querying for allExercisesForAutocompleteGlobal...');
+        const exercises = getAllExercisesForAutocompleteGlobal();
+        console.log(`[WorkoutPlanPage]... query returned ${exercises.length} exercises.`);
+        return exercises;
+      },
   });
 
   const activePlanDetails = useMemo(() => userData?.plans.find(p => p.isActive), [userData]);
@@ -69,7 +73,6 @@ export default function WorkoutPlanPage() {
     if (activePlanDetails && !isEditMode) {
       const clonedPlan = JSON.parse(JSON.stringify(activePlanDetails.plan));
       setEditableActivePlan(clonedPlan);
-      setInitialActivePlanForEdit(clonedPlan);
     }
   }, [activePlanDetails, isEditMode]);
 
@@ -99,9 +102,15 @@ export default function WorkoutPlanPage() {
   });
   
   const openExerciseModal = useCallback((dayId: string, exercise: Exercise | null) => {
+    console.log('[WorkoutPlanPage] openExerciseModal called.', { dayId, exercise });
     setDayIdForModal(dayId);
-    setExerciseToEdit(exercise); // This will be null for new, or an object for edit
+    setExerciseToEdit(exercise);
     setIsExerciseModalOpen(true);
+    console.log('[WorkoutPlanPage] State after setting for modal opening:', {
+      dayIdForModal: dayId, // Log the value directly
+      exerciseToEdit: exercise, // Log the value directly
+      isExerciseModalOpen: true,
+    });
   }, []);
 
   const handleSetPlanActive = useCallback((planId: string) => {
@@ -119,7 +128,6 @@ export default function WorkoutPlanPage() {
         { ...userData, plans: updatedPlans },
         {
           onSuccess: () => {
-             setInitialActivePlanForEdit(JSON.parse(JSON.stringify(editableActivePlan)));
              setIsEditMode(false);
              toast({ title: "Active Plan Updated", description: `Changes to '${activePlanDetails.name}' have been saved.` });
           }
@@ -169,25 +177,37 @@ export default function WorkoutPlanPage() {
   }, []);
   
   const handleCancelChangesToActivePlan = useCallback(() => {
-    if (initialActivePlanForEdit) {
-      setEditableActivePlan(JSON.parse(JSON.stringify(initialActivePlanForEdit)));
+    if (activePlanDetails) {
+        // Re-clone from the pristine source from query cache
+        const originalPlan = userData?.plans.find(p => p.id === activePlanDetails.id);
+        if(originalPlan) {
+            setEditableActivePlan(JSON.parse(JSON.stringify(originalPlan.plan)));
+        }
     }
     setIsEditMode(false);
     toast({ title: "Changes Canceled", description: "Modifications to the active plan have been discarded." });
-  }, [initialActivePlanForEdit, toast]);
+  }, [activePlanDetails, userData, toast]);
   
   const handleSaveExerciseToActivePlan = useCallback((dayId: string, savedExercise: Exercise) => {
+    console.log(`[WorkoutPlanPage] handleSaveExerciseToActivePlan called for dayId: ${dayId}`);
      setEditableActivePlan(currentPlan => {
-       if (!currentPlan) return null;
+       if (!currentPlan) {
+           console.log("[WorkoutPlanPage] Save failed: editableActivePlan is null.");
+           return null;
+        }
        return produce(currentPlan, draft => {
          const day = draft.find(d => d.id === dayId);
          if (day) {
            const existingExerciseIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
            if (existingExerciseIndex !== -1) {
+             console.log(`[WorkoutPlanPage] Updating existing exercise: ${savedExercise.name}`);
              day.exercises[existingExerciseIndex] = savedExercise;
            } else { 
+             console.log(`[WorkoutPlanPage] Adding new exercise: ${savedExercise.name}`);
              day.exercises.push(savedExercise);
            }
+         } else {
+            console.log(`[WorkoutPlanPage] Save failed: Could not find day with id ${dayId} in draft.`);
          }
        });
      });
@@ -251,6 +271,13 @@ export default function WorkoutPlanPage() {
       })
     );
   }, []);
+
+  console.log('[WorkoutPlanPage] Rendering. Modal props:', {
+      isExerciseModalOpen,
+      dayIdForModal,
+      exerciseToEdit,
+      allExercisesExist: !!allExercisesForModal,
+  });
   
   if (isLoadingUserData || isLoadingAllExercises) {
     return <LoadingWorkoutPlanPage />;

@@ -1,4 +1,3 @@
-
 // src/components/workout-plan/add-exercise-modal.tsx
 'use client';
 
@@ -24,38 +23,39 @@ interface AddExerciseModalProps {
 }
 
 const getInitialExerciseState = (initialData?: Exercise | null, defaultUnit: 'reps' | 's' | 'min' = 'reps'): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
-  if (initialData) {
+    console.log('[getInitialExerciseState] Called with initialData:', initialData);
+    if (initialData) {
+        return {
+        id: initialData.id,
+        name: initialData.name,
+        targetWeight: initialData.targetWeight || '',
+        notes: initialData.notes || '',
+        description: initialData.description || '',
+        videoUrl: initialData.videoUrl || '',
+        muscleGroups: initialData.muscleGroups || [],
+        isCore: initialData.isCore || false,
+        unit: initialData.unit || 'reps',
+        sets: initialData.sets.length > 0
+            ? initialData.sets.map((s, index) => ({
+                id: s.id || `set-${Date.now()}-${index}`,
+                targetReps: String(s.targetReps),
+                targetWeight: s.targetWeight || '',
+                unit: s.unit || initialData.unit || 'reps',
+            }))
+            : [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: initialData.unit || 'reps' }],
+        };
+    }
     return {
-      id: initialData.id,
-      name: initialData.name,
-      targetWeight: initialData.targetWeight || '',
-      notes: initialData.notes || '',
-      description: initialData.description || '',
-      videoUrl: initialData.videoUrl || '',
-      muscleGroups: initialData.muscleGroups || [],
-      isCore: initialData.isCore || false,
-      unit: initialData.unit || 'reps',
-      sets: initialData.sets.length > 0
-        ? initialData.sets.map((s, index) => ({
-            id: s.id || `set-${Date.now()}-${index}`,
-            targetReps: String(s.targetReps),
-            targetWeight: s.targetWeight || '',
-            unit: s.unit || initialData.unit || 'reps',
-          }))
-        : [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: initialData.unit || 'reps' }],
+        name: '',
+        targetWeight: '',
+        notes: '',
+        description: '',
+        videoUrl: '',
+        muscleGroups: [],
+        isCore: false,
+        unit: 'reps',
+        sets: [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: 'reps' }],
     };
-  }
-  return {
-    name: '',
-    targetWeight: '',
-    notes: '',
-    description: '',
-    videoUrl: '',
-    muscleGroups: [],
-    isCore: false,
-    unit: 'reps',
-    sets: [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: 'reps' }],
-  };
 };
 
 export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExercises, dayId, initialData }: AddExerciseModalProps) {
@@ -68,8 +68,10 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
+    console.log('[AddExerciseModal useEffect] Running. isOpen:', isOpen, 'InitialData:', initialData);
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
+      console.log('[AddExerciseModal useEffect] Setting new state:', stateToSet);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
@@ -78,8 +80,14 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   }, [isOpen, initialData]);
 
   const filteredExercises = useMemo(() => {
-    if (!searchTerm || isEditing) return [];
-    return allExercises.filter(ex => ex.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    console.log(`[AddExerciseModal useMemo] Filtering exercises. Search term: "${searchTerm}". Total exercises: ${allExercises.length}`);
+    if (!searchTerm || isEditing) {
+        console.log('[AddExerciseModal useMemo] No search term or in edit mode, returning empty array.');
+        return [];
+    }
+    const results = allExercises.filter(ex => ex.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    console.log(`[AddExerciseModal useMemo] Found ${results.length} matching exercises.`);
+    return results;
   }, [searchTerm, allExercises, isEditing]);
 
   const handleInputChange = (field: keyof Omit<Exercise, 'id' | 'sets' | 'muscleGroups'>, value: string | boolean | undefined) => {
@@ -114,8 +122,8 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
   
   const handleAutocompleteSelect = useCallback((selectedExercise: Exercise) => {
+    console.log('[AddExerciseModal] handleAutocompleteSelect called with:', selectedExercise.name);
     const stateToSet = getInitialExerciseState(selectedExercise);
-    // We don't want to copy the ID, as this is a new exercise being added to the plan
     setExerciseData({ ...stateToSet, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
@@ -123,6 +131,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   }, []);
 
   const handleSubmit = () => {
+    console.log('[AddExerciseModal] handleSubmit called. Current exerciseData:', exerciseData);
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
@@ -147,8 +156,11 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         exerciseId: newExerciseId,
       })),
     };
+    console.log('[AddExerciseModal] Calling onSave with:', exerciseToSave);
     onSave(exerciseToSave);
   };
+
+  console.log('[AddExerciseModal] Rendering. isOpen:', isOpen, 'allExercises count:', allExercises.length);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -175,6 +187,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
               />
               {showAutocomplete && filteredExercises.length > 0 && searchTerm && !isEditing && (
                 <div className="absolute z-10 w-full bg-card border border-border rounded-md mt-1 max-h-40 overflow-y-auto shadow-lg">
+                   {console.log('[AddExerciseModal] Rendering autocomplete dropdown with', filteredExercises.length, 'items.')}
                   {filteredExercises.map(ex => (
                     <div
                       key={ex.id}
