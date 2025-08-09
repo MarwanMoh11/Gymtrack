@@ -1,3 +1,4 @@
+
 // src/components/app-layout.tsx
 'use client';
 
@@ -250,8 +251,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             }
         } else if (userData.onboardingStatus === 'completed') {
             // Completed users should be on dashboard routes.
-            // Exception: They can access /workout-plan and the /onboarding/create-plan flow.
-            const isAllowedRouteForCompletedUser = pathname.startsWith('/dashboard') || pathname.startsWith('/workout-plan') || isPlanCreationRoute;
+            // Exception: They can access /workout-plan, the exercise details pages, and the /onboarding/create-plan flow.
+            const isAllowedRouteForCompletedUser = 
+                pathname.startsWith('/dashboard') || 
+                pathname.startsWith('/workout-plan') || 
+                pathname.startsWith('/exercises') ||
+                isPlanCreationRoute;
 
             if (!isAllowedRouteForCompletedUser) {
                 router.replace('/dashboard/today');
@@ -279,7 +284,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
          return (isOnboardingRoute || isPlanCreationRoute) ? <>{children}</> : <AuthLoadingSkeleton />;
      }
      if (userData.onboardingStatus === 'completed') {
-        const isAllowedRouteForCompletedUser = pathname.startsWith('/dashboard') || pathname.startsWith('/workout-plan') || isPlanCreationRoute;
+        const isAllowedRouteForCompletedUser = pathname.startsWith('/dashboard') || pathname.startsWith('/workout-plan') || pathname.startsWith('/exercises') || isPlanCreationRoute;
         return isAllowedRouteForCompletedUser 
             ? <AuthenticatedLayout>{children}</AuthenticatedLayout> 
             : <AuthLoadingSkeleton />;
