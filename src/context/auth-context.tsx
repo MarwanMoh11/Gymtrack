@@ -1,3 +1,4 @@
+// src/context/auth-context.tsx
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
@@ -10,6 +11,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useQueryClient } from '@tanstack/react-query';
+import { initializeDefaultPlansForUser } from '@/lib/firestore-workout-plan-service';
 
 interface AuthContextType {
   user: User | null;
@@ -27,30 +29,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    console.log('[AuthContext] Setting up onAuthStateChanged listener.');
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log('[AuthContext] onAuthStateChanged triggered. User:', user?.uid || 'null');
       setUser(user);
-      if (!user) {
-        // Clear all queries when the user logs out.
+      if (user) {
+        // This is a good place to ensure plans are initialized for a new user if they don't exist.
+        // We can check localStorage here.
+        const plansExist = localStorage.getItem('gymtrack_workout_plans');
+        if (!plansExist) {
+          console.log('[AuthContext] No plans found in localStorage for new/logged-in user. Initializing default plans.');
+          await initializeDefaultPlansForUser();
+        }
+      } else {
+        console.log('[AuthContext] User logged out. Clearing query cache.');
         queryClient.clear();
       }
+      console.log('[AuthContext] Auth loading state set to false.');
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      console.log('[AuthContext] Cleaning up onAuthStateChanged listener.');
+      unsubscribe();
+    }
   }, [queryClient]);
 
   const login = (email: string, password: string) => {
+    console.log('[AuthContext] Attempting login for email:', email);
     return signInWithEmailAndPassword(auth, email, password);
   };
 
   const signup = async (email: string, password: string) => {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    // After signup, onAuthStateChanged will trigger and update the user state.
-    // The AppLayout component will then handle redirection based on whether an active plan exists.
-    return userCredential;
+    console.log('[AuthContext] Attempting signup for email:', email);
+    // The onAuthStateChanged listener will handle the user state update and plan initialization.
+    return createUserWithEmailAndPassword(auth, email, password);
   };
 
   const logout = async () => {
+    console.log('[AuthContext] Attempting logout for user:', user?.uid);
     await signOut(auth);
   };
 

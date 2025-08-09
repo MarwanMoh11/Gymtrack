@@ -55,7 +55,7 @@ export default function ChoosePlanPage() {
       console.log("[ChoosePlanPage] 🟢 Mutation SUCCEEDED.");
       // Manually update the query cache with the new data.
       console.log("[ChoosePlanPage] Updating query cache with activated plan.");
-      queryClient.setQueryData(['workoutPlans'], variables);
+      queryClient.setQueryData(['workoutPlans', user?.uid], variables);
       
       toast({
         title: "Plan Activated!",

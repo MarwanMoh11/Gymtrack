@@ -1,4 +1,4 @@
-
+// src/components/app-layout.tsx
 'use client';
 
 import { useEffect } from 'react';
@@ -197,20 +197,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isPublicRoute = publicRoutes.includes(pathname);
   const isOnboardingRoute = onboardingRoutes.includes(pathname);
 
-  // This query will only run if a user is logged in.
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans', user?.uid],
+    queryKey: ['workoutPlans', user?.uid], // Use user ID to refetch on user change
     queryFn: () => {
       console.log(`[AppLayout] Querying workout plans for user: ${user?.uid || 'none'}`);
       return getAllUserWorkoutPlans();
     },
-    enabled: !!user,
+    // We want this to run whenever the user object changes, but not if there's no user.
+    enabled: !isAuthLoading, 
   });
-
+  
   useEffect(() => {
     console.log('[AppLayout EFFECT] Running effect, dependencies changed.');
     const hasPlans = allPlans && allPlans.length > 0;
     const hasActivePlan = allPlans?.some(p => p.isActive);
+
     console.table({
         pathname,
         isAuthLoading,
@@ -238,55 +239,54 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
     
     // User is logged in from here on.
+    if (isLoadingPlans) {
+       console.log('[AppLayout EFFECT] User is logged in, but plans are loading. Waiting.');
+       return;
+    }
     
-    // If we are on an onboarding route, we just let it render. 
-    // The page itself (e.g., choose-plan) is responsible for navigation upon completion.
     if (isOnboardingRoute) {
         console.log('[AppLayout EFFECT] On onboarding route. Permitting access regardless of plan status.');
         return;
     }
 
-    if (isLoadingPlans) {
-       console.log('[AppLayout EFFECT] User is logged in, but plans are loading and not on onboarding. Waiting.');
-       return;
-    }
-    
-    if (hasPlans !== undefined) { 
-        console.log(`[AppLayout EFFECT] Plan data loaded. Has active plan: ${hasActivePlan}`);
-        if (!hasActivePlan) {
-            console.log('[AppLayout EFFECT] No active plan, not on onboarding. Redirecting to /onboarding/welcome.');
-            router.replace('/onboarding/welcome');
-        } else if (isPublicRoute) { // Has active plan, but on a public page like /login
-             console.log('[AppLayout EFFECT] Has active plan, but on public route. Redirecting to /dashboard/today.');
-            router.replace('/dashboard/today');
-        } else {
-            console.log('[AppLayout EFFECT] All conditions met, rendering page.');
-        }
+    // At this point, user is logged in, plans are loaded, and not on an onboarding route.
+    if (!hasActivePlan) {
+        console.log('[AppLayout EFFECT] No active plan found. Redirecting to /onboarding/welcome.');
+        router.replace('/onboarding/welcome');
+    } else if (isPublicRoute) {
+         console.log('[AppLayout EFFECT] Has active plan, but on public route. Redirecting to /dashboard/today.');
+        router.replace('/dashboard/today');
+    } else {
+        console.log('[AppLayout EFFECT] All conditions met, rendering page.');
     }
     
   }, [user, isAuthLoading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
   
-  const isContentLoading = isAuthLoading || (user && !isOnboardingRoute && isLoadingPlans);
+  // Determine what to render
+  const shouldShowLoading = isAuthLoading || (!!user && isLoadingPlans && !isOnboardingRoute);
   
-  if (isContentLoading) {
+  if (shouldShowLoading) {
     console.log('[AppLayout RENDER] Showing AuthLoadingSkeleton.');
     return <AuthLoadingSkeleton />;
   }
 
-  // If user is logged in and is on an onboarding route, just render the content
-  if (user && isOnboardingRoute) {
-    console.log('[AppLayout RENDER] Showing Onboarding route children.');
-    return <>{children}</>;
-  }
-
-  // If user is logged in and has an active plan (and not onboarding), show main layout
   if (user) {
-    console.log('[AppLayout RENDER] Showing AuthenticatedLayout.');
-    return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
+      if(isOnboardingRoute) {
+        console.log('[AppLayout RENDER] User is on onboarding route, rendering children.');
+        return <>{children}</>;
+      }
+      if(allPlans?.some(p=>p.isActive)){
+        console.log('[AppLayout RENDER] User is authenticated with active plan, showing AuthenticatedLayout.');
+        return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
+      }
+      // This case handles when user is logged in, plans are loaded, but no active plan.
+      // The useEffect will redirect them, but we show a loading screen in the meantime.
+      console.log('[AppLayout RENDER] User authenticated, but no active plan state. Showing loading skeleton before redirect.');
+      return <AuthLoadingSkeleton />;
   }
   
   if (!user && isPublicRoute) {
-    console.log('[AppLayout RENDER] Showing PublicLayout.');
+    console.log('[AppLayout RENDER] No user, showing PublicLayout.');
     return <PublicLayout>{children}</PublicLayout>;
   }
   

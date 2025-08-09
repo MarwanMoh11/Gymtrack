@@ -62,7 +62,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
   const [isOverrideActive, setIsOverrideActive] = useState(false);
   
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans', user?.uid],
+    queryKey: ['workoutPlans', user?.uid], // Re-fetch if user changes
     queryFn: () => {
       console.log('[WorkoutView] Querying for workout plans.');
       return getAllUserWorkoutPlans();
@@ -82,24 +82,22 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
         console.log('[WorkoutView] Querying for today\'s override.');
         return getTodayWorkoutOverride(user!.uid);
       },
-      enabled: !!user && dayIdFromProps === null, // Only fetch for today's session page
+      enabled: !!user && dayIdFromProps === null,
   });
   
-  const effectiveDayId = useMemo(() => dayIdFromProps === null ? (overrideIdFromDB ?? 'today') : dayIdFromProps, [dayIdFromProps, overrideIdFromDB]);
-
   useEffect(() => {
     const dateStr = getCurrentDateString();
     console.log(`[WorkoutView] Setting current date: ${dateStr}`);
     setCurrentDate(dateStr);
   }, []);
 
-  const { data: dailyLog = {}, isLoading: isLoadingLog } = useQuery({
+  const { data: dailyLog, isLoading: isLoadingLog } = useQuery({
       queryKey: ['dailyLog', user?.uid, currentDate],
       queryFn: () => {
         console.log(`[WorkoutView] Querying for daily log for date: ${currentDate}`);
         return getDailyLog(user!.uid, currentDate);
       },
-      enabled: !!user && !!currentDate && (dayIdFromProps === null), // only fetch log data on today's page for now
+      enabled: !!user && !!currentDate && (dayIdFromProps === null),
       initialData: {},
   });
 
@@ -107,6 +105,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
     console.log('[WorkoutView] Running loadWorkoutForDisplay...');
     if (!allPlans) {
         console.log('[WorkoutView] No plans loaded yet, exiting loadWorkoutForDisplay.');
+        setWorkoutDay(undefined); // Explicitly set to loading state
         return;
     }
 
@@ -114,7 +113,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
     const activePlan = allPlans.find(p => p.isActive);
 
     if (!activePlan) {
-      console.log('[WorkoutView] No active plan found. Setting workoutDay to null.');
+      console.log('[WorkoutView] No active plan found. Setting workoutDay to null (no workout scheduled).');
       setWorkoutDay(null);
       return;
     }
@@ -124,16 +123,15 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
     if (dayIdFromProps === null) { // "Today's Session" page
       const finalOverrideId = overrideIdFromDB || null;
       console.log(`[WorkoutView] Today's session. Override ID from DB: ${finalOverrideId}`);
+      setIsOverrideActive(!!finalOverrideId);
       if (finalOverrideId) {
         dayToSet = activePlan.plan.find(d => d.id === finalOverrideId);
         console.log(`[WorkoutView] Found overridden day:`, dayToSet?.dayName);
-        setIsOverrideActive(true);
       } else {
         const todayNumeric = date.getDay();
         console.log(`[WorkoutView] No override. Today is numeric day ${todayNumeric}.`);
         dayToSet = activePlan.plan.find(d => d.mapsToActualDayOfWeek === todayNumeric);
         console.log(`[WorkoutView] Found scheduled day:`, dayToSet?.dayName);
-        setIsOverrideActive(false);
       }
     } else { // Specific [day] page
         console.log(`[WorkoutView] Specific day page for dayId: ${dayIdFromProps}`);
@@ -145,7 +143,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
   }, [allPlans, overrideIdFromDB, dayIdFromProps]);
   
   useEffect(() => {
-    console.log('[WorkoutView] EFFECT triggered. Deps:', {isLoadingPlans, isLoadingOverrideId});
+    console.log('[WorkoutView] EFFECT triggered. Deps:', {allPlans, isLoadingPlans, isLoadingOverrideId});
     if(!isLoadingPlans && !isLoadingOverrideId) {
       console.log('[WorkoutView] EFFECT: Plans and override have loaded. Calling loadWorkoutForDisplay.');
       loadWorkoutForDisplay();
@@ -154,7 +152,10 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
 
 
   const clearLogMutation = useMutation({
-    mutationFn: () => deleteDailyLog(user!.uid, currentDate),
+    mutationFn: () => {
+        if (!user || !currentDate) throw new Error("User or date not available");
+        return deleteDailyLog(user.uid, currentDate)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dailyLog', user?.uid, currentDate] });
       toast({ title: "Log Cleared", description: `Log for ${workoutDay?.dayName} (${currentDate}) has been cleared.` });
@@ -165,7 +166,10 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
   });
 
   const clearOverrideMutation = useMutation({
-    mutationFn: () => clearOverrideService(user!.uid),
+    mutationFn: () => {
+        if (!user) throw new Error("User not authenticated.");
+        return clearOverrideService(user.uid);
+    },
     onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ['todayOverride', user?.uid]});
         setIsOverrideActive(false);
@@ -174,13 +178,14 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
   });
   
   const { completedSets, totalSets, score } = useMemo(
-    () => (dayIdFromProps === null) ? calculateWorkoutProgress(workoutDay, dailyLog) : { completedSets: 0, totalSets: 0, score: 0},
+    () => (dayIdFromProps === null) ? calculateWorkoutProgress(workoutDay, dailyLog || {}) : { completedSets: 0, totalSets: 0, score: 0},
     [workoutDay, dailyLog, dayIdFromProps]
   );
   
-  const isLoading = isLoadingPlans || isLoadingLog || isLoadingOverrides || (dayIdFromProps === null && isLoadingOverrideId);
+  const isLoading = workoutDay === undefined || isLoadingPlans || isLoadingLog || isLoadingOverrides || (dayIdFromProps === null && isLoadingOverrideId);
   console.log('[WorkoutView] RENDER check. Final isLoading state:', isLoading);
   console.table({
+      workoutDayIsUndefined: workoutDay === undefined,
       isLoadingPlans, 
       isLoadingLog,
       isLoadingOverrides,
@@ -201,22 +206,25 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle />
-              {isOverrideActive ? `Overridden Workout Not Found` : `Workout Not Found`}
+              {isOverrideActive ? `Overridden Workout Not Found` : `No Workout For Today`}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p>
               {isOverrideActive
-                ? `Could not find the overridden workout. Try clearing the override.`
-                : `No workout plan found for ${dayIdFromProps || scheduledDayName} in the active plan.`}
+                ? `Could not find the overridden workout. It might have been deleted from the plan.`
+                : `No workout is scheduled for ${dayIdFromProps || scheduledDayName} in your active plan.`}
             </p>
+             <p className="mt-2 text-sm text-muted-foreground">
+                You can start any workout for today from the "Full Workout Plan" page.
+             </p>
             {isOverrideActive && (
               <Button onClick={() => clearOverrideMutation.mutate()} variant="outline" className="mt-4 mr-2">
                 <RefreshCcw className="mr-2 h-4 w-4" /> Clear Override
               </Button>
             )}
-            <Button asChild variant="link" className="mt-4">
-              <Link href="/workout-plan">Manage Workout Plans</Link>
+            <Button asChild variant="default" className="mt-4">
+              <Link href="/workout-plan">Go to Workout Plan</Link>
             </Button>
           </CardContent>
         </Card>
@@ -225,6 +233,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
   }
   
   const isExerciseCompleted = (exercise: ExerciseType): boolean => {
+    if (!dailyLog) return false;
     const exerciseLog = dailyLog[exercise.id];
     if (!exerciseLog) return false;
     return exercise.sets.every(set => exerciseLog[set.id]?.isCompleted);
@@ -289,7 +298,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
         {workoutDay.exercises.map((exercise) => {
           const effectiveWeight = weightOverrides?.[exercise.id] ?? exercise.targetWeight;
           const exerciseCompleted = (dayIdFromProps === null) ? isExerciseCompleted(exercise) : false;
-          const exerciseLog = dailyLog[exercise.id];
+          const exerciseLog = dailyLog ? dailyLog[exercise.id] : undefined;
           const isSkipped = dayIdFromProps === null && exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => set.isCompleted === false);
 
           return (
