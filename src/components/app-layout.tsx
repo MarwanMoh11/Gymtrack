@@ -2,7 +2,7 @@
 // src/components/app-layout.tsx
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogOut, Settings } from 'lucide-react';
@@ -25,6 +25,9 @@ import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-context';
 import { useQuery } from '@tanstack/react-query';
 import { getUserData } from '@/lib/firestore-workout-plan-service';
+import { getRedirectResult } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+
 
 const todayNavItem = {
   href: '/dashboard/today',
@@ -208,17 +211,37 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading: isAuthLoading } = useAuth();
+  const [isRedirectLoading, setIsRedirectLoading] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
 
   const publicRoutes = ['/login', '/signup'];
-  // Allow access to the create-plan wizard for all users.
   const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan'];
   const planCreationRoutes = ['/onboarding/create-plan', '/onboarding/create-plan/configure-days', '/onboarding/create-plan/add-exercises'];
   
   const isPublicRoute = publicRoutes.includes(pathname);
   const isOnboardingRoute = onboardingRoutes.some(route => pathname.startsWith(route));
   const isPlanCreationRoute = planCreationRoutes.some(route => pathname.startsWith(route));
+  
+  useEffect(() => {
+    // This effect checks if the app is loading after a redirect from an auth provider.
+    const checkRedirect = async () => {
+        try {
+            // The presence of a result indicates a sign-in redirect just happened.
+            // getRedirectResult will resolve to null if there was no redirect.
+            // This is a key part of the flow: we wait for this to resolve.
+            await getRedirectResult(auth);
+        } catch (error) {
+            console.error("Error processing redirect result:", error);
+        } finally {
+            // Once getRedirectResult completes (with or without a user),
+            // the redirect loading is finished. The onAuthStateChanged listener
+            // will then have the final user state.
+            setIsRedirectLoading(false);
+        }
+    };
+    checkRedirect();
+  }, []);
 
   const { data: userData, isLoading: isLoadingUserData } = useQuery({
     queryKey: ['userData', user?.uid],
@@ -227,7 +250,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    if (isAuthLoading) {
+    // Don't run routing logic until BOTH the initial auth state check AND
+    // any potential redirect results have been processed.
+    if (isAuthLoading || isRedirectLoading) {
       return; 
     }
 
@@ -238,6 +263,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // After auth is settled, we still need to wait for the user's specific data.
     if (isLoadingUserData) {
         return;
     }
@@ -245,13 +271,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // Once user and their data are loaded, perform routing logic.
     if (userData) {
         if (userData.onboardingStatus === 'needs_plan_selection') {
-            // New users can be on onboarding or plan creation routes.
             if (!isOnboardingRoute && !isPlanCreationRoute) {
                 router.replace('/onboarding/welcome');
             }
         } else if (userData.onboardingStatus === 'completed') {
-            // Completed users should be on dashboard routes.
-            // Exception: They can access /workout-plan, the exercise details pages, and the /onboarding/create-plan flow.
             const isAllowedRouteForCompletedUser = 
                 pathname.startsWith('/dashboard') || 
                 pathname.startsWith('/workout-plan') || 
@@ -263,16 +286,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             }
         }
     } else if (!isPublicRoute) {
-        // This case can happen if the user doc creation is delayed.
-        // It's safer to redirect to login if no user data is found for a logged-in user on a protected route.
-        // The AuthContext also tries to initialize data, so this is a fallback.
         router.replace('/login');
     }
 
-  }, [user, userData, isAuthLoading, isLoadingUserData, pathname, isPublicRoute, isOnboardingRoute, isPlanCreationRoute, router]);
+  }, [user, userData, isAuthLoading, isLoadingUserData, isRedirectLoading, pathname, isPublicRoute, isOnboardingRoute, isPlanCreationRoute, router]);
   
   // --- Render Logic ---
-  const isLoading = isAuthLoading || (!!user && isLoadingUserData);
+  const isLoading = isAuthLoading || isRedirectLoading || (!!user && isLoadingUserData);
   
   if (isLoading) {
     return <AuthLoadingSkeleton />;
@@ -280,7 +300,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (user && userData) {
      if (userData.onboardingStatus === 'needs_plan_selection') {
-         // Allow rendering onboarding/creation routes if user needs it
          return (isOnboardingRoute || isPlanCreationRoute) ? <>{children}</> : <AuthLoadingSkeleton />;
      }
      if (userData.onboardingStatus === 'completed') {
@@ -291,11 +310,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
      }
   }
   
-  // If no user, only render public routes.
   if (!user && isPublicRoute) {
     return <PublicLayout>{children}</PublicLayout>;
   }
 
-  // Fallback for any other edge cases during transitions.
   return <AuthLoadingSkeleton />;
 }
