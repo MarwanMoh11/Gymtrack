@@ -1,4 +1,3 @@
-
 // src/components/workout-plan/add-exercise-modal.tsx
 'use client';
 
@@ -25,6 +24,7 @@ interface AddExerciseModalProps {
 }
 
 const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
+    console.log('[AddExerciseModal] getInitialExerciseState called with:', initialData);
     if (initialData) {
         return {
             id: initialData.id,
@@ -71,6 +71,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
+    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen, 'InitialData:', initialData);
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
       setExerciseData(stateToSet);
@@ -78,6 +79,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
       setSearchTerm(stateToSet.name || '');
       setIsFormVisible(isEditing); // Show form immediately if editing
       setShowAutocomplete(!isEditing); // Show autocomplete if creating
+      console.log('[AddExerciseModal] State initialized:', { stateToSet, isEditing });
     }
   }, [isOpen, initialData, isEditing]);
 
@@ -123,6 +125,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
   
   const handleAutocompleteSelect = useCallback((selectedExercise: Exercise) => {
+    console.log('[AddExerciseModal] handleAutocompleteSelect called with:', selectedExercise);
     const stateToSet = getInitialExerciseState(selectedExercise);
     setExerciseData({ ...stateToSet, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
@@ -132,6 +135,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   }, []);
   
   const handleCreateNewFromSearch = () => {
+      console.log(`[AddExerciseModal] handleCreateNewFromSearch for term: "${searchTerm}"`);
       const stateToSet = getInitialExerciseState();
       setExerciseData({ ...stateToSet, name: searchTerm });
       setShowAutocomplete(false);
@@ -139,6 +143,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   }
 
   const handleSubmit = (isCustomizing: boolean) => {
+    console.log('[AddExerciseModal] handleSubmit called. isCustomizing:', isCustomizing);
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
@@ -163,9 +168,11 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         exerciseId: newExerciseId,
       })),
     };
+    console.log('[AddExerciseModal] Saving exercise:', exerciseToSave);
     onSave(exerciseToSave);
   };
 
+  console.log('[AddExerciseModal] Rendering modal. isOpen prop:', isOpen);
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
