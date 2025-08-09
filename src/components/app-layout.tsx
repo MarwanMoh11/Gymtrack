@@ -1,4 +1,3 @@
-
 // src/components/app-layout.tsx
 'use client';
 
@@ -25,9 +24,6 @@ import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-context';
 import { useQuery } from '@tanstack/react-query';
 import { getUserData } from '@/lib/firestore-workout-plan-service';
-import { getRedirectResult } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-
 
 const todayNavItem = {
   href: '/dashboard/today',
@@ -210,8 +206,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading: isAuthLoading } = useAuth();
-  const [isRedirectLoading, setIsRedirectLoading] = useState(true);
+  const { user, loading: isAuthLoading, isProcessingRedirect } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -223,26 +218,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isOnboardingRoute = onboardingRoutes.some(route => pathname.startsWith(route));
   const isPlanCreationRoute = planCreationRoutes.some(route => pathname.startsWith(route));
   
-  useEffect(() => {
-    // This effect checks if the app is loading after a redirect from an auth provider.
-    const checkRedirect = async () => {
-        try {
-            // The presence of a result indicates a sign-in redirect just happened.
-            // getRedirectResult will resolve to null if there was no redirect.
-            // This is a key part of the flow: we wait for this to resolve.
-            await getRedirectResult(auth);
-        } catch (error) {
-            console.error("Error processing redirect result:", error);
-        } finally {
-            // Once getRedirectResult completes (with or without a user),
-            // the redirect loading is finished. The onAuthStateChanged listener
-            // will then have the final user state.
-            setIsRedirectLoading(false);
-        }
-    };
-    checkRedirect();
-  }, []);
-
   const { data: userData, isLoading: isLoadingUserData } = useQuery({
     queryKey: ['userData', user?.uid],
     queryFn: () => getUserData(user!.uid),
@@ -250,12 +225,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    // Don't run routing logic until BOTH the initial auth state check AND
-    // any potential redirect results have been processed.
-    if (isAuthLoading || isRedirectLoading) {
+    // Wait until all auth-related loading is complete.
+    if (isAuthLoading || isProcessingRedirect) {
       return; 
     }
 
+    // Logic for unauthenticated users
     if (!user) {
       if (!isPublicRoute) {
         router.replace('/login');
@@ -263,7 +238,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // After auth is settled, we still need to wait for the user's specific data.
+    // After auth is settled, wait for the user's specific app data.
     if (isLoadingUserData) {
         return;
     }
@@ -286,13 +261,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             }
         }
     } else if (!isPublicRoute) {
+        // This is a fallback case for when a user is authenticated but has no user document
         router.replace('/login');
     }
 
-  }, [user, userData, isAuthLoading, isLoadingUserData, isRedirectLoading, pathname, isPublicRoute, isOnboardingRoute, isPlanCreationRoute, router]);
+  }, [user, userData, isAuthLoading, isLoadingUserData, isProcessingRedirect, pathname, isPublicRoute, isOnboardingRoute, isPlanCreationRoute, router]);
   
   // --- Render Logic ---
-  const isLoading = isAuthLoading || isRedirectLoading || (!!user && isLoadingUserData);
+  const isLoading = isAuthLoading || isProcessingRedirect || (!!user && isLoadingUserData);
   
   if (isLoading) {
     return <AuthLoadingSkeleton />;
@@ -314,5 +290,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return <PublicLayout>{children}</PublicLayout>;
   }
 
+  // This is the final fallback. If we reach here, something is inconsistent.
+  // The AuthLoadingSkeleton is a safe default.
   return <AuthLoadingSkeleton />;
 }
