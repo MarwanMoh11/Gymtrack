@@ -64,19 +64,19 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const [muscleGroupsInput, setMuscleGroupsInput] = useState(() => (initialData?.muscleGroups || []).join(', '));
   const [searchTerm, setSearchTerm] = useState(() => initialData?.name || '');
   const [showAutocomplete, setShowAutocomplete] = useState(false);
-  const [isFormVisible, setIsFormVisible] = useState(false);
   const { toast } = useToast();
   
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
+    // This effect now correctly re-initializes the modal's state whenever it's opened
+    // for a new exercise (or for editing), by depending on `initialData` as well.
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
-      setIsFormVisible(!!initialData); 
-      setShowAutocomplete(!initialData);
+      setShowAutocomplete(!initialData); // Show autocomplete only if creating a new exercise
     }
   }, [isOpen, initialData]);
 
@@ -127,22 +127,20 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
-    setIsFormVisible(false);
   }, []);
   
   const handleCreateNewFromSearch = () => {
       const stateToSet = getInitialExerciseState();
       setExerciseData({ ...stateToSet, name: searchTerm });
       setShowAutocomplete(false);
-      setIsFormVisible(true);
   }
 
-  const handleSubmit = (isCustomizing: boolean) => {
+  const handleSubmit = () => {
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
     }
-    if (isFormVisible && exerciseData.sets.some(s => !String(s.targetReps).trim())) {
+    if (exerciseData.sets.some(s => !String(s.targetReps).trim())) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Target reps/duration are required for all sets.' });
       return;
     }
@@ -156,7 +154,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
       id: newExerciseId,
       muscleGroups: finalMuscleGroups,
       sets: exerciseData.sets.map((s, index) => ({
-        id: s.id.startsWith('set-') ? `set-${newExerciseId}-${index}` : s.id,
+        id: (s.id && s.id.startsWith('set-')) ? s.id : `set-${newExerciseId}-${index}`,
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
         unit: s.unit,
@@ -166,6 +164,9 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     onSave(exerciseToSave);
   };
   
+  // The form is now visible if we are editing OR if an exercise has been selected/created (i.e., name is not empty).
+  const isFormVisible = isEditing || exerciseData.name;
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
@@ -184,16 +185,10 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
             onChange={(e) => {
               const newSearchTerm = e.target.value;
               setSearchTerm(newSearchTerm);
-              
-              if (!isEditing) {
-                setShowAutocomplete(true);
-                setExerciseData(produce(draft => { 
-                    draft.name = newSearchTerm;
-                    draft.description = ''; 
-                }));
-              } else {
-                 handleInputChange('name', newSearchTerm);
-              }
+              setShowAutocomplete(true);
+              setExerciseData(produce(draft => { 
+                  draft.name = newSearchTerm;
+              }));
             }}
             onFocus={() => { if (!isEditing) setShowAutocomplete(true); }}
             onBlur={() => setTimeout(() => setShowAutocomplete(false), 200)}
@@ -213,7 +208,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
           )}
         </div>
         
-        {(isFormVisible || isEditing) ? (
+        {isFormVisible ? (
           <ScrollArea className="flex-grow pr-6 -mr-6 pl-1">
             <div className="space-y-4 py-4 pr-1">
                 <div>
@@ -276,28 +271,15 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
           </ScrollArea>
         ) : (
              <div className="flex-grow flex items-center justify-center text-muted-foreground text-center">
-                 {exerciseData.name && !exerciseData.description ? (
-                     <p>Selected: <span className="font-bold text-primary">{exerciseData.name}</span>.<br/>Add to plan or edit details first.</p>
-                 ) : (
-                    <p>Search for an exercise to begin.</p>
-                 )}
+                <p>Search for an exercise to add, or create a new one.</p>
             </div>
         )}
 
-        <DialogFooter className="pt-4 border-t flex-col-reverse sm:flex-row sm:justify-between gap-2">
-            <div>
-              {!isFormVisible && !isEditing && exerciseData.name && exerciseData.description && (
-                <Button variant="outline" onClick={() => setIsFormVisible(true)}>
-                  <Edit className="mr-2 h-4 w-4" /> Customize Details
-                </Button>
-              )}
-            </div>
-            <div className="flex justify-end gap-2">
-                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-                 <Button type="button" onClick={() => handleSubmit(isFormVisible || isEditing)} disabled={!exerciseData.name}>
-                    {isEditing ? 'Save Changes' : 'Add to Plan'}
-                 </Button>
-            </div>
+        <DialogFooter className="pt-4 border-t flex-col-reverse sm:flex-row sm:justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="button" onClick={handleSubmit} disabled={!exerciseData.name}>
+                {isEditing ? 'Save Changes' : 'Add to Plan'}
+            </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
