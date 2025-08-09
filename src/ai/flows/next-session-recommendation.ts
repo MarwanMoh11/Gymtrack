@@ -34,7 +34,18 @@ export type NextSessionRecommendationOutput = z.infer<typeof NextSessionRecommen
 export async function nextSessionRecommendation(
   input: NextSessionRecommendationInput
 ): Promise<NextSessionRecommendationOutput> {
-  return nextSessionRecommendationFlow(input);
+  // return nextSessionRecommendationFlow(input);
+
+  // Temporarily disabled to manage costs.
+  return new Promise((resolve) => {
+    setTimeout(() => {
+        resolve({
+            suggestedWeight: "AI Suggestion Disabled",
+            suggestedReps: "N/A",
+            reasoning: "This AI-powered feature has been temporarily disabled to manage operational costs. Please consult your training plan for guidance."
+        })
+    }, 500);
+  });
 }
 
 const prompt = ai.definePrompt({
