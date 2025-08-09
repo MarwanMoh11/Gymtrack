@@ -266,8 +266,8 @@ export default function WorkoutPlanPage() {
     return <LoadingWorkoutPlanPage />;
   }
   
-  console.log('[WorkoutPlanPage] Rendering. Modal state:', { isExerciseModalOpen, dayIdForModal, exerciseToEdit });
-  
+  console.log('[WorkoutPlanPage] Rendering. Modal state:', { isExerciseModalOpen, dayIdForModal, exerciseToEdit, allExercisesExist: !!allExercisesForModal });
+
   return (
     <div className="container mx-auto py-8 px-4 md:px-6">
       <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -464,7 +464,7 @@ export default function WorkoutPlanPage() {
         </section>
       )}
       
-      {dayIdForModal && allExercisesForModal && (
+      {isExerciseModalOpen && dayIdForModal && allExercisesForModal && userData && (
         <AddExerciseModal
           isOpen={isExerciseModalOpen}
           onOpenChange={setIsExerciseModalOpen}

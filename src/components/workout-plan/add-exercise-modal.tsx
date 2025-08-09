@@ -24,7 +24,7 @@ interface AddExerciseModalProps {
 
 const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
   if (initialData) {
-     console.log('[AddExerciseModal] Initializing with existing data:', initialData);
+     console.log('[AddExerciseModal] getInitial: Initializing with existing data:', initialData);
     return {
       id: initialData.id,
       name: initialData.name,
@@ -43,7 +43,7 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
       })),
     };
   }
-   console.log('[AddExerciseModal] Initializing with new exercise state.');
+   console.log('[AddExerciseModal] getInitial: Initializing with new exercise state.');
   return {
     name: '',
     targetWeight: '',
@@ -58,8 +58,6 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
 };
 
 export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExercises, dayId, initialData }: AddExerciseModalProps) {
-  console.log('[AddExerciseModal] Rendering. isOpen:', isOpen, 'initialData:', initialData);
-  
   const [exerciseData, setExerciseData] = useState(() => getInitialExerciseState(initialData));
   const [muscleGroupsInput, setMuscleGroupsInput] = useState(() => (initialData?.muscleGroups || []).join(', '));
   const [searchTerm, setSearchTerm] = useState(() => initialData?.name || '');
@@ -69,16 +67,19 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
-    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen, 'initialData:', initialData);
+    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen, 'initialData changed:', initialData);
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
       setShowAutocomplete(false);
-      console.log('[AddExerciseModal] State has been reset.', stateToSet);
+      console.log('[AddExerciseModal] State has been reset inside useEffect.', stateToSet);
     }
   }, [isOpen, initialData]);
+  
+  console.log('[AddExerciseModal] Rendering. isOpen:', isOpen, 'initialData prop:', initialData);
+  console.log('[AddExerciseModal] Internal component state `exerciseData`:', exerciseData);
 
   const filteredExercises = useMemo(() => {
     if (!searchTerm || isEditing) return [];
