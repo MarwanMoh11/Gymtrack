@@ -1,4 +1,3 @@
-
 // src/components/workout-plan/add-exercise-modal.tsx
 'use client';
 
@@ -68,6 +67,8 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const isEditing = !!initialData;
 
   useEffect(() => {
+    // This effect now correctly depends on `initialData` and `dayId`
+    // to ensure it re-initializes the state every time the modal opens for a new purpose.
     if (isOpen) {
         const stateToSet = getInitialExerciseState(initialData);
         setExerciseData(stateToSet);
@@ -145,6 +146,8 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
         unit: s.unit,
+        // Add exerciseId to each set for easier data lookup later
+        exerciseId: exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
       })),
     };
     onSave(exerciseToSave);
@@ -314,4 +317,3 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     </Dialog>
   );
 }
-
