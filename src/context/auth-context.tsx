@@ -13,6 +13,7 @@ import {
   getAdditionalUserInfo,
   updateProfile as firebaseUpdateProfile,
   reauthenticateWithCredential,
+  reauthenticateWithPopup,
   EmailAuthProvider,
   deleteUser,
 } from 'firebase/auth';
@@ -118,7 +119,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           await reauthenticate(password);
         } else if (providerId === 'google.com') {
           const provider = new GoogleAuthProvider();
-          await signInWithPopup(currentUser, provider); // This re-authenticates
+          await reauthenticateWithPopup(currentUser, provider); // This re-authenticates
         } else {
             // This case handles users who might have a password but are trying to delete without one
             // or other unhandled providers.
@@ -136,7 +137,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               // This error means the initial token from Google is too old. 
               // We need to force a fresh popup.
               try {
-                await signInWithPopup(auth, new GoogleAuthProvider());
+                await reauthenticateWithPopup(auth.currentUser!, new GoogleAuthProvider());
                 await deleteUser(currentUser); // Retry deletion
                 setUser(null);
                 queryClient.clear();
