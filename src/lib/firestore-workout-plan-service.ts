@@ -20,6 +20,7 @@ export async function getAllUserWorkoutPlans(userId: string): Promise<NamedWorko
     throw new Error("User ID is required to fetch workout plans.");
   }
   const plansCollectionRef = collection(db, 'users', userId, 'workoutPlans');
+  console.log(`[FirestoreService] Querying plans for user: ${userId}`);
   const querySnapshot = await getDocs(plansCollectionRef);
 
   if (querySnapshot.empty) {
@@ -36,8 +37,7 @@ export async function getAllUserWorkoutPlans(userId: string): Promise<NamedWorko
 }
 
 /**
- * Saves all of a user's workout plans to Firestore.
- * This is useful for bulk updates like reordering or changing the active plan.
+ * Saves all of a user's workout plans to Firestore using a batch write.
  * @param userId The ID of the user.
  * @param plans The array of plans to save.
  */
@@ -46,24 +46,27 @@ export async function saveAllUserWorkoutPlans(userId: string, plans: NamedWorkou
     console.error("[FirestoreService] saveAllUserWorkoutPlans called without a userId.");
     throw new Error("User ID is required to save workout plans.");
   }
-  console.log(`[FirestoreService] Attempting to save ${plans.length} plans for user ${userId}.`);
+  console.log(`[FirestoreService] Attempting to batch save ${plans.length} plans for user ${userId}.`);
   const batch = writeBatch(db);
   const plansCollectionRef = collection(db, 'users', userId, 'workoutPlans');
 
   plans.forEach((plan) => {
     const planDocRef = doc(plansCollectionRef, plan.id);
-    // Firestore handles converting JS objects to its format, no need to manually convert `plan.plan`
+    // Firestore handles converting plain JS objects. No manual conversion is needed.
+    // The object must be a plain object, which it is.
     batch.set(planDocRef, plan);
   });
 
   try {
     await batch.commit();
-    console.log(`[FirestoreService] Successfully saved all workout plans for user ${userId}.`);
+    console.log(`[FirestoreService] Successfully batch saved all workout plans for user ${userId}.`);
   } catch (error) {
-    console.error(`[FirestoreService] Error saving all workout plans for user ${userId}:`, error);
+    console.error(`[FirestoreService] Error batch saving workout plans for user ${userId}:`, error);
+    // Re-throwing the error so the mutation hook can catch it.
     throw new Error("Failed to save workout plans to the database.");
   }
 }
+
 
 /**
  * Saves a single workout plan for a user.
@@ -78,6 +81,7 @@ export async function saveUserWorkoutPlan(userId: string, plan: NamedWorkoutPlan
     console.log(`[FirestoreService] Attempting to save plan '${plan.id}' for user ${userId}.`);
     const planDocRef = doc(db, 'users', userId, 'workoutPlans', plan.id);
     try {
+        // As with batch, setDoc directly handles plain JS objects.
         await setDoc(planDocRef, plan);
         console.log(`[FirestoreService] Successfully saved plan '${plan.id}' for user ${userId}.`);
     } catch (error) {
@@ -97,15 +101,14 @@ export async function saveUserWorkoutPlan(userId: string, plan: NamedWorkoutPlan
  */
 async function initializeDefaultPlansForUser(userId: string): Promise<NamedWorkoutPlan[]> {
   console.log(`[FirestoreService] Initializing default plans for new user ${userId}.`);
-  // For new users, ensure no plan is active so they are directed to the onboarding flow.
   const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
   
   try {
+    // This uses the corrected batch save function.
     await saveAllUserWorkoutPlans(userId, plansToSave);
     return plansToSave;
   } catch (error) {
      console.error(`[FirestoreService] Failed to initialize default plans for user ${userId}:`, error);
-     // Re-throw the error so the calling function knows about the failure.
-     throw error;
+     throw error; // Propagate error to the caller
   }
 }
