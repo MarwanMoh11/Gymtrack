@@ -201,13 +201,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
     queryKey: ['workoutPlans'],
     queryFn: () => {
-      console.log(`[AppLayout] Querying workout plans.`);
+      console.log(`[AppLayout] Querying workout plans for user: ${user?.uid || 'none'}`);
       return getAllUserWorkoutPlans();
     },
   });
 
   useEffect(() => {
     console.log('[AppLayout EFFECT] Running effect, dependencies changed.');
+    const hasActivePlan = allPlans?.some(p => p.isActive);
     console.table({
       pathname,
       isAuthLoading,
@@ -216,6 +217,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       isPublicRoute,
       isOnboardingRoute,
       hasPlans: allPlans?.length,
+      hasActivePlan: hasActivePlan
     });
 
     if (isAuthLoading) {
@@ -233,21 +235,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       return;
     }
     
-    // User is logged in
+    // User is logged in from here on
+    if (isOnboardingRoute) {
+      console.log('[AppLayout EFFECT] On onboarding route. Permitting access regardless of plan status.');
+      return; // Allow onboarding pages to render without waiting for plan checks
+    }
+
     if (isLoadingPlans) {
-       console.log('[AppLayout EFFECT] User is logged in, but plans are loading. Waiting.');
+       console.log('[AppLayout EFFECT] User is logged in, but plans are loading and not on onboarding. Waiting.');
        return;
     }
     
     if (allPlans) { // This block runs only when plan data is available
-        const hasActivePlan = allPlans.some(p => p.isActive);
         console.log(`[AppLayout EFFECT] Plan data loaded. Has active plan: ${hasActivePlan}`);
 
-        if (!hasActivePlan && !isOnboardingRoute) {
+        if (!hasActivePlan) {
             console.log('[AppLayout EFFECT] No active plan, not on onboarding. Redirecting to /onboarding/welcome.');
             router.replace('/onboarding/welcome');
-        } else if (hasActivePlan && (isPublicRoute || isOnboardingRoute)) {
-            console.log('[AppLayout EFFECT] Has active plan, but on public/onboarding route. Redirecting to /dashboard/today.');
+        } else if (hasActivePlan && isPublicRoute) {
+            console.log('[AppLayout EFFECT] Has active plan, but on public route. Redirecting to /dashboard/today.');
             router.replace('/dashboard/today');
         } else {
             console.log('[AppLayout EFFECT] All conditions met, rendering page.');
@@ -256,7 +262,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     
   }, [user, isAuthLoading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
   
-  const isContentLoading = isAuthLoading || (user && isLoadingPlans);
+  const isContentLoading = isAuthLoading || (user && !isOnboardingRoute && isLoadingPlans);
   
   if (isContentLoading) {
     console.log('[AppLayout RENDER] Showing AuthLoadingSkeleton.');

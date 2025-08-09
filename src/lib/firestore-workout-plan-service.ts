@@ -14,27 +14,29 @@ const WORKOUT_PLANS_STORAGE_KEY = 'gymtrack_workout_plans';
  * @returns A promise that resolves to an array of NamedWorkoutPlan.
  */
 export async function getAllUserWorkoutPlans(): Promise<NamedWorkoutPlan[]> {
-  console.log('[LocalStorageService] Getting all workout plans.');
+  console.log('[PlanService] Getting all workout plans from localStorage.');
   if (typeof window === 'undefined') {
     // Return default plans in SSR/server-side context, won't be active.
+    console.log('[PlanService] SSR context: returning default plans.');
     return defaultNamedPlans.map(p => ({ ...p, isActive: false }));
   }
 
   const plansJson = window.localStorage.getItem(WORKOUT_PLANS_STORAGE_KEY);
 
   if (!plansJson) {
-    console.log('[LocalStorageService] No plans found, initializing with defaults.');
+    console.log('[PlanService] No plans found in localStorage, initializing with defaults.');
     const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
+    // Await the save to ensure it completes before returning
     await saveAllUserWorkoutPlans(plansToSave);
     return plansToSave;
   }
 
   try {
     const plans = JSON.parse(plansJson) as NamedWorkoutPlan[];
-    console.log(`[LocalStorageService] Successfully fetched ${plans.length} plans.`);
+    console.log(`[PlanService] Successfully fetched ${plans.length} plans from localStorage.`);
     return plans;
   } catch (error) {
-    console.error('[LocalStorageService] Error parsing plans from localStorage:', error);
+    console.error('[PlanService] Error parsing plans from localStorage:', error);
     // If parsing fails, reset to default
     const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
     await saveAllUserWorkoutPlans(plansToSave);
@@ -42,19 +44,20 @@ export async function getAllUserWorkoutPlans(): Promise<NamedWorkoutPlan[]> {
   }
 }
 
+
 /**
  * Saves all workout plans to localStorage.
  * @param plans The array of plans to save.
  */
 export async function saveAllUserWorkoutPlans(plans: NamedWorkoutPlan[]): Promise<void> {
-  console.log(`[LocalStorageService] Attempting to save ${plans.length} plans.`);
+  console.log(`[PlanService] Attempting to save ${plans.length} plans to localStorage.`);
    if (typeof window === 'undefined') return;
 
   try {
     window.localStorage.setItem(WORKOUT_PLANS_STORAGE_KEY, JSON.stringify(plans));
-    console.log(`[LocalStorageService] Successfully saved all workout plans.`);
+    console.log(`[PlanService] Successfully saved all workout plans.`);
   } catch (error) {
-    console.error(`[LocalStorageService] Error saving workout plans:`, error);
+    console.error(`[PlanService] Error saving workout plans:`, error);
     throw new Error("Failed to save workout plans to localStorage.");
   }
 }
@@ -64,21 +67,23 @@ export async function saveAllUserWorkoutPlans(plans: NamedWorkoutPlan[]): Promis
  * @param plan The plan to save.
  */
 export async function saveUserWorkoutPlan(plan: NamedWorkoutPlan): Promise<void> {
-    console.log(`[LocalStorageService] Attempting to save plan '${plan.id}'.`);
+    console.log(`[PlanService] Attempting to save single plan '${plan.id}'.`);
     try {
         const allPlans = await getAllUserWorkoutPlans();
         const planIndex = allPlans.findIndex(p => p.id === plan.id);
 
         if (planIndex > -1) {
+            console.log(`[PlanService] Updating existing plan at index ${planIndex}.`);
             allPlans[planIndex] = plan;
         } else {
+            console.log(`[PlanService] Adding new plan.`);
             allPlans.push(plan);
         }
 
         await saveAllUserWorkoutPlans(allPlans);
-        console.log(`[LocalStorageService] Successfully saved plan '${plan.id}'.`);
+        console.log(`[PlanService] Successfully saved single plan '${plan.id}'.`);
     } catch (error) {
-        console.error(`[LocalStorageService] Error saving plan ${plan.id}:`, error);
+        console.error(`[PlanService] Error saving plan ${plan.id}:`, error);
         throw new Error("Failed to save workout plan.");
     }
 }

@@ -52,7 +52,9 @@ export default function ChoosePlanPage() {
   const mutation = useMutation({
     mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(plansToSave),
     onSuccess: (data, variables) => {
+      console.log("[ChoosePlanPage] 🟢 Mutation SUCCEEDED.");
       // Manually update the query cache with the new data.
+      console.log("[ChoosePlanPage] Updating query cache with activated plan.");
       queryClient.setQueryData(['workoutPlans'], variables);
       
       toast({
@@ -61,24 +63,35 @@ export default function ChoosePlanPage() {
       });
       
       // Now that the local state is correct, we can safely redirect.
+      console.log("[ChoosePlanPage] Redirecting to /dashboard/today...");
       router.push('/dashboard/today');
     },
     onError: (error) => {
-      console.error("Plan activation failed:", error);
+      console.error("[ChoosePlanPage] 🔴 Mutation FAILED:", error);
       toast({ variant: 'destructive', title: 'Error', description: 'Could not activate the selected plan. Please try again.' });
     }
   });
 
   const handleSelectPlan = (planId: string) => {
+    console.log(`[ChoosePlanPage] User selected plan with ID: ${planId}`);
     setSelectedPlanId(planId);
   };
   
   const handleConfirmSelection = () => {
-    if (!selectedPlanId || !allPlans) return;
+    console.log("[ChoosePlanPage] handleConfirmSelection triggered.");
+    if (!selectedPlanId || !allPlans) {
+        console.error("[ChoosePlanPage] 🔴 Cannot confirm: selectedPlanId or allPlans is missing.", { selectedPlanId, allPlans });
+        return;
+    }
+
+    console.log(`[ChoosePlanPage] Activating plan ID: ${selectedPlanId}`);
     const updatedPlans = allPlans.map(p => ({
         ...p,
         isActive: p.id === selectedPlanId
     }));
+    
+    console.log("[ChoosePlanPage] Generated updated plans array to save:", updatedPlans);
+    console.log("[ChoosePlanPage] Calling mutation.mutate...");
     mutation.mutate(updatedPlans);
   };
 
