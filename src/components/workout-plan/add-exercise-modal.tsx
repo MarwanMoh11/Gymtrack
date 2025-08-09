@@ -19,7 +19,7 @@ interface AddExerciseModalProps {
   onOpenChange: (open: boolean) => void;
   onSave: (exercise: Exercise) => void;
   allExercises: Exercise[];
-  dayId: string;
+  dayId: string | null;
   initialData?: Exercise | null; // For editing
 }
 
@@ -71,17 +71,19 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
-    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen, 'InitialData:', initialData);
+    console.log(`[AddExerciseModal] useEffect triggered. isOpen: ${isOpen}`, { initialData });
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
-      setIsFormVisible(isEditing); // Show form immediately if editing
-      setShowAutocomplete(!isEditing); // Show autocomplete if creating
-      console.log('[AddExerciseModal] State initialized:', { stateToSet, isEditing });
+      // IMPORTANT: If we are editing, show the form immediately.
+      setIsFormVisible(!!initialData); 
+      setShowAutocomplete(!initialData);
+      console.log('[AddExerciseModal] State initialized:', { stateToSet, isEditing: !!initialData });
     }
-  }, [isOpen, initialData, isEditing]);
+  }, [isOpen, initialData]);
+
 
   const filteredExercises = useMemo(() => {
     if (!searchTerm) return [];
@@ -127,11 +129,14 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const handleAutocompleteSelect = useCallback((selectedExercise: Exercise) => {
     console.log('[AddExerciseModal] handleAutocompleteSelect called with:', selectedExercise);
     const stateToSet = getInitialExerciseState(selectedExercise);
+    // Don't assign an ID yet, it will be created on save.
     setExerciseData({ ...stateToSet, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
-    setIsFormVisible(false); // Keep form hidden, user might want to one-click add
+    // When an item is selected, we assume the user might want to add it as is.
+    // They can click "Customize" to see the full form.
+    setIsFormVisible(false);
   }, []);
   
   const handleCreateNewFromSearch = () => {
@@ -143,24 +148,28 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   }
 
   const handleSubmit = (isCustomizing: boolean) => {
-    console.log('[AddExerciseModal] handleSubmit called. isCustomizing:', isCustomizing);
+    console.log(`[AddExerciseModal] handleSubmit called. Customizing: ${isCustomizing}. Current exercise name: "${exerciseData.name}"`);
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
     }
-    if (isCustomizing && exerciseData.sets.some(s => !String(s.targetReps).trim())) {
+    // Only validate sets if the form is visible (i.e., user is customizing)
+    if (isFormVisible && exerciseData.sets.some(s => !String(s.targetReps).trim())) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Target reps/duration are required for all sets.' });
       return;
     }
 
     const finalMuscleGroups = muscleGroupsInput.split(',').map(s => s.trim()).filter(s => s);
-    const newExerciseId = exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    
+    // Use the existing ID if we are editing, otherwise create a new one.
+    const newExerciseId = initialData?.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     
     const exerciseToSave: Exercise = {
       ...exerciseData,
       id: newExerciseId,
       muscleGroups: finalMuscleGroups,
       sets: exerciseData.sets.map((s, index) => ({
+        // Ensure sets have a unique and persistent ID structure tied to the exercise
         id: s.id.startsWith('set-') ? `set-${newExerciseId}-${index}` : s.id,
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
@@ -168,11 +177,12 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         exerciseId: newExerciseId,
       })),
     };
-    console.log('[AddExerciseModal] Saving exercise:', exerciseToSave);
+    console.log('[AddExerciseModal] Calling onSave with exercise:', exerciseToSave);
     onSave(exerciseToSave);
   };
 
-  console.log('[AddExerciseModal] Rendering modal. isOpen prop:', isOpen);
+  console.log(`[AddExerciseModal] Rendering modal. isOpen prop: ${isOpen}, isEditing: ${isEditing}, isFormVisible: ${isFormVisible}`);
+  
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
@@ -189,16 +199,19 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
             id="exerciseName"
             value={searchTerm}
             onChange={(e) => {
-              setSearchTerm(e.target.value);
+              const newSearchTerm = e.target.value;
+              setSearchTerm(newSearchTerm);
+              
               if (!isEditing) {
                 setShowAutocomplete(true);
-                // Clear selected exercise if user types again
-                if (exerciseData.description) {
-                   setExerciseData(getInitialExerciseState());
-                   setMuscleGroupsInput('');
-                }
+                // If user is typing, it's a new search, so reset selection
+                setExerciseData(produce(draft => { 
+                    draft.name = newSearchTerm;
+                    draft.description = ''; // Clear description to signify it's not a pre-filled item
+                }));
+              } else {
+                 handleInputChange('name', newSearchTerm);
               }
-              handleInputChange('name', e.target.value);
             }}
             onFocus={() => { if (!isEditing) setShowAutocomplete(true); }}
             onBlur={() => setTimeout(() => setShowAutocomplete(false), 200)}
@@ -206,17 +219,13 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
           />
           {showAutocomplete && !isEditing && (
             <div className="absolute z-10 w-full bg-card border border-border rounded-md mt-1 max-h-60 overflow-y-auto shadow-lg">
-              {filteredExercises.length > 0 ? (
-                filteredExercises.map(ex => (
+              {filteredExercises.length > 0 && filteredExercises.map(ex => (
                   <div key={ex.id} className="p-2 hover:bg-accent cursor-pointer" onMouseDown={() => handleAutocompleteSelect(ex)}>
                     {ex.name}
                   </div>
-                ))
-              ) : (
-                <div className="p-2 text-muted-foreground italic">No matches found.</div>
-              )}
-               <div className="p-2 hover:bg-accent cursor-pointer text-primary font-semibold border-t" onMouseDown={handleCreateNewFromSearch}>
-                <PlusCircle className="inline h-4 w-4 mr-2"/>Create new exercise named "{searchTerm}"
+              ))}
+              <div className="p-2 hover:bg-accent cursor-pointer text-primary font-semibold border-t" onMouseDown={handleCreateNewFromSearch}>
+                <PlusCircle className="inline h-4 w-4 mr-2"/>Create new exercise: "{searchTerm}"
               </div>
             </div>
           )}
@@ -285,7 +294,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
           </ScrollArea>
         ) : (
              <div className="flex-grow flex items-center justify-center text-muted-foreground text-center">
-                 {exerciseData.name && !isEditing ? (
+                 {exerciseData.name && !exerciseData.description ? (
                      <p>Selected: <span className="font-bold text-primary">{exerciseData.name}</span>.<br/>Add to plan or edit details first.</p>
                  ) : (
                     <p>Search for an exercise to begin.</p>
@@ -295,7 +304,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
 
         <DialogFooter className="pt-4 border-t flex-col-reverse sm:flex-row sm:justify-between gap-2">
             <div>
-              {!isFormVisible && !isEditing && exerciseData.name && (
+              {!isFormVisible && !isEditing && exerciseData.name && exerciseData.description && (
                 <Button variant="outline" onClick={() => setIsFormVisible(true)}>
                   <Edit className="mr-2 h-4 w-4" /> Customize Details
                 </Button>

@@ -81,7 +81,9 @@ function AddExercisesComponent() {
   });
 
   useEffect(() => {
+    console.log('[AddExercisesPage] useEffect for planDetails running.');
     if (planDetails && workoutPlan.length === 0) {
+      console.log('[AddExercisesPage] planDetails found, initializing workout plan structure.');
       const { configuredDays } = planDetails;
       const initialPlan = configuredDays.map((day: ConfiguredDay, index: number) => ({
         id: `custom-day-${Date.now()}-${index}`,
@@ -96,25 +98,37 @@ function AddExercisesComponent() {
   }, [planDetails, workoutPlan.length]);
 
   const handleOpenExerciseModal = useCallback((dayId: string, exercise: Exercise | null) => {
+    console.log(`[AddExercisesPage] handleOpenExerciseModal called for dayId: ${dayId}`, { exercise });
+    console.log('[AddExercisesPage] State BEFORE update:', { dayIdForModal, exerciseToEdit, isExerciseModalOpen });
+    
     setDayIdForModal(dayId);
     setExerciseToEdit(exercise);
     setIsExerciseModalOpen(true);
+
+    // Use a timeout to log the state *after* React has processed the update.
+    setTimeout(() => {
+        console.log('[AddExercisesPage] State AFTER update (expected):', { dayIdForModal: dayId, exerciseToEdit: exercise, isExerciseModalOpen: true });
+    }, 0);
   }, []);
 
   const handleSaveExercise = useCallback((savedExercise: Exercise) => {
     if (!dayIdForModal) {
+        console.error("[AddExercisesPage] handleSaveExercise called but dayIdForModal is null.");
         return;
     }
+    console.log(`[AddExercisesPage] handleSaveExercise for dayId: ${dayIdForModal}`, { savedExercise });
     setWorkoutPlan(
       produce(draft => {
         const day = draft.find(d => d.id === dayIdForModal);
         if (day) {
           const existingIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
           if (existingIndex !== -1) {
+            console.log(`[AddExercisesPage] Updating existing exercise at index ${existingIndex}.`);
             day.exercises[existingIndex] = savedExercise;
           } else {
             const newExercise = { ...savedExercise, id: `custom-ex-${Date.now()}` };
             newExercise.sets = newExercise.sets.map((s, i) => ({...s, id: `set-${newExercise.id}-${i}`}));
+            console.log(`[AddExercisesPage] Adding new exercise:`, newExercise);
             day.exercises.push(newExercise);
           }
         }
@@ -178,6 +192,8 @@ function AddExercisesComponent() {
   if (!planDetails || isLoadingUser || isLoadingAllExercises) {
     return <LoadingAddExercisesPage />;
   }
+
+  console.log(`[AddExercisesPage] Rendering main component. Modal open state: ${isExerciseModalOpen}`);
   
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
@@ -208,7 +224,7 @@ function AddExercisesComponent() {
                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'down')} disabled={index === day.exercises.length - 1}>
                                 <ArrowDown className="h-3 w-3" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleOpenExerciseModal(day.id, ex)}>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { console.log(`[AddExercisesPage] Edit button clicked for exercise: ${ex.name}`); handleOpenExerciseModal(day.id, ex); }}>
                                 <Edit className="h-3 w-3" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleRemoveExercise(day.id, ex.id)}>
@@ -221,7 +237,7 @@ function AddExercisesComponent() {
                       <p className="text-sm text-muted-foreground italic text-center py-2">No exercises added yet.</p>
                     )}
                   </ul>
-                  <Button variant="outline" size="sm" className="w-full mt-4" onClick={() => handleOpenExerciseModal(day.id, null)}>
+                  <Button variant="outline" size="sm" className="w-full mt-4" onClick={() => { console.log(`[AddExercisesPage] 'Add Exercise' button clicked for dayId: ${day.id}`); handleOpenExerciseModal(day.id, null); }}>
                     <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise
                   </Button>
                 </AccordionContent>
@@ -237,7 +253,8 @@ function AddExercisesComponent() {
         </CardFooter>
       </Card>
       
-      {isExerciseModalOpen && allExercises && dayIdForModal && (
+      {console.log(`[AddExercisesPage] Rendering AddExerciseModal with isOpen=${isExerciseModalOpen}`)}
+      {allExercises && (
         <AddExerciseModal
             isOpen={isExerciseModalOpen}
             onOpenChange={setIsExerciseModalOpen}
