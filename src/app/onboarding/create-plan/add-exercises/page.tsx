@@ -1,3 +1,4 @@
+
 // src/app/onboarding/create-plan/add-exercises/page.tsx
 'use client';
 
@@ -194,13 +195,13 @@ function AddExercisesComponent() {
         </CardFooter>
       </Card>
       
-      {isExerciseModalOpen && allExercises && (
+      {isExerciseModalOpen && allExercises && dayIdForModal && (
         <AddExerciseModal
             isOpen={isExerciseModalOpen}
             onOpenChange={setIsExerciseModalOpen}
             onSave={handleSaveExercise}
             allExercises={allExercises}
-            dayId={dayIdForModal!}
+            dayId={dayIdForModal}
         />
       )}
     </div>

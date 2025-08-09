@@ -1,3 +1,4 @@
+
 // src/components/workout-plan/add-exercise-modal.tsx
 'use client';
 
@@ -12,6 +13,7 @@ import { PlusCircle, Trash2, Edit } from 'lucide-react';
 import type { Exercise, SetData, NewSetData } from '@/types/workout';
 import { ScrollArea } from '../ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
+import { produce } from 'immer';
 
 interface AddExerciseModalProps {
   isOpen: boolean;
