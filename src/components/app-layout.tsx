@@ -1,7 +1,8 @@
+
 // src/components/app-layout.tsx
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogOut } from 'lucide-react';
@@ -22,8 +23,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Logo } from '@/components/icons/logo';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-context';
-import { useQuery } from '@tanstack/react-query';
-import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getAllUserWorkoutPlans, initializeDefaultPlansForUser } from '@/lib/firestore-workout-plan-service';
 
 const todayNavItem = {
   href: '/dashboard/today',
@@ -189,6 +190,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading: isAuthLoading } = useAuth();
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -199,15 +201,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
     queryKey: ['workoutPlans'],
-    queryFn: getAllUserWorkoutPlans,
-    // This query runs as soon as the app loads, but its result is only
-    // relevant for routing *after* auth state is determined.
+    queryFn: () => {
+      console.log(`[AppLayout] Querying workout plans for user: ${user?.uid || 'none'}`);
+      return getAllUserWorkoutPlans();
+    },
     enabled: true, 
   });
-  
+
   useEffect(() => {
     console.log('[AppLayout EFFECT] Running effect, dependencies changed.');
-    const hasPlans = allPlans !== null && allPlans.length > 0;
+
+    // This check is now safer. `allPlans` can be undefined, so we check for its existence first.
+    const hasPlans = allPlans && allPlans.length > 0; 
     const hasActivePlan = allPlans?.some(p => p.isActive);
 
     console.table({
@@ -217,8 +222,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         isLoadingPlans,
         isPublicRoute,
         isOnboardingRoute,
-        hasPlans,
-        hasActivePlan
+        hasPlans: hasPlans,
+        hasActivePlan: hasActivePlan,
     });
 
     if (isAuthLoading) {
@@ -241,13 +246,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
        console.log('[AppLayout EFFECT] User is logged in, but plans are loading. Waiting.');
        return;
     }
-    
+
     if (isOnboardingRoute) {
         console.log('[AppLayout EFFECT] On onboarding route. Permitting access regardless of plan status.');
         return;
     }
 
-    // At this point, user is logged in, plans are loaded, and not on an onboarding route.
+    // At this point, user is logged in, plans are loaded (or not), and not on an onboarding route.
+    console.log(`[AppLayout EFFECT] Plan data loaded. Has active plan: ${hasActivePlan}`);
     if (!hasActivePlan) {
         console.log('[AppLayout EFFECT] No active plan found. Redirecting to /onboarding/welcome.');
         router.replace('/onboarding/welcome');
@@ -261,23 +267,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [user, isAuthLoading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
   
   // Determine what to render
-  const shouldShowLoading = isAuthLoading || (!!user && isLoadingPlans && !isOnboardingRoute);
+  const isLoading = isAuthLoading || (!!user && isLoadingPlans && !isOnboardingRoute);
   
-  if (shouldShowLoading) {
-    console.log('[AppLayout RENDER] Showing AuthLoadingSkeleton.');
+  if (isLoading) {
+    console.log(`[AppLayout RENDER] Showing AuthLoadingSkeleton. isAuthLoading: ${isAuthLoading}, isLoadingPlans: ${isLoadingPlans}`);
     return <AuthLoadingSkeleton />;
   }
 
   if (user) {
-      // If user is logged in but has no plans loaded yet, they need to go through onboarding.
-      // This is the key state for a brand new user after signup.
+      // After signup, `allPlans` might be null if they haven't been initialized yet.
+      // The auth context handles initialization, but we wait here before deciding routes.
       if (allPlans === null && !isOnboardingRoute) {
-         console.log('[AppLayout RENDER] User exists, but no plans in storage. Redirecting to onboarding.');
-         // The useEffect will handle the redirect, show loading in the meantime.
+         console.log('[AppLayout RENDER] User exists, but plans are null (pre-initialization). Showing loading skeleton.');
          return <AuthLoadingSkeleton />;
       }
       
-      // If they are on an onboarding route, let them be there.
       if (isOnboardingRoute) {
         console.log('[AppLayout RENDER] User is on onboarding route, rendering children.');
         return <>{children}</>;
@@ -289,8 +293,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
       }
 
-      // This case handles a logged-in user who has plans, but none are active.
-      // The useEffect will redirect them to onboarding.
        console.log('[AppLayout RENDER] User authenticated, but no active plan state. Showing loading skeleton before redirect.');
        return <AuthLoadingSkeleton />;
   }
@@ -300,7 +302,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return <PublicLayout>{children}</PublicLayout>;
   }
   
-  // Default fallback, should rarely be hit with the logic above
   console.log('[AppLayout RENDER] Fallback: Showing AuthLoadingSkeleton.');
   return <AuthLoadingSkeleton />;
 }
