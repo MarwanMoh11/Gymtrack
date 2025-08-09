@@ -24,7 +24,6 @@ interface AddExerciseModalProps {
 }
 
 const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
-    console.log('[AddExerciseModal] getInitialExerciseState called with:', initialData);
     if (initialData) {
         return {
             id: initialData.id,
@@ -71,16 +70,13 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
-    console.log(`[AddExerciseModal] useEffect triggered. isOpen: ${isOpen}`, { initialData });
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
-      // IMPORTANT: If we are editing, show the form immediately.
       setIsFormVisible(!!initialData); 
       setShowAutocomplete(!initialData);
-      console.log('[AddExerciseModal] State initialized:', { stateToSet, isEditing: !!initialData });
     }
   }, [isOpen, initialData]);
 
@@ -127,20 +123,15 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
   
   const handleAutocompleteSelect = useCallback((selectedExercise: Exercise) => {
-    console.log('[AddExerciseModal] handleAutocompleteSelect called with:', selectedExercise);
     const stateToSet = getInitialExerciseState(selectedExercise);
-    // Don't assign an ID yet, it will be created on save.
     setExerciseData({ ...stateToSet, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
-    // When an item is selected, we assume the user might want to add it as is.
-    // They can click "Customize" to see the full form.
     setIsFormVisible(false);
   }, []);
   
   const handleCreateNewFromSearch = () => {
-      console.log(`[AddExerciseModal] handleCreateNewFromSearch for term: "${searchTerm}"`);
       const stateToSet = getInitialExerciseState();
       setExerciseData({ ...stateToSet, name: searchTerm });
       setShowAutocomplete(false);
@@ -148,12 +139,10 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   }
 
   const handleSubmit = (isCustomizing: boolean) => {
-    console.log(`[AddExerciseModal] handleSubmit called. Customizing: ${isCustomizing}. Current exercise name: "${exerciseData.name}"`);
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
     }
-    // Only validate sets if the form is visible (i.e., user is customizing)
     if (isFormVisible && exerciseData.sets.some(s => !String(s.targetReps).trim())) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Target reps/duration are required for all sets.' });
       return;
@@ -161,7 +150,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
 
     const finalMuscleGroups = muscleGroupsInput.split(',').map(s => s.trim()).filter(s => s);
     
-    // Use the existing ID if we are editing, otherwise create a new one.
     const newExerciseId = initialData?.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     
     const exerciseToSave: Exercise = {
@@ -169,7 +157,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
       id: newExerciseId,
       muscleGroups: finalMuscleGroups,
       sets: exerciseData.sets.map((s, index) => ({
-        // Ensure sets have a unique and persistent ID structure tied to the exercise
         id: s.id.startsWith('set-') ? `set-${newExerciseId}-${index}` : s.id,
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
@@ -177,11 +164,8 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         exerciseId: newExerciseId,
       })),
     };
-    console.log('[AddExerciseModal] Calling onSave with exercise:', exerciseToSave);
     onSave(exerciseToSave);
   };
-
-  console.log(`[AddExerciseModal] Rendering modal. isOpen prop: ${isOpen}, isEditing: ${isEditing}, isFormVisible: ${isFormVisible}`);
   
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -204,10 +188,9 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
               
               if (!isEditing) {
                 setShowAutocomplete(true);
-                // If user is typing, it's a new search, so reset selection
                 setExerciseData(produce(draft => { 
                     draft.name = newSearchTerm;
-                    draft.description = ''; // Clear description to signify it's not a pre-filled item
+                    draft.description = ''; 
                 }));
               } else {
                  handleInputChange('name', newSearchTerm);
