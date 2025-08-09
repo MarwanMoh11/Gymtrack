@@ -2,17 +2,10 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Grant signed-in users access to their own data and subcollections.
-    // Allow a user to create their own document upon signup.
-    match /users/{userId}/{path=**} {
-      allow create, read, write: if request.auth != null && request.auth.uid == userId;
-    }
-
-    // The following is an example rule and is not currently used by the application.
-    // It is kept for reference.
-    match /workouts/{doc} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.ownerId;
+    // Allow read and write access to all documents for testing purposes.
+    // WARNING: This is insecure and should not be used in production.
+    match /{document=**} {
+      allow read, write: if true;
     }
   }
 }
