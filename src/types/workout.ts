@@ -78,5 +78,6 @@ export type UserData = {
   id: string;
   onboardingStatus: 'needs_plan_selection' | 'completed';
   plans: NamedWorkoutPlan[];
-  // other top-level user settings can go here
+  displayName?: string;
+  photoURL?: string;
 };

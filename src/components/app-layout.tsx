@@ -4,7 +4,7 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogOut } from 'lucide-react';
+import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogOut, Settings } from 'lucide-react';
 import {
   Sidebar,
   SidebarHeader,
@@ -147,6 +147,24 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
                 ))}
               </SidebarMenu>
             )}
+
+            <SidebarMenu className="p-2 lg:p-4 mt-auto">
+                <SidebarMenuItem>
+                    <SidebarMenuButton
+                        asChild
+                        isActive={pathname.startsWith('/dashboard/settings')}
+                        variant="default"
+                        size="default"
+                        className="justify-start"
+                        tooltip="Settings"
+                    >
+                        <Link href="/dashboard/settings" onClick={handleLinkClick}>
+                            <Settings />
+                            <span>Settings</span>
+                        </Link>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            </SidebarMenu>
             
           </ScrollArea>
         </SidebarContent>
@@ -193,7 +211,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const publicRoutes = ['/login', '/signup'];
-  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan', '/onboarding/create-plan', '/onboarding/create-plan/configure-days', '/workout-plan'];
+  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan', '/onboarding/create-plan', '/onboarding/create-plan/configure-days', '/onboarding/create-plan/add-exercises', '/workout-plan'];
   const isPublicRoute = publicRoutes.includes(pathname);
   const isOnboardingRoute = onboardingRoutes.some(route => pathname.startsWith(route));
 

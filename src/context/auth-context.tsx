@@ -10,7 +10,11 @@ import {
   signOut,
   GoogleAuthProvider,
   signInWithPopup,
-  getAdditionalUserInfo
+  getAdditionalUserInfo,
+  updateProfile as firebaseUpdateProfile,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  deleteUser,
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useQueryClient } from '@tanstack/react-query';
@@ -23,6 +27,9 @@ interface AuthContextType {
   signup: (email: string, password: string) => Promise<any>;
   signInWithGoogle: () => Promise<any>;
   logout: () => Promise<void>;
+  updateProfile: (data: { displayName?: string; photoURL?: string }) => Promise<void>;
+  reauthenticate: (password: string) => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,10 +46,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!newUser) {
         queryClient.clear();
       } else {
-        // Preemptively check if user data exists when auth state changes
         const existingData = await getUserData(newUser.uid);
         if (!existingData) {
-          // This ensures that even for Google sign-ins, the user doc gets created
           await initializeUserData(newUser.uid);
           await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
         }
@@ -85,6 +90,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     await signOut(auth);
   };
+  
+  const updateProfile = async (data: { displayName?: string; photoURL?: string }) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    await firebaseUpdateProfile(auth.currentUser, data);
+    // Manually update the user state to reflect changes immediately
+    setUser(auth.currentUser);
+    // You might also want to update the user data in Firestore if you store it there too.
+    // await saveUserData(auth.currentUser.uid, { displayName: data.displayName });
+    // And invalidate any related queries
+    queryClient.invalidateQueries({ queryKey: ['user', auth.currentUser.uid] });
+  };
+  
+  const reauthenticate = async (password: string) => {
+    if (!auth.currentUser || !auth.currentUser.email) throw new Error("No user or email found for reauthentication.");
+    const credential = EmailAuthProvider.credential(auth.currentUser.email, password);
+    await reauthenticateWithCredential(auth.currentUser, credential);
+  };
+  
+  const deleteAccount = async () => {
+      if (!auth.currentUser) throw new Error("Not authenticated");
+      try {
+        await deleteUser(auth.currentUser);
+        setUser(null);
+        queryClient.clear();
+      } catch (error) {
+          console.error("Error deleting user account:", error);
+          throw error;
+      }
+  };
+
 
   const value = {
     user,
@@ -93,6 +128,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     signup,
     signInWithGoogle,
     logout,
+    updateProfile,
+    reauthenticate,
+    deleteAccount,
   };
 
   return (
