@@ -28,7 +28,7 @@ export default function WelcomePage() {
             </Link>
           </Button>
           <Button asChild size="lg" variant="outline" className="w-full">
-            <Link href="/workout-plan">
+            <Link href="/onboarding/create-plan">
               Build My Own Plan
             </Link>
           </Button>

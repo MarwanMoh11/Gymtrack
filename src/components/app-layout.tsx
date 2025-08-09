@@ -193,9 +193,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const publicRoutes = ['/login', '/signup'];
-  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan', '/workout-plan'];
+  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan', '/onboarding/create-plan', '/onboarding/create-plan/configure-days', '/workout-plan'];
   const isPublicRoute = publicRoutes.includes(pathname);
-  const isOnboardingRoute = onboardingRoutes.includes(pathname);
+  const isOnboardingRoute = onboardingRoutes.some(route => pathname.startsWith(route));
 
   const { data: userData, isLoading: isLoadingUserData } = useQuery({
     queryKey: ['userData', user?.uid],
@@ -226,7 +226,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 router.replace('/onboarding/welcome');
             }
         } else if (userData.onboardingStatus === 'completed') {
-            if (isPublicRoute || isOnboardingRoute) {
+            if (isPublicRoute || (isOnboardingRoute && pathname !== '/workout-plan')) {
                 router.replace('/dashboard/today');
             }
         }
@@ -253,7 +253,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
      }
      if (userData.onboardingStatus === 'completed') {
         // If onboarding is done, show authenticated layout unless on a public/onboarding route (redirect is pending)
-        return isPublicRoute || isOnboardingRoute ? <AuthLoadingSkeleton /> : <AuthenticatedLayout>{children}</AuthenticatedLayout>;
+        return (isPublicRoute || (isOnboardingRoute && pathname !== '/workout-plan')) 
+            ? <AuthLoadingSkeleton /> 
+            : <AuthenticatedLayout>{children}</AuthenticatedLayout>;
      }
   }
   

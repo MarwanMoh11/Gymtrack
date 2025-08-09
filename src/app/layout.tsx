@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
-import { Providers } from '@/components/providers'; // Import the new provider component
+import { Providers } from '@/components/providers';
+import { Suspense } from 'react';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -27,8 +28,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
-        <Providers> {/* Use the new single provider component */}
-          {children}
+        <Providers>
+           <Suspense>
+             {children}
+           </Suspense>
           <Toaster />
         </Providers>
       </body>
