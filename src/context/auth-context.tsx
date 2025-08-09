@@ -28,8 +28,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<any>;
   logout: () => Promise<void>;
   updateProfile: (data: { displayName?: string; photoURL?: string }) => Promise<void>;
-  reauthenticate: (password: string) => Promise<void>;
-  deleteAccount: () => Promise<void>;
+  deleteAccount: (password?: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -108,15 +107,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await reauthenticateWithCredential(auth.currentUser, credential);
   };
   
-  const deleteAccount = async () => {
-      if (!auth.currentUser) throw new Error("Not authenticated");
+  const deleteAccount = async (password?: string) => {
+      const currentUser = auth.currentUser;
+      if (!currentUser) throw new Error("Not authenticated");
+
+      const providerId = currentUser.providerData[0]?.providerId;
+
       try {
-        await deleteUser(auth.currentUser);
+        if (providerId === 'password' && password) {
+          await reauthenticate(password);
+        } else if (providerId === 'google.com') {
+          const provider = new GoogleAuthProvider();
+          await signInWithPopup(currentUser, provider); // This re-authenticates
+        } else {
+            // This case handles users who might have a password but are trying to delete without one
+            // or other unhandled providers.
+            if(password) await reauthenticate(password);
+            else throw new Error("Re-authentication required.");
+        }
+        
+        // If re-authentication was successful, proceed with deletion
+        await deleteUser(currentUser);
         setUser(null);
         queryClient.clear();
-      } catch (error) {
-          console.error("Error deleting user account:", error);
-          throw error;
+      } catch (error: any) {
+          console.error("Error during account deletion process:", error);
+           if (error.code === 'auth/requires-recent-login' && providerId === 'google.com') {
+              // This error means the initial token from Google is too old. 
+              // We need to force a fresh popup.
+              try {
+                await signInWithPopup(auth, new GoogleAuthProvider());
+                await deleteUser(currentUser); // Retry deletion
+                setUser(null);
+                queryClient.clear();
+              } catch (reauthError) {
+                  throw reauthError; // Throw the re-authentication error
+              }
+           } else {
+             throw error; // Throw other errors (e.g., wrong password)
+           }
       }
   };
 
@@ -129,7 +158,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     signInWithGoogle,
     logout,
     updateProfile,
-    reauthenticate,
     deleteAccount,
   };
 

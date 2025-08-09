@@ -49,7 +49,7 @@ const profileSchema = z.object({
 type ProfileFormValues = z.infer<typeof profileSchema>;
 
 export default function SettingsForm() {
-  const { user, updateProfile, reauthenticate, deleteAccount } = useAuth();
+  const { user, updateProfile, deleteAccount, signInWithGoogle } = useAuth();
   const { toast } = useToast();
   const { setTheme, theme } = useTheme();
   const queryClient = useQueryClient();
@@ -57,6 +57,10 @@ export default function SettingsForm() {
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
   const [passwordForDelete, setPasswordForDelete] = useState('');
+  
+  const authProvider = user?.providerData?.[0]?.providerId;
+  const isPasswordProvider = authProvider === 'password';
+  const isGoogleProvider = authProvider === 'google.com';
 
   const form = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
@@ -91,9 +95,9 @@ export default function SettingsForm() {
   const deleteAccountMutation = useMutation({
     mutationFn: async () => {
         setIsDeleteLoading(true);
-        if (!passwordForDelete) throw new Error("Password is required to delete your account.");
-        await reauthenticate(passwordForDelete);
-        await deleteAccount();
+        if (!user) throw new Error("User not found");
+        
+        await deleteAccount(passwordForDelete); // Pass the password, context will handle logic
     },
     onSuccess: () => {
         toast({ title: 'Account Deleted', description: 'Your account has been permanently deleted.' });
@@ -104,7 +108,9 @@ export default function SettingsForm() {
         if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
             description = "The password you entered is incorrect. Please try again.";
         } else if(error.code === 'auth/requires-recent-login'){
-            description = "This is a sensitive operation and requires a recent login. Please log out and log back in to delete your account."
+            description = "This is a sensitive operation. Please sign in with Google again to confirm your identity."
+        } else if(error.code === 'auth/reauthentication-failed') {
+             description = "Re-authentication failed. Please try again."
         }
         toast({ variant: 'destructive', title: 'Deletion Failed', description });
     },
@@ -225,29 +231,31 @@ export default function SettingsForm() {
                     <AlertDialogContent>
                         <AlertDialogHeader>
                             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                                This action cannot be undone. This will permanently delete your account and remove all your data from our servers. To confirm, please type your current password.
+                             <AlertDialogDescription>
+                                This action cannot be undone. To confirm deletion, please {isPasswordProvider ? 'enter your password.' : 're-authenticate with Google.'}
                             </AlertDialogDescription>
                         </AlertDialogHeader>
-                        <div className="py-2">
-                             <Label htmlFor="password-confirm" className="sr-only">Password</Label>
-                             <Input 
-                                id="password-confirm" 
-                                type="password"
-                                placeholder="Enter your password to confirm"
-                                value={passwordForDelete}
-                                onChange={(e) => setPasswordForDelete(e.target.value)}
-                             />
-                        </div>
+                        {isPasswordProvider && (
+                             <div className="py-2">
+                                 <Label htmlFor="password-confirm" className="sr-only">Password</Label>
+                                 <Input 
+                                    id="password-confirm" 
+                                    type="password"
+                                    placeholder="Enter your password to confirm"
+                                    value={passwordForDelete}
+                                    onChange={(e) => setPasswordForDelete(e.target.value)}
+                                 />
+                            </div>
+                        )}
                         <AlertDialogFooter>
                             <AlertDialogCancel disabled={isDeleteLoading}>Cancel</AlertDialogCancel>
                             <AlertDialogAction 
                                 onClick={() => deleteAccountMutation.mutate()} 
                                 className="bg-destructive hover:bg-destructive/90"
-                                disabled={isDeleteLoading || !passwordForDelete}
+                                disabled={isDeleteLoading || (isPasswordProvider && !passwordForDelete)}
                             >
                                 {isDeleteLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Delete My Account
+                                {isPasswordProvider ? 'Delete My Account' : 'Continue with Google to Delete'}
                             </AlertDialogAction>
                         </AlertDialogFooter>
                     </AlertDialogContent>
