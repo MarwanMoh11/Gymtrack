@@ -180,7 +180,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
             <span>Logout</span>
           </SidebarMenuButton>
           <p className="text-xs text-sidebar-foreground/50 px-2 pt-2 truncate group-data-[collapsible=icon]:hidden">
-            {user?.email}
+            {user?.displayName || user?.email}
           </p>
         </SidebarFooter>
       </Sidebar>
