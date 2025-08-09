@@ -26,7 +26,7 @@ async function getUserSettings(userId: string): Promise<UserSettings> {
     const docSnap = await getDoc(settingsDocRef);
     return docSnap.exists() ? (docSnap.data() as UserSettings) : {};
   } catch (error) {
-    console.error(`Error getting user settings for ${userId}:`, error);
+    console.error(`[FirestoreService] Error getting user settings for ${userId}:`, error);
     throw new Error("Failed to fetch user settings.");
   }
 }
@@ -41,6 +41,7 @@ export async function getTargetWeightOverrides(userId: string): Promise<Record<s
 export async function setTargetWeightOverride(userId: string, exerciseId: string, targetWeight: string): Promise<void> {
   if (!userId || !exerciseId) return;
   const settingsDocRef = doc(db, 'users', userId, 'settings', 'userSettings');
+  console.log(`[FirestoreService] Setting weight override for user ${userId}, exercise ${exerciseId} to '${targetWeight}'.`);
   try {
     // Use dot notation to update a specific field in the map
     await setDoc(settingsDocRef, {
@@ -48,8 +49,9 @@ export async function setTargetWeightOverride(userId: string, exerciseId: string
         [exerciseId]: targetWeight
       }
     }, { merge: true });
+    console.log(`[FirestoreService] Successfully set weight override for user ${userId}, exercise ${exerciseId}.`);
   } catch (error) {
-    console.error(`Error setting weight override for user ${userId}:`, error);
+    console.error(`[FirestoreService] Error setting weight override for user ${userId}:`, error);
     throw new Error("Failed to save weight override.");
   }
 }
@@ -60,12 +62,14 @@ export async function setTodayWorkoutOverride(userId: string, dayId: string): Pr
   if (!userId || !dayId) return;
   const settingsDocRef = doc(db, 'users', userId, 'settings', 'userSettings');
   const today = new Date().toISOString().split('T')[0];
+  console.log(`[FirestoreService] Setting session override for user ${userId} to dayId '${dayId}'.`);
   try {
     await setDoc(settingsDocRef, {
       sessionOverride: { dayId, date: today }
     }, { merge: true });
+    console.log(`[FirestoreService] Successfully set session override for user ${userId}.`);
   } catch (error) {
-    console.error(`Error setting session override for user ${userId}:`, error);
+    console.error(`[FirestoreService] Error setting session override for user ${userId}:`, error);
     throw new Error("Failed to save session override.");
   }
 }
@@ -82,12 +86,14 @@ export async function getTodayWorkoutOverride(userId: string): Promise<string | 
 export async function clearTodayWorkoutOverride(userId: string): Promise<void> {
   if (!userId) return;
   const settingsDocRef = doc(db, 'users', userId, 'settings', 'userSettings');
+  console.log(`[FirestoreService] Clearing session override for user ${userId}.`);
   try {
     await setDoc(settingsDocRef, {
         sessionOverride: null
     }, { merge: true });
+     console.log(`[FirestoreService] Successfully cleared session override for user ${userId}.`);
   } catch (error) {
-    console.error(`Error clearing session override for user ${userId}:`, error);
+    console.error(`[FirestoreService] Error clearing session override for user ${userId}:`, error);
     throw new Error("Failed to clear session override.");
   }
 }

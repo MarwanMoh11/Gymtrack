@@ -17,9 +17,15 @@ export async function getDailyLog(userId: string, date: string): Promise<DailyLo
   const logDocRef = doc(db, 'users', userId, 'dailyLogs', date);
   try {
     const docSnap = await getDoc(logDocRef);
-    return docSnap.exists() ? (docSnap.data() as DailyLog) : null;
+    if (docSnap.exists()) {
+      console.log(`[FirestoreService] Fetched daily log for user ${userId} on ${date}.`);
+      return docSnap.data() as DailyLog;
+    } else {
+      console.log(`[FirestoreService] No daily log found for user ${userId} on ${date}.`);
+      return null;
+    }
   } catch (error) {
-    console.error(`Error getting daily log for user ${userId} on ${date}:`, error);
+    console.error(`[FirestoreService] Error getting daily log for user ${userId} on ${date}:`, error);
     throw new Error('Failed to fetch daily log.');
   }
 }
@@ -31,12 +37,17 @@ export async function getDailyLog(userId: string, date: string): Promise<DailyLo
  * @param dailyLog The DailyLog object to save.
  */
 export async function saveDailyLog(userId: string, date: string, dailyLog: DailyLog): Promise<void> {
-  if (!userId || !date) return;
+  if (!userId || !date) {
+    console.error("[FirestoreService] saveDailyLog called with invalid userId or date.");
+    return;
+  }
   const logDocRef = doc(db, 'users', userId, 'dailyLogs', date);
+  console.log(`[FirestoreService] Attempting to save daily log for user ${userId} on ${date}.`);
   try {
     await setDoc(logDocRef, dailyLog, { merge: true });
+    console.log(`[FirestoreService] Successfully saved daily log for user ${userId} on ${date}.`);
   } catch (error) {
-    console.error(`Error saving daily log for user ${userId} on ${date}:`, error);
+    console.error(`[FirestoreService] Error saving daily log for user ${userId} on ${date}:`, error);
     throw new Error('Failed to save daily log.');
   }
 }
@@ -49,10 +60,12 @@ export async function saveDailyLog(userId: string, date: string, dailyLog: Daily
 export async function deleteDailyLog(userId: string, date: string): Promise<void> {
   if (!userId || !date) return;
   const logDocRef = doc(db, 'users', userId, 'dailyLogs', date);
+  console.log(`[FirestoreService] Attempting to delete daily log for user ${userId} on ${date}.`);
   try {
     await deleteDoc(logDocRef);
+    console.log(`[FirestoreService] Successfully deleted daily log for user ${userId} on ${date}.`);
   } catch (error) {
-    console.error(`Error deleting daily log for user ${userId} on ${date}:`, error);
+    console.error(`[FirestoreService] Error deleting daily log for user ${userId} on ${date}:`, error);
     throw new Error('Failed to delete daily log.');
   }
 }
@@ -67,14 +80,16 @@ export async function getAllUserLogs(userId: string): Promise<Map<string, DailyL
   if (!userId) return new Map();
   const logsCollectionRef = collection(db, 'users', userId, 'dailyLogs');
   const logsMap = new Map<string, DailyLog>();
+  console.log(`[FirestoreService] Fetching all logs for user ${userId}.`);
   try {
     const querySnapshot = await getDocs(logsCollectionRef);
     querySnapshot.forEach((doc) => {
       logsMap.set(doc.id, doc.data() as DailyLog);
     });
+    console.log(`[FirestoreService] Found ${logsMap.size} log entries for user ${userId}.`);
     return logsMap;
   } catch (error) {
-    console.error(`Error fetching all logs for user ${userId}:`, error);
+    console.error(`[FirestoreService] Error fetching all logs for user ${userId}:`, error);
     throw new Error('Failed to fetch user logs.');
   }
 }

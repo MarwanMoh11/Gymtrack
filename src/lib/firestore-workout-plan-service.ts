@@ -16,13 +16,14 @@ import { defaultNamedPlans } from '@/data/workout-data';
  */
 export async function getAllUserWorkoutPlans(userId: string): Promise<NamedWorkoutPlan[]> {
   if (!userId) {
+    console.error("[FirestoreService] getAllUserWorkoutPlans called without a userId.");
     throw new Error("User ID is required to fetch workout plans.");
   }
   const plansCollectionRef = collection(db, 'users', userId, 'workoutPlans');
   const querySnapshot = await getDocs(plansCollectionRef);
 
   if (querySnapshot.empty) {
-    console.log(`No plans found for user ${userId}, initializing with defaults.`);
+    console.log(`[FirestoreService] No plans found for user ${userId}, initializing with defaults.`);
     return initializeDefaultPlansForUser(userId);
   }
 
@@ -30,6 +31,7 @@ export async function getAllUserWorkoutPlans(userId: string): Promise<NamedWorko
   querySnapshot.forEach((doc) => {
     plans.push(doc.data() as NamedWorkoutPlan);
   });
+  console.log(`[FirestoreService] Successfully fetched ${plans.length} plans for user ${userId}.`);
   return plans;
 }
 
@@ -40,7 +42,11 @@ export async function getAllUserWorkoutPlans(userId: string): Promise<NamedWorko
  * @param plans The array of plans to save.
  */
 export async function saveAllUserWorkoutPlans(userId: string, plans: NamedWorkoutPlan[]): Promise<void> {
-  if (!userId) return;
+  if (!userId) {
+    console.error("[FirestoreService] saveAllUserWorkoutPlans called without a userId.");
+    return;
+  }
+  console.log(`[FirestoreService] Attempting to save ${plans.length} plans for user ${userId}.`);
   const batch = writeBatch(db);
   const plansCollectionRef = collection(db, 'users', userId, 'workoutPlans');
 
@@ -51,8 +57,9 @@ export async function saveAllUserWorkoutPlans(userId: string, plans: NamedWorkou
 
   try {
     await batch.commit();
+    console.log(`[FirestoreService] Successfully saved all workout plans for user ${userId}.`);
   } catch (error) {
-    console.error(`Error saving all workout plans for user ${userId}:`, error);
+    console.error(`[FirestoreService] Error saving all workout plans for user ${userId}:`, error);
     throw new Error("Failed to save workout plans.");
   }
 }
@@ -63,12 +70,17 @@ export async function saveAllUserWorkoutPlans(userId: string, plans: NamedWorkou
  * @param plan The plan to save.
  */
 export async function saveUserWorkoutPlan(userId: string, plan: NamedWorkoutPlan): Promise<void> {
-    if (!userId) return;
+    if (!userId) {
+      console.error("[FirestoreService] saveUserWorkoutPlan called without a userId.");
+      return;
+    }
+    console.log(`[FirestoreService] Attempting to save plan '${plan.id}' for user ${userId}.`);
     const planDocRef = doc(db, 'users', userId, 'workoutPlans', plan.id);
     try {
         await setDoc(planDocRef, plan);
+        console.log(`[FirestoreService] Successfully saved plan '${plan.id}' for user ${userId}.`);
     } catch (error) {
-        console.error(`Error saving plan ${plan.id} for user ${userId}:`, error);
+        console.error(`[FirestoreService] Error saving plan ${plan.id} for user ${userId}:`, error);
         throw new Error("Failed to save workout plan.");
     }
 }
@@ -83,6 +95,7 @@ export async function saveUserWorkoutPlan(userId: string, plan: NamedWorkoutPlan
  * @returns The array of default plans that were just saved.
  */
 async function initializeDefaultPlansForUser(userId: string): Promise<NamedWorkoutPlan[]> {
+  console.log(`[FirestoreService] Initializing default plans for new user ${userId}.`);
   // For new users, ensure no plan is active so they are directed to the onboarding flow.
   const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
   await saveAllUserWorkoutPlans(userId, plansToSave);
