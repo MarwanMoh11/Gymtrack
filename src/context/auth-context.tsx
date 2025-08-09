@@ -50,50 +50,62 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    // First, check for a redirect result. This is critical for mobile logins.
-    getRedirectResult(auth)
-      .then(async (result) => {
+    let mounted = true;
+    let unsubscribe: (() => void) | undefined;
+
+    (async () => {
+      try {
+        // Keep the UI blocked until we process redirect (important on mobile)
+        setIsProcessingRedirect(true);
+        console.log('[Auth] checking redirect result...');
+        const result = await getRedirectResult(auth);
+        console.log('[Auth] getRedirectResult finished', !!result);
+
         if (result) {
-          // A user signed in or linked a credential via redirect.
           const additionalUserInfo = getAdditionalUserInfo(result);
           if (additionalUserInfo?.isNewUser) {
+            console.log('[Auth] new user from redirect, initializing user data', result.user.uid);
             await initializeUserData(result.user.uid);
-            // No need to invalidate here, onAuthStateChanged will trigger the query
+            await queryClient.invalidateQueries({ queryKey: ['userData', result.user.uid] });
           }
         }
-      })
-      .catch((error) => {
-        console.error("Error processing redirect result:", error);
-      })
-      .finally(() => {
-        // Once the redirect check is complete, we can stop blocking the UI for it.
-        // onAuthStateChanged will now give us the definitive user state.
+      } catch (error) {
+        console.error('[Auth] Error processing redirect result:', error);
+      } finally {
+        // Now that redirect handling is done, allow the rest of the app to proceed.
         setIsProcessingRedirect(false);
-      });
-
-    // onAuthStateChanged listener handles all other auth state changes.
-    const unsubscribe = onAuthStateChanged(auth, async (newUser) => {
-      setUser(newUser);
-      
-      if (!newUser) {
-        queryClient.clear();
-      } else {
-         // The user might already exist, so we fetch their data.
-         // If they don't exist (e.g., brand new user from redirect), this will be null
-         // and the subsequent logic in AppLayout will handle onboarding.
-         const existingData = await getUserData(newUser.uid);
-         if (!existingData) {
-            // This is a crucial step for brand new users, especially after a redirect.
-            await initializeUserData(newUser.uid);
-         }
-         // Invalidate to ensure AppLayout gets the freshest data.
-         await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
       }
 
-      setLoading(false);
-    });
+      // Attach the auth state listener *after* redirect-result processing
+      if (mounted) {
+        unsubscribe = onAuthStateChanged(auth, async (newUser) => {
+          console.log('[Auth] onAuthStateChanged, user:', !!newUser, newUser?.uid);
+          setUser(newUser);
 
-    return () => unsubscribe();
+          if (!newUser) {
+            queryClient.clear();
+          } else {
+            try {
+              const existingData = await getUserData(newUser.uid);
+              if (!existingData) {
+                console.log('[Auth] no user document found, initializing:', newUser.uid);
+                await initializeUserData(newUser.uid);
+              }
+              await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
+            } catch (err) {
+              console.error('[Auth] error fetching/initializing user data:', err);
+            }
+          }
+
+          setLoading(false);
+        });
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      if (unsubscribe) unsubscribe();
+    };
   }, [queryClient]);
 
   const login = (email: string, password: string) => {
