@@ -58,7 +58,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const additionalUserInfo = getAdditionalUserInfo(result);
           if (additionalUserInfo?.isNewUser) {
             await initializeUserData(result.user.uid);
-            await queryClient.invalidateQueries({ queryKey: ['userData', result.user.uid] });
+            // No need to invalidate here, onAuthStateChanged will trigger the query
           }
         }
       })
@@ -78,11 +78,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!newUser) {
         queryClient.clear();
       } else {
-        const existingData = await getUserData(newUser.uid);
-        if (!existingData) {
-          await initializeUserData(newUser.uid);
-          await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
-        }
+         // The user might already exist, so we fetch their data.
+         // If they don't exist (e.g., brand new user from redirect), this will be null
+         // and the subsequent logic in AppLayout will handle onboarding.
+         const existingData = await getUserData(newUser.uid);
+         if (!existingData) {
+            // This is a crucial step for brand new users, especially after a redirect.
+            await initializeUserData(newUser.uid);
+         }
+         // Invalidate to ensure AppLayout gets the freshest data.
+         await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
       }
 
       setLoading(false);
@@ -100,6 +105,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
         if (isMobileDevice()) {
             await signInWithRedirect(auth, provider);
+            // After this, the page will reload, and getRedirectResult will handle the rest.
             return; 
         } else {
             const result = await signInWithPopup(auth, provider);
@@ -151,7 +157,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (providerId === 'password' && password) {
           await reauthenticate(password);
         } else if (providerId === 'google.com') {
-          await reauthenticateWithPopup(currentUser, new GoogleAuthProvider());
+          // For mobile, this might need a redirect flow as well, but popup is standard for desktop re-auth.
+           if (isMobileDevice()) {
+              await reauthenticateWithRedirect(currentUser, new GoogleAuthProvider());
+              return; // App will reload, logic needs to handle post-redirect delete
+           }
+           await reauthenticateWithPopup(currentUser, new GoogleAuthProvider());
         } else {
             if(password) await reauthenticate(password);
             else throw new Error("Re-authentication required.");
@@ -164,6 +175,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.error("Error during account deletion process:", error);
            if (error.code === 'auth/requires-recent-login' && providerId === 'google.com') {
               try {
+                // This re-authenticates and then deletes.
                 await reauthenticateWithPopup(auth.currentUser!, new GoogleAuthProvider());
                 await deleteUser(currentUser);
                 setUser(null);

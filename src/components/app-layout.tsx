@@ -260,9 +260,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 router.replace('/dashboard/today');
             }
         }
-    } else if (!isPublicRoute) {
-        // This is a fallback case for when a user is authenticated but has no user document
-        router.replace('/login');
+    } else if (!isPublicRoute && user) {
+        // This is a fallback case for when a user is authenticated but user document is still loading or missing.
+        // It's possible on the first load after signup/redirect.
+        // The AuthLoadingSkeleton is a safe bet here.
+        console.log("Authenticated user has no user data yet, waiting...")
     }
 
   }, [user, userData, isAuthLoading, isLoadingUserData, isProcessingRedirect, pathname, isPublicRoute, isOnboardingRoute, isPlanCreationRoute, router]);
