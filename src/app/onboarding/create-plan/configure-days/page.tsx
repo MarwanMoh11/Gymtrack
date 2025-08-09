@@ -4,17 +4,13 @@
 import { Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
-import { useAuth } from '@/context/auth-context';
-import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { saveUserData, getUserData } from '@/lib/firestore-workout-plan-service';
+import type { WorkoutDay, NamedWorkoutPlan, UserData } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, WandSparkles } from 'lucide-react';
-import type { WorkoutDay, NamedWorkoutPlan, UserData } from '@/types/workout';
-import { useToast } from '@/hooks/use-toast';
+import { ArrowRight } from 'lucide-react';
 
 const daysOfWeekMap = [
   { name: "Sunday", value: 0 }, { name: "Monday", value: 1 },
@@ -26,9 +22,6 @@ const daysOfWeekMap = [
 function ConfigureDaysComponent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
 
   const planName = searchParams.get('name') || 'My New Plan';
   const planDescription = searchParams.get('description') || '';
@@ -46,53 +39,19 @@ function ConfigureDaysComponent() {
   });
 
   const { fields } = useFieldArray({ control, name: "days" });
-
-  const { data: userData } = useQuery({
-    queryKey: ['userData', user?.uid],
-    queryFn: () => getUserData(user!.uid),
-    enabled: !!user,
-  });
-
-  const mutation = useMutation({
-    mutationFn: (newUserData: UserData) => saveUserData(user!.uid, newUserData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['userData', user?.uid] });
-      toast({
-        title: "Plan Created!",
-        description: "Your new plan is active. Now let's add some exercises.",
-      });
-      router.push('/workout-plan');
-    },
-    onError: () => {
-      toast({ variant: 'destructive', title: 'Error', description: 'Could not create the new plan.' });
-    }
-  });
-
+  
   const onSubmit = (data: { days: Partial<WorkoutDay>[] }) => {
-    if (!userData) return;
-
-    const newPlanId = `custom-plan-${planName.trim().toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
-    const newWorkoutDays: WorkoutDay[] = data.days.map((day, index) => ({
-      id: `custom-day-${newPlanId}-${index}`,
-      dayName: daysOfWeekMap.find(d => d.value === Number(day.mapsToActualDayOfWeek))?.name || `Day ${index + 1}`,
-      title: day.title || `Workout Focus ${index + 1}`,
-      exercises: [],
-      notes: '',
-      mapsToActualDayOfWeek: Number(day.mapsToActualDayOfWeek),
-    }));
-
-    const newPlan: NamedWorkoutPlan = {
-      id: newPlanId,
-      name: planName,
-      description: planDescription,
-      plan: newWorkoutDays,
-      isActive: true,
+    const payload = {
+      planName,
+      planDescription,
+      configuredDays: data.days.map((day, index) => ({
+        dayName: `Day ${index + 1}`,
+        title: day.title || `Workout Focus ${index + 1}`,
+        mapsToActualDayOfWeek: Number(day.mapsToActualDayOfWeek),
+      }))
     };
-
-    const updatedOldPlans = userData.plans.map(p => ({ ...p, isActive: false }));
-    const newUserData = { ...userData, plans: [...updatedOldPlans, newPlan], onboardingStatus: 'completed' as const };
-    
-    mutation.mutate(newUserData);
+    const query = new URLSearchParams({ data: JSON.stringify(payload) });
+    router.push(`/onboarding/create-plan/add-exercises?${query.toString()}`);
   };
   
   const assignedDays = watch('days').map(d => d.mapsToActualDayOfWeek);
@@ -155,9 +114,8 @@ function ConfigureDaysComponent() {
             ))}
           </CardContent>
           <CardFooter className="flex justify-end pt-6">
-            <Button type="submit" disabled={!isValid || mutation.isPending}>
-              {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <WandSparkles className="mr-2 h-4 w-4" />}
-              Create Plan & Add Exercises
+            <Button type="submit" disabled={!isValid}>
+              Next: Add Exercises <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </CardFooter>
         </form>
