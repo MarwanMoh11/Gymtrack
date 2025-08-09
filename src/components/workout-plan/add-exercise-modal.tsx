@@ -1,14 +1,14 @@
 // src/components/workout-plan/add-exercise-modal.tsx
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, PlusCircle, Trash2 } from 'lucide-react';
+import { PlusCircle, Trash2 } from 'lucide-react';
 import type { Exercise, SetData, NewSetData } from '@/types/workout';
 import { ScrollArea } from '../ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
@@ -24,7 +24,6 @@ interface AddExerciseModalProps {
 
 const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
   if (initialData) {
-    console.log('[AddExerciseModal] Initializing state from initialData:', initialData);
     return {
       id: initialData.id,
       name: initialData.name,
@@ -43,7 +42,6 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
       })),
     };
   }
-  console.log('[AddExerciseModal] Initializing new exercise state.');
   return {
     name: '',
     targetWeight: '',
@@ -57,30 +55,24 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
   };
 };
 
-
 export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExercises, dayId, initialData }: AddExerciseModalProps) {
-  // Key change: Initialize state based on initialData directly.
-  // This state is now "local" to each render of the open dialog.
   const [exerciseData, setExerciseData] = useState(() => getInitialExerciseState(initialData));
   const [muscleGroupsInput, setMuscleGroupsInput] = useState(() => (initialData?.muscleGroups || []).join(', '));
   const [searchTerm, setSearchTerm] = useState(() => initialData?.name || '');
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const { toast } = useToast();
   
-  const isEditing = !!initialData;
+  const isEditing = !!(initialData && initialData.id);
 
-  // This effect ensures that if the modal is re-opened with different data, the state updates.
   useEffect(() => {
-      console.log('[AddExerciseModal useEffect] isOpen changed to:', isOpen, 'initialData ID:', initialData?.id);
-      if (isOpen) {
-          const stateToSet = getInitialExerciseState(initialData);
-          setExerciseData(stateToSet);
-          setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
-          setSearchTerm(stateToSet.name || '');
-          setShowAutocomplete(false); // Reset autocomplete on open
-      }
+    if (isOpen) {
+      const stateToSet = getInitialExerciseState(initialData);
+      setExerciseData(stateToSet);
+      setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
+      setSearchTerm(stateToSet.name || '');
+      setShowAutocomplete(false);
+    }
   }, [isOpen, initialData]);
-
 
   const filteredExercises = useMemo(() => {
     if (!searchTerm || isEditing) return [];
@@ -96,10 +88,12 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleSetChange = (index: number, field: keyof NewSetData, value: string) => {
-    const newSets = [...exerciseData.sets];
-    // @ts-ignore
-    newSets[index][field] = value;
-    setExerciseData(prev => ({ ...prev, sets: newSets }));
+    setExerciseData(prev => {
+      const newSets = [...prev.sets];
+      // @ts-ignore
+      newSets[index][field] = value;
+      return { ...prev, sets: newSets };
+    });
   };
 
   const addSet = () => {
@@ -118,9 +112,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleAutocompleteSelect = (selectedExercise: Exercise) => {
-    console.log('[AddExerciseModal] Autocomplete selected:', selectedExercise.name);
-    // When selecting from autocomplete, we reset the state based on the template,
-    // but ensure it's treated as a "new" exercise by clearing the ID.
     const newState = getInitialExerciseState(selectedExercise);
     setExerciseData({ ...newState, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
@@ -129,7 +120,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleSubmit = () => {
-    console.log('[AddExerciseModal] handleSubmit called.');
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
@@ -140,31 +130,25 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     }
 
     const finalMuscleGroups = muscleGroupsInput.split(',').map(s => s.trim()).filter(s => s);
-    
-    // Use the initialData ID if editing, otherwise generate a new one.
-    const newExerciseId = initialData?.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    const newExerciseId = exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     
     const exerciseToSave: Exercise = {
       ...exerciseData,
       id: newExerciseId,
       muscleGroups: finalMuscleGroups,
       sets: exerciseData.sets.map((s, index) => ({
-        // Preserve existing set IDs if they exist (during edit), otherwise generate new ones.
-        id: (initialData?.sets[index]?.id && s.id.startsWith('set-')) ? initialData.sets[index].id : s.id,
+        id: s.id.startsWith('set-') ? `set-${newExerciseId}-${index}` : s.id,
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
         unit: s.unit,
         exerciseId: newExerciseId,
       })),
     };
-    console.log('[AddExerciseModal] Saving exercise:', exerciseToSave);
     onSave(exerciseToSave);
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => {
-      onOpenChange(open);
-    }}>
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Edit Exercise' : 'Add New Exercise to Plan'}</DialogTitle>
@@ -192,7 +176,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
                     <div
                       key={ex.id}
                       className="p-2 hover:bg-accent cursor-pointer"
-                      onMouseDown={() => handleAutocompleteSelect(ex)} // use onMouseDown to fire before onBlur
+                      onMouseDown={() => handleAutocompleteSelect(ex)}
                     >
                       {ex.name}
                     </div>
