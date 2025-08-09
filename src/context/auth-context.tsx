@@ -57,14 +57,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       try {
         // Keep the UI blocked until we process redirect (important on mobile)
         setIsProcessingRedirect(true);
-        console.log('[Auth] checking redirect result...');
         const result = await getRedirectResult(auth);
-        console.log('[Auth] getRedirectResult finished', !!result);
 
         if (result) {
           const additionalUserInfo = getAdditionalUserInfo(result);
           if (additionalUserInfo?.isNewUser) {
-            console.log('[Auth] new user from redirect, initializing user data', result.user.uid);
             await initializeUserData(result.user.uid);
             await queryClient.invalidateQueries({ queryKey: ['userData', result.user.uid] });
           }
@@ -79,7 +76,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // Attach the auth state listener *after* redirect-result processing
       if (mounted) {
         unsubscribe = onAuthStateChanged(auth, async (newUser) => {
-          console.log('[Auth] onAuthStateChanged, user:', !!newUser, newUser?.uid);
           setUser(newUser);
 
           if (!newUser) {
@@ -88,7 +84,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             try {
               const existingData = await getUserData(newUser.uid);
               if (!existingData) {
-                console.log('[Auth] no user document found, initializing:', newUser.uid);
                 await initializeUserData(newUser.uid);
               }
               await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });

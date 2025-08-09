@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -45,12 +45,23 @@ const signupSchema = z
 
 type SignupFormValues = z.infer<typeof signupSchema>;
 
+const isMobileDevice = () => {
+    if (typeof window === 'undefined') return false;
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
+
 export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const { toast } = useToast();
   const { signup, signInWithGoogle } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    setIsMobile(isMobileDevice());
+  }, []);
 
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
@@ -78,6 +89,14 @@ export default function SignupPage() {
   };
   
   const handleGoogleSignIn = async () => {
+    if (isMobile) {
+        toast({
+            variant: 'destructive',
+            title: 'Temporarily Disabled',
+            description: 'Google Sign-In is temporarily disabled on mobile browsers. Please use email and password.',
+        });
+        return;
+    }
     setIsGoogleLoading(true);
     try {
         await signInWithGoogle();
@@ -190,7 +209,13 @@ export default function SignupPage() {
             </div>
         </div>
 
-        <Button variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={isLoading || isGoogleLoading}>
+        <Button 
+          variant="outline" 
+          className="w-full" 
+          onClick={handleGoogleSignIn} 
+          disabled={isLoading || isGoogleLoading || isMobile}
+          title={isMobile ? "Google Sign-In is temporarily disabled on mobile." : "Sign up with Google"}
+        >
              {isGoogleLoading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
