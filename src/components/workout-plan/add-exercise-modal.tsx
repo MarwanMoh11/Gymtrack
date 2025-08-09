@@ -22,9 +22,8 @@ interface AddExerciseModalProps {
   initialData?: Exercise | null; // For editing
 }
 
-const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
+const getInitialExerciseState = (initialData?: Exercise | null, defaultUnit: 'reps' | 's' | 'min' = 'reps'): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
   if (initialData) {
-     console.log('[AddExerciseModal] getInitial: Initializing with existing data:', initialData);
     return {
       id: initialData.id,
       name: initialData.name,
@@ -35,15 +34,16 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
       muscleGroups: initialData.muscleGroups || [],
       isCore: initialData.isCore || false,
       unit: initialData.unit || 'reps',
-      sets: initialData.sets.map((s, index) => ({
-        id: s.id || `set-${Date.now()}-${index}`,
-        targetReps: String(s.targetReps),
-        targetWeight: s.targetWeight || '',
-        unit: s.unit || initialData.unit || 'reps',
-      })),
+      sets: initialData.sets.length > 0
+        ? initialData.sets.map((s, index) => ({
+            id: s.id || `set-${Date.now()}-${index}`,
+            targetReps: String(s.targetReps),
+            targetWeight: s.targetWeight || '',
+            unit: s.unit || initialData.unit || 'reps',
+          }))
+        : [{ id: `set-${Date.now()}-0`, targetReps: '', targetWeight: '', unit: initialData.unit || 'reps' }],
     };
   }
-   console.log('[AddExerciseModal] getInitial: Initializing with new exercise state.');
   return {
     name: '',
     targetWeight: '',
@@ -66,20 +66,16 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
+  // This effect correctly resets the modal's state whenever it's opened or the data changes.
   useEffect(() => {
-    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen, 'initialData changed:', initialData);
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
       setShowAutocomplete(false);
-      console.log('[AddExerciseModal] State has been reset inside useEffect.', stateToSet);
     }
   }, [isOpen, initialData]);
-  
-  console.log('[AddExerciseModal] Rendering. isOpen:', isOpen, 'initialData prop:', initialData);
-  console.log('[AddExerciseModal] Internal component state `exerciseData`:', exerciseData);
 
   const filteredExercises = useMemo(() => {
     if (!searchTerm || isEditing) return [];
@@ -127,7 +123,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleSubmit = () => {
-    console.log('[AddExerciseModal] handleSubmit called. Current exerciseData:', exerciseData);
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
@@ -152,7 +147,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         exerciseId: newExerciseId,
       })),
     };
-    console.log('[AddExerciseModal] Calling onSave with:', exerciseToSave);
     onSave(exerciseToSave);
   };
 

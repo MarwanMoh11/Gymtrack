@@ -46,7 +46,7 @@ export default function WorkoutPlanPage() {
   
   const [isExerciseModalOpen, setIsExerciseModalOpen] = useState(false);
   const [dayIdForModal, setDayIdForModal] = useState<string | null>(null);
-  const [exerciseToEdit, setExerciseToEdit] = useState<Exercise | null | undefined>(undefined);
+  const [exerciseToEdit, setExerciseToEdit] = useState<Exercise | null>(null);
   
   const [isNewPlanDialogVisible, setIsNewPlanDialogVisible] = useState(false);
   const [newPlanNameInput, setNewPlanNameInput] = useState('');
@@ -99,11 +99,9 @@ export default function WorkoutPlanPage() {
   });
   
   const openExerciseModal = useCallback((dayId: string, exercise: Exercise | null) => {
-    console.log('[WorkoutPlanPage] openExerciseModal called.', { dayId, exercise });
     setDayIdForModal(dayId);
-    setExerciseToEdit(exercise);
+    setExerciseToEdit(exercise); // This will be null for new, or an object for edit
     setIsExerciseModalOpen(true);
-    console.log('[WorkoutPlanPage] State after setting for modal opening:', { dayIdForModal: dayId, exerciseToEdit: exercise, isExerciseModalOpen: true });
   }, []);
 
   const handleSetPlanActive = useCallback((planId: string) => {
@@ -179,25 +177,17 @@ export default function WorkoutPlanPage() {
   }, [initialActivePlanForEdit, toast]);
   
   const handleSaveExerciseToActivePlan = useCallback((dayId: string, savedExercise: Exercise) => {
-     console.log('[WorkoutPlanPage] handleSaveExerciseToActivePlan called.', { dayId, savedExercise });
      setEditableActivePlan(currentPlan => {
-       if (!currentPlan) {
-         console.error("[WorkoutPlanPage] Save Error: currentPlan is null.");
-         return null;
-       }
+       if (!currentPlan) return null;
        return produce(currentPlan, draft => {
          const day = draft.find(d => d.id === dayId);
          if (day) {
            const existingExerciseIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
            if (existingExerciseIndex !== -1) {
-             console.log(`[WorkoutPlanPage] Updating existing exercise at index ${existingExerciseIndex}`);
              day.exercises[existingExerciseIndex] = savedExercise;
            } else { 
-             console.log('[WorkoutPlanPage] Adding new exercise to day.');
              day.exercises.push(savedExercise);
            }
-         } else {
-            console.error(`[WorkoutPlanPage] Save Error: Could not find day with id ${dayId}`);
          }
        });
      });
@@ -265,8 +255,6 @@ export default function WorkoutPlanPage() {
   if (isLoadingUserData || isLoadingAllExercises) {
     return <LoadingWorkoutPlanPage />;
   }
-  
-  console.log('[WorkoutPlanPage] Rendering. Modal state:', { isExerciseModalOpen, dayIdForModal, exerciseToEdit, allExercisesExist: !!allExercisesForModal });
 
   return (
     <div className="container mx-auto py-8 px-4 md:px-6">
@@ -464,16 +452,18 @@ export default function WorkoutPlanPage() {
         </section>
       )}
       
-      {isExerciseModalOpen && dayIdForModal && allExercisesForModal && userData && (
-        <AddExerciseModal
-          isOpen={isExerciseModalOpen}
-          onOpenChange={setIsExerciseModalOpen}
-          onSave={(exercise) => handleSaveExerciseToActivePlan(dayIdForModal, exercise)}
-          allExercises={allExercisesForModal}
-          dayId={dayIdForModal}
-          initialData={exerciseToEdit}
-        />
-      )}
+      <AddExerciseModal
+        isOpen={isExerciseModalOpen}
+        onOpenChange={setIsExerciseModalOpen}
+        onSave={(exercise) => {
+          if (dayIdForModal) {
+            handleSaveExerciseToActivePlan(dayIdForModal, exercise);
+          }
+        }}
+        allExercises={allExercisesForModal || []}
+        dayId={dayIdForModal!}
+        initialData={exerciseToEdit}
+      />
 
       <Dialog open={isNewPlanDialogVisible} onOpenChange={setIsNewPlanDialogVisible}>
         <DialogContent>
