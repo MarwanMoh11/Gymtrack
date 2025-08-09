@@ -1,7 +1,7 @@
 // src/lib/firestore-workout-plan-service.ts
 'use server';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc, collection, writeBatch, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import type { NamedWorkoutPlan, UserData } from '@/types/workout';
 import { defaultNamedPlans } from '@/data/workout-data';
 
@@ -13,11 +13,16 @@ import { defaultNamedPlans } from '@/data/workout-data';
 export async function getUserData(userId: string): Promise<UserData | null> {
     if (!userId) return null;
     const userDocRef = doc(db, 'users', userId);
-    const docSnap = await getDoc(userDocRef);
-    if (docSnap.exists()) {
-        return docSnap.data() as UserData;
+    try {
+        const docSnap = await getDoc(userDocRef);
+        if (docSnap.exists()) {
+            return docSnap.data() as UserData;
+        }
+        return null;
+    } catch (error) {
+        console.error("Error getting user data:", error);
+        throw new Error("Failed to fetch user data.");
     }
-    return null;
 }
 
 /**
@@ -35,8 +40,8 @@ export async function initializeUserData(userId: string): Promise<UserData> {
     const userData: UserData = {
         id: userId,
         onboardingStatus: 'needs_plan_selection',
-        plans: defaultNamedPlans.map(p => ({ ...p, isActive: false })),
-        // Initialize other user-specific fields here if needed in the future
+        // Set the first plan as active by default
+        plans: defaultNamedPlans.map((p, index) => ({ ...p, isActive: index === 0 })),
     };
 
     const userDocRef = doc(db, 'users', userId);
@@ -46,8 +51,8 @@ export async function initializeUserData(userId: string): Promise<UserData> {
 }
 
 /**
- * Saves a single workout plan (or the entire user data object) to Firestore.
- * This is now the primary way to update a user's plans or onboarding status.
+ * Saves the entire user data object to Firestore.
+ * This is the primary way to update a user's plans or onboarding status.
  * @param userId The ID of the user.
  * @param userData The full UserData object to save.
  */
@@ -57,6 +62,6 @@ export async function saveUserData(userId: string, userData: UserData): Promise<
         throw new Error("User ID is required to save data.");
     }
     const userDocRef = doc(db, 'users', userId);
-    await setDoc(userDocRef, userData, { merge: true }); // Use merge to avoid overwriting other fields unintentionally
+    await setDoc(userDocRef, userData, { merge: true });
     console.log(`[PlanService] Successfully saved user data for ${userId}.`);
 }

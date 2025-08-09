@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
 import { getUserData, saveUserData } from '@/lib/firestore-workout-plan-service';
 import type { NamedWorkoutPlan, UserData } from '@/types/workout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CheckCircle, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -45,27 +45,30 @@ export default function ChoosePlanPage() {
 
   const { data: userData, isLoading: isLoadingUserData } = useQuery({
     queryKey: ['userData', user?.uid],
-    queryFn: () => getUserData(user!.uid),
+    queryFn: () => {
+      if (!user) throw new Error("User not authenticated");
+      return getUserData(user.uid);
+    },
     enabled: !!user,
+    // Set a longer stale time as this data doesn't change often unless user modifies plans
+    staleTime: 1000 * 60 * 5, 
   });
 
   const mutation = useMutation({
-    mutationFn: (newUserData: UserData) => saveUserData(user!.uid, newUserData),
+    mutationFn: (newUserData: UserData) => {
+      if (!user) throw new Error("User not authenticated for mutation");
+      return saveUserData(user.uid, newUserData);
+    },
     onSuccess: (data, newUserData) => {
-        console.log("[ChoosePlanPage] 🟢 Mutation SUCCEEDED.");
         // Manually update the query cache with the new user data.
         queryClient.setQueryData(['userData', user?.uid], newUserData);
-        
         toast({
             title: "Plan Activated!",
             description: "You're all set. Let's get started with your first workout.",
         });
-        
-        console.log("[ChoosePlanPage] Redirecting to /dashboard/today...");
         router.push('/dashboard/today');
     },
     onError: (error) => {
-      console.error("[ChoosePlanPage] 🔴 Mutation FAILED:", error);
       toast({ variant: 'destructive', title: 'Error', description: 'Could not activate the selected plan. Please try again.' });
     }
   });
@@ -76,7 +79,6 @@ export default function ChoosePlanPage() {
   
   const handleConfirmSelection = () => {
     if (!selectedPlanId || !user || !userData) {
-        console.error("[ChoosePlanPage] 🔴 Cannot confirm: missing data.", { selectedPlanId, user, userData });
         return;
     }
 

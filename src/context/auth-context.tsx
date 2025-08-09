@@ -29,49 +29,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    console.log('[AuthContext] Setting up onAuthStateChanged listener.');
     const unsubscribe = onAuthStateChanged(auth, async (newUser) => {
-      console.log(`[AuthContext] onAuthStateChanged triggered. User: ${newUser?.uid || 'null'}.`);
+      setUser(newUser);
       
-      if (newUser) {
-        // Check if user data exists in Firestore.
-        const userData = await getUserData(newUser.uid);
-        if (!userData) {
-          console.log('[AuthContext] New user detected or missing data. Initializing user data in Firestore.');
-          await initializeUserData(newUser.uid);
-          // After initializing, invalidate to ensure AppLayout re-fetches the new user data.
-          await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
-        }
-      } else {
-        console.log('[AuthContext] User logged out. Clearing all user-specific query data.');
-        // Clear all queries upon logout to prevent stale data issues.
+      if (!newUser) {
+         // Clear all queries upon logout to prevent stale data issues.
         queryClient.clear();
       }
 
-      setUser(newUser);
-      console.log('[AuthContext] Auth loading state set to false.');
       setLoading(false);
     });
 
-    return () => {
-      console.log('[AuthContext] Cleaning up onAuthStateChanged listener.');
-      unsubscribe();
-    }
+    return () => unsubscribe();
   }, [queryClient]);
 
   const login = (email: string, password: string) => {
-    console.log('[AuthContext] Attempting login for email:', email);
     return signInWithEmailAndPassword(auth, email, password);
   };
 
   const signup = async (email: string, password: string) => {
-    console.log('[AuthContext] Attempting signup for email:', email);
-    // The onAuthStateChanged listener now handles the user data initialization.
-    return createUserWithEmailAndPassword(auth, email, password);
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    // After creating the user in Auth, immediately create their data document in Firestore.
+    await initializeUserData(userCredential.user.uid);
+    // Invalidate the query to ensure the new user data is fetched immediately
+    await queryClient.invalidateQueries({ queryKey: ['userData', userCredential.user.uid] });
+    return userCredential;
   };
 
   const logout = async () => {
-    console.log('[AuthContext] Attempting logout for user:', user?.uid);
     await signOut(auth);
   };
 

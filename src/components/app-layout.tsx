@@ -1,8 +1,7 @@
-
 // src/components/app-layout.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogOut } from 'lucide-react';
@@ -23,9 +22,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Logo } from '@/components/icons/logo';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { getUserData } from '@/lib/firestore-workout-plan-service';
-import type { UserData } from '@/types/workout';
 
 const todayNavItem = {
   href: '/dashboard/today',
@@ -199,53 +197,48 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isPublicRoute = publicRoutes.includes(pathname);
   const isOnboardingRoute = onboardingRoutes.includes(pathname);
 
-  // Use a single query for all user data, including plans and onboarding status.
   const { data: userData, isLoading: isLoadingUserData } = useQuery({
     queryKey: ['userData', user?.uid],
     queryFn: () => getUserData(user!.uid),
-    enabled: !!user, // Only fetch if the user object is available
+    enabled: !!user,
   });
 
   useEffect(() => {
-    console.log('[AppLayout EFFECT] Running routing logic...');
-
     if (isAuthLoading) {
-      console.log('[AppLayout] Auth is loading. No routing decisions made.');
-      return;
+      return; 
     }
 
     if (!user) {
-      // If user is not logged in, redirect to login page unless they are already there.
       if (!isPublicRoute) {
-        console.log(`[AppLayout] No user, not on public route. Redirecting from ${pathname} to /login.`);
         router.replace('/login');
       }
       return;
     }
 
-    // From here, user is logged in.
     if (isLoadingUserData) {
-      console.log('[AppLayout] User is logged in, but their data is loading. Waiting.');
-      return;
+        return;
     }
-
-    // Now we have the user and their data (or lack thereof).
-    const onboardingStatus = userData?.onboardingStatus;
     
-    if (onboardingStatus === 'needs_plan_selection') {
-      if (!isOnboardingRoute) {
-        console.log(`[AppLayout] User needs onboarding. Redirecting from ${pathname} to /onboarding/welcome.`);
-        router.replace('/onboarding/welcome');
-      }
-    } else if (onboardingStatus === 'completed') {
-      if (isPublicRoute || isOnboardingRoute) {
-        console.log(`[AppLayout] User has completed onboarding but is on a public/onboarding route. Redirecting from ${pathname} to /dashboard/today.`);
-        router.replace('/dashboard/today');
-      }
+    // Once user and their data are loaded, perform routing logic.
+    if (userData) {
+        if (userData.onboardingStatus === 'needs_plan_selection') {
+            if (!isOnboardingRoute) {
+                router.replace('/onboarding/welcome');
+            }
+        } else if (userData.onboardingStatus === 'completed') {
+            if (isPublicRoute || isOnboardingRoute) {
+                router.replace('/dashboard/today');
+            }
+        }
+    } else if (!isPublicRoute) {
+        // This case can happen if the user doc creation is delayed.
+        // It's safer to redirect to login if no user data is found for a logged-in user on a protected route.
+        // The AuthContext also tries to initialize data, so this is a fallback.
+        router.replace('/login');
     }
-  }, [user, isAuthLoading, isLoadingUserData, userData, pathname, isPublicRoute, isOnboardingRoute, router]);
-  
 
+  }, [user, userData, isAuthLoading, isLoadingUserData, pathname, isPublicRoute, isOnboardingRoute, router]);
+  
   // --- Render Logic ---
   const isLoading = isAuthLoading || (!!user && isLoadingUserData);
   
@@ -253,25 +246,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return <AuthLoadingSkeleton />;
   }
 
-  if (user) {
-     if (!userData) {
-         // This state can happen briefly after signup while the user doc is being created.
-         // Showing the skeleton prevents content flashing.
-         return <AuthLoadingSkeleton />;
+  if (user && userData) {
+     if (userData.onboardingStatus === 'needs_plan_selection') {
+         // Allow rendering onboarding routes if user needs it
+         return isOnboardingRoute ? <>{children}</> : <AuthLoadingSkeleton />;
      }
-     if (userData.onboardingStatus === 'needs_plan_selection' && isOnboardingRoute) {
-         return <>{children}</>;
+     if (userData.onboardingStatus === 'completed') {
+        // If onboarding is done, show authenticated layout unless on a public/onboarding route (redirect is pending)
+        return isPublicRoute || isOnboardingRoute ? <AuthLoadingSkeleton /> : <AuthenticatedLayout>{children}</AuthenticatedLayout>;
      }
-     if (userData.onboardingStatus === 'completed' && !isOnboardingRoute) {
-        return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
-     }
-     // If logic above hasn't decided, it means a redirect is pending.
-     // Show the skeleton to prevent layout flashes during the redirect.
-     return <AuthLoadingSkeleton />;
   }
   
   // If no user, only render public routes.
-  if (isPublicRoute) {
+  if (!user && isPublicRoute) {
     return <PublicLayout>{children}</PublicLayout>;
   }
 
