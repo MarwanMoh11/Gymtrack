@@ -2,7 +2,7 @@
 // src/app/onboarding/create-plan/add-exercises/page.tsx
 'use client';
 
-import { Suspense, useState, useMemo, useCallback, useEffect } from 'react';
+import { Suspense, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
@@ -81,7 +81,7 @@ function AddExercisesComponent() {
     }
   });
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (planDetails && workoutPlan.length === 0) {
       const { configuredDays } = planDetails;
       const initialPlan = configuredDays.map((day: ConfiguredDay, index: number) => ({
@@ -238,16 +238,14 @@ function AddExercisesComponent() {
         </CardFooter>
       </Card>
       
-      {allExercises && (
-        <AddExerciseModal
-            isOpen={isExerciseModalOpen}
-            onOpenChange={setIsExerciseModalOpen}
-            onSave={handleSaveExercise}
-            allExercises={allExercises}
-            dayId={dayIdForModal}
-            initialData={exerciseToEdit}
-        />
-      )}
+      <AddExerciseModal
+          isOpen={isExerciseModalOpen}
+          onOpenChange={setIsExerciseModalOpen}
+          onSave={handleSaveExercise}
+          allExercises={allExercises || []}
+          dayId={dayIdForModal}
+          initialData={exerciseToEdit}
+      />
     </div>
   );
 }

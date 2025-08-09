@@ -80,7 +80,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     }
   }, [isOpen, initialData]);
 
-
   const filteredExercises = useMemo(() => {
     if (!searchTerm) return [];
     return allExercises.filter(ex => ex.name.toLowerCase().includes(searchTerm.toLowerCase()));
