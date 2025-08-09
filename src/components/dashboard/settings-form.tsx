@@ -15,6 +15,14 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, User, Palette, ShieldAlert, LogOut, Trash2 } from 'lucide-react';
 import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -25,7 +33,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Select,
   SelectContent,
@@ -44,6 +52,7 @@ export default function SettingsForm() {
   const { user, updateProfile, reauthenticate, deleteAccount } = useAuth();
   const { toast } = useToast();
   const { setTheme, theme } = useTheme();
+  const queryClient = useQueryClient();
 
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
@@ -69,6 +78,7 @@ export default function SettingsForm() {
     },
     onSuccess: () => {
         toast({ title: 'Profile Updated', description: 'Your profile information has been successfully updated.' });
+        queryClient.invalidateQueries({ queryKey: ['userData', user?.uid] });
     },
     onError: (error: any) => {
         toast({ variant: 'destructive', title: 'Update Failed', description: error.message || "An unexpected error occurred." });
@@ -143,17 +153,19 @@ export default function SettingsForm() {
                         </Button>
                     </div>
 
-                    <div className="space-y-1">
-                        <Label htmlFor="displayName">Display Name</Label>
-                        <Controller
-                            name="displayName"
-                            control={form.control}
-                            render={({ field }) => (
-                                <Input id="displayName" {...field} disabled={isProfileLoading} />
-                            )}
+                    <FormField
+                        control={form.control}
+                        name="displayName"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Display Name</FormLabel>
+                                <FormControl>
+                                    <Input id="displayName" {...field} disabled={isProfileLoading} />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
                         />
-                        {form.formState.errors.displayName && <p className="text-sm text-destructive mt-1">{form.formState.errors.displayName.message}</p>}
-                    </div>
                 </CardContent>
                 <CardFooter className="border-t px-6 py-4 flex justify-end">
                     <Button type="submit" disabled={isProfileLoading}>
