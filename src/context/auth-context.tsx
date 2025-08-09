@@ -30,21 +30,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     console.log('[AuthContext] Setting up onAuthStateChanged listener.');
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log('[AuthContext] onAuthStateChanged triggered. User:', user?.uid || 'null');
-      setUser(user);
-      if (user) {
-        // This is a good place to ensure plans are initialized for a new user if they don't exist.
-        // We can check localStorage here.
-        const plansExist = localStorage.getItem('gymtrack_workout_plans');
-        if (!plansExist) {
-          console.log('[AuthContext] No plans found in localStorage for new/logged-in user. Initializing default plans.');
-          await initializeDefaultPlansForUser();
-        }
-      } else {
-        console.log('[AuthContext] User logged out. Clearing query cache.');
+    const unsubscribe = onAuthStateChanged(auth, async (newUser) => {
+      const isNewUser = newUser && newUser.metadata.creationTime === newUser.metadata.lastSignInTime;
+      console.log(`[AuthContext] onAuthStateChanged triggered. User: ${newUser?.uid || 'null'}. Is new user: ${isNewUser}`);
+
+      setUser(newUser);
+
+      if (isNewUser) {
+        console.log('[AuthContext] New user detected. Initializing default plans.');
+        await initializeDefaultPlansForUser();
+        // After initializing, we should refetch the plans query to ensure the app has the latest state.
+        await queryClient.invalidateQueries({ queryKey: ['workoutPlans'] });
+      }
+
+      if (!newUser) {
+        console.log('[AuthContext] User logged out. Clearing all query data.');
+        // Clearing the entire cache on logout is safe and ensures no stale data for the next user.
         queryClient.clear();
       }
+      
       console.log('[AuthContext] Auth loading state set to false.');
       setLoading(false);
     });

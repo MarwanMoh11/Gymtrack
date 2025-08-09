@@ -198,18 +198,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isOnboardingRoute = onboardingRoutes.includes(pathname);
 
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans', user?.uid], // Use user ID to refetch on user change
-    queryFn: () => {
-      console.log(`[AppLayout] Querying workout plans for user: ${user?.uid || 'none'}`);
-      return getAllUserWorkoutPlans();
-    },
-    // We want this to run whenever the user object changes, but not if there's no user.
-    enabled: !isAuthLoading, 
+    queryKey: ['workoutPlans'],
+    queryFn: getAllUserWorkoutPlans,
+    // This query runs as soon as the app loads, but its result is only
+    // relevant for routing *after* auth state is determined.
+    enabled: true, 
   });
   
   useEffect(() => {
     console.log('[AppLayout EFFECT] Running effect, dependencies changed.');
-    const hasPlans = allPlans && allPlans.length > 0;
+    const hasPlans = allPlans !== null && allPlans.length > 0;
     const hasActivePlan = allPlans?.some(p => p.isActive);
 
     console.table({
@@ -271,18 +269,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-      if(isOnboardingRoute) {
+      // If user is logged in but has no plans loaded yet, they need to go through onboarding.
+      // This is the key state for a brand new user after signup.
+      if (allPlans === null && !isOnboardingRoute) {
+         console.log('[AppLayout RENDER] User exists, but no plans in storage. Redirecting to onboarding.');
+         // The useEffect will handle the redirect, show loading in the meantime.
+         return <AuthLoadingSkeleton />;
+      }
+      
+      // If they are on an onboarding route, let them be there.
+      if (isOnboardingRoute) {
         console.log('[AppLayout RENDER] User is on onboarding route, rendering children.');
         return <>{children}</>;
       }
+
+      // If they have an active plan, they are fully set up.
       if(allPlans?.some(p=>p.isActive)){
         console.log('[AppLayout RENDER] User is authenticated with active plan, showing AuthenticatedLayout.');
         return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
       }
-      // This case handles when user is logged in, plans are loaded, but no active plan.
-      // The useEffect will redirect them, but we show a loading screen in the meantime.
-      console.log('[AppLayout RENDER] User authenticated, but no active plan state. Showing loading skeleton before redirect.');
-      return <AuthLoadingSkeleton />;
+
+      // This case handles a logged-in user who has plans, but none are active.
+      // The useEffect will redirect them to onboarding.
+       console.log('[AppLayout RENDER] User authenticated, but no active plan state. Showing loading skeleton before redirect.');
+       return <AuthLoadingSkeleton />;
   }
   
   if (!user && isPublicRoute) {

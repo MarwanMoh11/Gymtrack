@@ -18,6 +18,7 @@ export async function initializeDefaultPlansForUser(): Promise<void> {
     console.log('[PlanService] Cannot initialize on server. Aborting.');
     return;
   }
+  // This ensures no plan is active by default for a new user
   const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
   await saveAllUserWorkoutPlans(plansToSave);
   console.log('[PlanService] Default plans have been initialized in localStorage.');
@@ -25,22 +26,21 @@ export async function initializeDefaultPlansForUser(): Promise<void> {
 
 /**
  * Fetches all workout plans from localStorage.
- * If no plans are found, it initializes them with the default plans.
- * @returns A promise that resolves to an array of NamedWorkoutPlan.
+ * If no plans are found, it returns null, indicating that initialization is needed.
+ * @returns A promise that resolves to an array of NamedWorkoutPlan or null.
  */
-export async function getAllUserWorkoutPlans(): Promise<NamedWorkoutPlan[]> {
+export async function getAllUserWorkoutPlans(): Promise<NamedWorkoutPlan[] | null> {
   console.log('[PlanService] Getting all workout plans from localStorage.');
   if (typeof window === 'undefined') {
-    console.log('[PlanService] SSR context: returning a copy of default plans.');
-    return JSON.parse(JSON.stringify(defaultNamedPlans.map(p => ({ ...p, isActive: false }))));
+    console.warn('[PlanService] SSR context: cannot access localStorage. Returning null.');
+    return null;
   }
 
   const plansJson = window.localStorage.getItem(WORKOUT_PLANS_STORAGE_KEY);
 
   if (!plansJson) {
-    console.log('[PlanService] No plans found in localStorage, returning default set.');
-    // Don't save here, let the auth context handler do it.
-    return JSON.parse(JSON.stringify(defaultNamedPlans.map(p => ({ ...p, isActive: false }))));
+    console.log('[PlanService] No plans found in localStorage.');
+    return null;
   }
 
   try {
@@ -48,8 +48,8 @@ export async function getAllUserWorkoutPlans(): Promise<NamedWorkoutPlan[]> {
     console.log(`[PlanService] Successfully fetched ${plans.length} plans from localStorage.`);
     return plans;
   } catch (error) {
-    console.error('[PlanService] Error parsing plans from localStorage, returning defaults:', error);
-    return JSON.parse(JSON.stringify(defaultNamedPlans.map(p => ({ ...p, isActive: false }))));
+    console.error('[PlanService] Error parsing plans from localStorage:', error);
+    return null;
   }
 }
 
@@ -80,7 +80,7 @@ export async function saveAllUserWorkoutPlans(plans: NamedWorkoutPlan[]): Promis
 export async function saveUserWorkoutPlan(plan: NamedWorkoutPlan): Promise<void> {
     console.log(`[PlanService] Attempting to save single plan '${plan.id}'.`);
     try {
-        const allPlans = await getAllUserWorkoutPlans();
+        const allPlans = (await getAllUserWorkoutPlans()) || [];
         const planIndex = allPlans.findIndex(p => p.id === plan.id);
 
         if (planIndex > -1) {
