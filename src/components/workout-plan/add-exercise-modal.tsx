@@ -66,7 +66,6 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   
   const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
-  // This effect correctly resets the modal's state whenever it's opened or the data changes.
   useEffect(() => {
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
@@ -93,8 +92,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const handleSetChange = (index: number, field: keyof NewSetData, value: string) => {
     setExerciseData(prev => {
       const newSets = [...prev.sets];
-      // @ts-ignore
-      newSets[index][field] = value;
+      (newSets[index] as any)[field] = value;
       return { ...prev, sets: newSets };
     });
   };
@@ -113,14 +111,15 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     }
     setExerciseData(prev => ({ ...prev, sets: prev.sets.filter((_, i) => i !== index) }));
   };
-
-  const handleAutocompleteSelect = (selectedExercise: Exercise) => {
-    const newState = getInitialExerciseState(selectedExercise);
-    setExerciseData({ ...newState, id: undefined }); 
+  
+  const handleAutocompleteSelect = useCallback((selectedExercise: Exercise) => {
+    const stateToSet = getInitialExerciseState(selectedExercise);
+    // We don't want to copy the ID, as this is a new exercise being added to the plan
+    setExerciseData({ ...stateToSet, id: undefined }); 
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
-  };
+  }, []);
 
   const handleSubmit = () => {
     if (!exerciseData.name.trim()) {
@@ -155,7 +154,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Edit Exercise' : 'Add New Exercise to Plan'}</DialogTitle>
-          <DialogDescription>Define the details for the exercise.</DialogDescription>
+          <DialogDescription>Define the details for the exercise. You can search for existing exercises to pre-fill details.</DialogDescription>
         </DialogHeader>
         <ScrollArea className="flex-grow pr-6 -mr-6 pl-1">
           <div className="space-y-4 py-4 pr-1">
