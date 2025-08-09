@@ -8,6 +8,9 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  GoogleAuthProvider,
+  signInWithPopup,
+  getAdditionalUserInfo
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,6 +21,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<any>;
   signup: (email: string, password: string) => Promise<any>;
+  signInWithGoogle: () => Promise<any>;
   logout: () => Promise<void>;
 }
 
@@ -33,8 +37,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(newUser);
       
       if (!newUser) {
-         // Clear all queries upon logout to prevent stale data issues.
         queryClient.clear();
+      } else {
+        // Preemptively check if user data exists when auth state changes
+        const existingData = await getUserData(newUser.uid);
+        if (!existingData) {
+          // This ensures that even for Google sign-ins, the user doc gets created
+          await initializeUserData(newUser.uid);
+          await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
+        }
       }
 
       setLoading(false);
@@ -46,12 +57,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = (email: string, password: string) => {
     return signInWithEmailAndPassword(auth, email, password);
   };
+  
+  const signInWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+        const result = await signInWithPopup(auth, provider);
+        const additionalUserInfo = getAdditionalUserInfo(result);
+        
+        if (additionalUserInfo?.isNewUser) {
+            await initializeUserData(result.user.uid);
+            await queryClient.invalidateQueries({ queryKey: ['userData', result.user.uid] });
+        }
+        return result;
+    } catch (error) {
+        console.error("Google Sign-In Error:", error);
+        throw error;
+    }
+  };
 
   const signup = async (email: string, password: string) => {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    // After creating the user in Auth, immediately create their data document in Firestore.
     await initializeUserData(userCredential.user.uid);
-    // Invalidate the query to ensure the new user data is fetched immediately
     await queryClient.invalidateQueries({ queryKey: ['userData', userCredential.user.uid] });
     return userCredential;
   };
@@ -65,6 +91,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     loading,
     login,
     signup,
+    signInWithGoogle,
     logout,
   };
 

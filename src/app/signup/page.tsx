@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
 import { Dumbbell, Loader2 } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
 
 const signupSchema = z
   .object({
@@ -46,8 +47,9 @@ type SignupFormValues = z.infer<typeof signupSchema>;
 
 export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const { toast } = useToast();
-  const { signup } = useAuth();
+  const { signup, signInWithGoogle } = useAuth();
   const router = useRouter();
 
   const form = useForm<SignupFormValues>({
@@ -67,13 +69,35 @@ export default function SignupPage() {
         title: 'Account Created',
         description: "Welcome! Let's get started.",
       });
-      // The redirect is handled by the AppLayout component's effect
+      // Redirect is handled by the AppLayout
     } catch (error: any) {
+      handleAuthError(error, 'Sign Up Failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const handleGoogleSignIn = async () => {
+    setIsGoogleLoading(true);
+    try {
+        await signInWithGoogle();
+        toast({
+            title: 'Account Created',
+            description: "Welcome! Let's get started.",
+        });
+        // Redirect is handled by the AppLayout
+    } catch (error: any) {
+        handleAuthError(error, 'Google Sign-Up Failed');
+    } finally {
+        setIsGoogleLoading(false);
+    }
+  }
+
+  const handleAuthError = (error: any, title: string) => {
       let errorMessage = 'An unexpected error occurred. Please try again.';
       switch (error.code) {
         case 'auth/email-already-in-use':
-          errorMessage =
-            'This email is already registered. Please try logging in.';
+          errorMessage = 'This email is already registered. Please try logging in.';
           break;
         case 'auth/invalid-email':
           errorMessage = 'Please enter a valid email address.';
@@ -81,19 +105,23 @@ export default function SignupPage() {
         case 'auth/weak-password':
           errorMessage = 'The password is too weak. Please choose a stronger one.';
           break;
-        case 'auth/configuration-not-found':
-          errorMessage = 'There was a problem connecting to the authentication service. Please check the configuration.';
+        case 'auth/popup-closed-by-user':
+          errorMessage = 'The sign-up popup was closed before completion. Please try again.';
           break;
+        case 'auth/cancelled-popup-request':
+            return;
+        case 'auth/configuration-not-found':
+          errorMessage = 'Authentication service is not configured. Please contact support.';
+          break;
+        default:
+          console.error(title, error);
       }
       toast({
         variant: 'destructive',
-        title: 'Sign Up Failed',
+        title: title,
         description: errorMessage,
       });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  }
 
   return (
     <Card className="mx-auto max-w-sm w-full">
@@ -114,7 +142,7 @@ export default function SignupPage() {
                 <FormItem>
                   <FormLabel>Email</FormLabel>
                   <FormControl>
-                    <Input placeholder="name@example.com" {...field} />
+                    <Input placeholder="name@example.com" {...field} disabled={isLoading || isGoogleLoading}/>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -127,7 +155,7 @@ export default function SignupPage() {
                 <FormItem>
                   <FormLabel>Password</FormLabel>
                   <FormControl>
-                    <Input type="password" placeholder="••••••••" {...field} />
+                    <Input type="password" placeholder="••••••••" {...field} disabled={isLoading || isGoogleLoading}/>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -140,20 +168,37 @@ export default function SignupPage() {
                 <FormItem>
                   <FormLabel>Confirm Password</FormLabel>
                   <FormControl>
-                    <Input type="password" placeholder="••••••••" {...field} />
+                    <Input type="password" placeholder="••••••••" {...field} disabled={isLoading || isGoogleLoading}/>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : null}
+            <Button type="submit" className="w-full" disabled={isLoading || isGoogleLoading}>
+              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create Account
             </Button>
           </form>
         </Form>
+        
+        <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">Or sign up with</span>
+            </div>
+        </div>
+
+        <Button variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={isLoading || isGoogleLoading}>
+             {isGoogleLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <svg className="mr-2 h-4 w-4" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="google" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512"><path fill="currentColor" d="M488 261.8C488 403.3 381.5 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 126 21.2 177.2 56.5L357 128C330.5 103.2 292.8 88 248 88c-88.3 0-160 71.7-160 160s71.7 160 160 160c92.6 0 156.6-63.2 162.7-149.9H248v-85.3h236.1c2.3 12.7 3.9 26.9 3.9 41.4z"></path></svg>
+             )}
+            Google
+        </Button>
+        
         <div className="mt-4 text-center text-sm">
           Already have an account?{' '}
           <Link href="/login" className="underline text-primary">
