@@ -739,7 +739,7 @@ export const calisthenicsBeastPlan: WeeklyPlan = [
     title: 'Complete Rest',
     mapsToActualDayOfWeek: 0,
     isRecovery: true,
-    notes: 'Allow your body to fully recover. Focus on good nutrition and hydration.',
+    notes: 'Allow your body to fully recover and rebuild. Focus on good nutrition and hydration.',
     exercises: [
       {
         id: 'cal-sun-rest', name: 'Rest Day', isActivity: true,
@@ -1571,7 +1571,7 @@ export const exerciseLibrary: WeeklyPlan = [{
       {
         id: 'lib-cable-crossover', name: 'Cable Crossover', targetWeight: 'Cable Stack', unit: 'reps',
         description: 'Chest isolation exercise using cables. Bring handles together in front of body from various angles.',
-        videoUrl: 'https://www.youtube.com/embed/taI4XduLpTk',
+        videoUrl: 'https://www.youtube.com/embed/tAI4XduLpTk',
         muscleGroups: ['Chest'],
         sets: [{ id: 'lib-ccross-s1', targetReps: '12-15' }, { id: 'lib-ccross-s2', targetReps: '12-15' }, { id: 'lib-ccross-s3', targetReps: '12-15' }],
       },
@@ -1728,12 +1728,12 @@ export const getWorkoutByDayFromPlan = (plan: WeeklyPlan, dayIdOrNumericDay: str
 };
 
 
-// Helper function to get all unique exercises from a specific WeeklyPlan or all default plans
-export const getAllExercisesFromPlan = (specificPlan?: WeeklyPlan): Exercise[] => {
+// Helper function to get all unique exercises from all default plans and the library.
+export const getAllExercisesFromPlan = (): Exercise[] => {
   const allExercisesMap = new Map<string, Exercise>();
-  const plansToSearch = specificPlan ? [ { id: 'custom', name: 'Custom', plan: specificPlan, isActive: true, description: 'Custom Plan'} ] : defaultNamedPlans;
-
-  plansToSearch.forEach(namedPlan => {
+  
+  // Always search all default plans
+  defaultNamedPlans.forEach(namedPlan => {
     namedPlan.plan.forEach(day => {
       day.exercises.forEach(exercise => {
         if (!allExercisesMap.has(exercise.id)) {
@@ -1742,12 +1742,14 @@ export const getAllExercisesFromPlan = (specificPlan?: WeeklyPlan): Exercise[] =
       });
     });
   });
-  // Also include exercises from the standalone library for broader autocomplete
+
+  // Always include exercises from the standalone library
   exerciseLibrary[0].exercises.forEach(exercise => {
      if (!allExercisesMap.has(exercise.id)) {
         allExercisesMap.set(exercise.id, exercise);
       }
   });
+
   return Array.from(allExercisesMap.values()).sort((a,b) => a.name.localeCompare(b.name));
 };
 
@@ -1779,3 +1781,4 @@ export const getDaysForPlan = (plan: WeeklyPlan) => plan.filter(day => day.id !=
 export const weeklyPlan: WeeklyPlan = pplHybridPlan; 
 
 export { pplHybridPlan as defaultStrengthPlan };
+
