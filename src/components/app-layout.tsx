@@ -199,25 +199,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // This query will only run if a user is logged in.
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans'],
+    queryKey: ['workoutPlans', user?.uid],
     queryFn: () => {
       console.log(`[AppLayout] Querying workout plans for user: ${user?.uid || 'none'}`);
       return getAllUserWorkoutPlans();
     },
+    enabled: !!user,
   });
 
   useEffect(() => {
     console.log('[AppLayout EFFECT] Running effect, dependencies changed.');
+    const hasPlans = allPlans && allPlans.length > 0;
     const hasActivePlan = allPlans?.some(p => p.isActive);
     console.table({
-      pathname,
-      isAuthLoading,
-      isUserPresent: !!user,
-      isLoadingPlans,
-      isPublicRoute,
-      isOnboardingRoute,
-      hasPlans: allPlans?.length,
-      hasActivePlan: hasActivePlan
+        pathname,
+        isAuthLoading,
+        isUserPresent: !!user,
+        isLoadingPlans,
+        isPublicRoute,
+        isOnboardingRoute,
+        hasPlans,
+        hasActivePlan
     });
 
     if (isAuthLoading) {
@@ -235,10 +237,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       return;
     }
     
-    // User is logged in from here on
+    // User is logged in from here on.
+    
+    // If we are on an onboarding route, we just let it render. 
+    // The page itself (e.g., choose-plan) is responsible for navigation upon completion.
     if (isOnboardingRoute) {
-      console.log('[AppLayout EFFECT] On onboarding route. Permitting access regardless of plan status.');
-      return; // Allow onboarding pages to render without waiting for plan checks
+        console.log('[AppLayout EFFECT] On onboarding route. Permitting access regardless of plan status.');
+        return;
     }
 
     if (isLoadingPlans) {
@@ -246,14 +251,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
        return;
     }
     
-    if (allPlans) { // This block runs only when plan data is available
+    if (hasPlans !== undefined) { 
         console.log(`[AppLayout EFFECT] Plan data loaded. Has active plan: ${hasActivePlan}`);
-
         if (!hasActivePlan) {
             console.log('[AppLayout EFFECT] No active plan, not on onboarding. Redirecting to /onboarding/welcome.');
             router.replace('/onboarding/welcome');
-        } else if (hasActivePlan && isPublicRoute) {
-            console.log('[AppLayout EFFECT] Has active plan, but on public route. Redirecting to /dashboard/today.');
+        } else if (isPublicRoute) { // Has active plan, but on a public page like /login
+             console.log('[AppLayout EFFECT] Has active plan, but on public route. Redirecting to /dashboard/today.');
             router.replace('/dashboard/today');
         } else {
             console.log('[AppLayout EFFECT] All conditions met, rendering page.');
@@ -269,14 +273,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return <AuthLoadingSkeleton />;
   }
 
-  if (user && !isOnboardingRoute) {
-    console.log('[AppLayout RENDER] Showing AuthenticatedLayout.');
-    return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
-  }
-  
+  // If user is logged in and is on an onboarding route, just render the content
   if (user && isOnboardingRoute) {
     console.log('[AppLayout RENDER] Showing Onboarding route children.');
     return <>{children}</>;
+  }
+
+  // If user is logged in and has an active plan (and not onboarding), show main layout
+  if (user) {
+    console.log('[AppLayout RENDER] Showing AuthenticatedLayout.');
+    return <AuthenticatedLayout>{children}</AuthenticatedLayout>;
   }
   
   if (!user && isPublicRoute) {
@@ -284,6 +290,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return <PublicLayout>{children}</PublicLayout>;
   }
   
+  // Default fallback, should rarely be hit with the logic above
   console.log('[AppLayout RENDER] Fallback: Showing AuthLoadingSkeleton.');
   return <AuthLoadingSkeleton />;
 }
