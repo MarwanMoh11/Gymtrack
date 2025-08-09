@@ -10,6 +10,7 @@ import {
   signOut,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect, // Import the redirect method
   getAdditionalUserInfo,
   updateProfile as firebaseUpdateProfile,
   reauthenticateWithCredential,
@@ -33,6 +34,13 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// A simple check for mobile user agents
+const isMobileDevice = () => {
+    if (typeof window === 'undefined') return false;
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -66,14 +74,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
     try {
-        const result = await signInWithPopup(auth, provider);
-        const additionalUserInfo = getAdditionalUserInfo(result);
-        
-        if (additionalUserInfo?.isNewUser) {
-            await initializeUserData(result.user.uid);
-            await queryClient.invalidateQueries({ queryKey: ['userData', result.user.uid] });
+        if (isMobileDevice()) {
+            // For mobile, redirect is more reliable than a popup.
+            // Firebase handles the redirect back and gets the result automatically.
+            await signInWithRedirect(auth, provider);
+            // signInWithRedirect doesn't return a result directly,
+            // the onAuthStateChanged listener will handle the new user state.
+            return; 
+        } else {
+            // For desktop, popup is a better UX.
+            const result = await signInWithPopup(auth, provider);
+            const additionalUserInfo = getAdditionalUserInfo(result);
+            
+            if (additionalUserInfo?.isNewUser) {
+                await initializeUserData(result.user.uid);
+                await queryClient.invalidateQueries({ queryKey: ['userData', result.user.uid] });
+            }
+            return result;
         }
-        return result;
     } catch (error) {
         console.error("Google Sign-In Error:", error);
         throw error;
