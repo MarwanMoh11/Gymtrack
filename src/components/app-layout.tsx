@@ -193,7 +193,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const publicRoutes = ['/login', '/signup'];
-  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan'];
+  const onboardingRoutes = ['/onboarding/welcome', '/onboarding/choose-plan', '/workout-plan'];
   const isPublicRoute = publicRoutes.includes(pathname);
   const isOnboardingRoute = onboardingRoutes.includes(pathname);
 
