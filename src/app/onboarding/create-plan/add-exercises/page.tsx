@@ -1,8 +1,7 @@
-
 // src/app/onboarding/create-plan/add-exercises/page.tsx
 'use client';
 
-import { Suspense, useState, useMemo, useEffect } from 'react';
+import { Suspense, useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
@@ -16,7 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, PlusCircle, Trash2 } from 'lucide-react';
+import { Loader2, PlusCircle, Trash2, ArrowUp, ArrowDown, Edit } from 'lucide-react';
 import AddExerciseModal from '@/components/workout-plan/add-exercise-modal';
 import LoadingAddExercisesPage from './loading';
 
@@ -43,7 +42,8 @@ function AddExercisesComponent() {
   const [workoutPlan, setWorkoutPlan] = useState<WorkoutDay[]>([]);
   const [isExerciseModalOpen, setIsExerciseModalOpen] = useState(false);
   const [dayIdForModal, setDayIdForModal] = useState<string | null>(null);
-  
+  const [exerciseToEdit, setExerciseToEdit] = useState<Exercise | null>(null);
+
   const planDetails = useMemo(() => {
     const data = searchParams.get('data');
     if (!data) return null;
@@ -95,26 +95,37 @@ function AddExercisesComponent() {
     }
   }, [planDetails, workoutPlan.length]);
 
-  const handleOpenExerciseModal = (dayId: string) => {
+  const handleOpenExerciseModal = useCallback((dayId: string, exercise: Exercise | null) => {
     setDayIdForModal(dayId);
+    setExerciseToEdit(exercise);
     setIsExerciseModalOpen(true);
-  };
-  
-  const handleSaveExercise = (exercise: Exercise) => {
+  }, []);
+
+  const handleSaveExercise = useCallback((savedExercise: Exercise) => {
     if (!dayIdForModal) return;
     setWorkoutPlan(
       produce(draft => {
         const day = draft.find(d => d.id === dayIdForModal);
         if (day) {
-           const newExercise = { ...exercise, id: `custom-ex-${Date.now()}` };
-           newExercise.sets = newExercise.sets.map((s, i) => ({...s, id: `set-${newExercise.id}-${i}`}));
-           day.exercises.push(newExercise);
+          const existingIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
+          if (existingIndex !== -1) {
+            day.exercises[existingIndex] = savedExercise;
+          } else {
+            const newExercise = { ...savedExercise, id: `custom-ex-${Date.now()}` };
+            newExercise.sets = newExercise.sets.map((s, i) => ({...s, id: `set-${newExercise.id}-${i}`}));
+            day.exercises.push(newExercise);
+          }
         }
       })
     );
     setIsExerciseModalOpen(false);
     setDayIdForModal(null);
-  };
+    setExerciseToEdit(null);
+    toast({
+        title: exerciseToEdit ? "Exercise Updated" : "Exercise Added",
+        description: `${savedExercise.name} has been staged. Save the plan to finalize changes.`
+    })
+  }, [dayIdForModal, exerciseToEdit, toast]);
 
   const handleRemoveExercise = (dayId: string, exerciseId: string) => {
     setWorkoutPlan(produce(draft => {
@@ -122,6 +133,21 @@ function AddExercisesComponent() {
       if (day) {
         day.exercises = day.exercises.filter(ex => ex.id !== exerciseId);
       }
+    }));
+  };
+  
+  const handleMoveExercise = (dayId: string, exerciseId: string, direction: 'up' | 'down') => {
+    setWorkoutPlan(produce(draft => {
+        const day = draft.find(d => d.id === dayId);
+        if (day) {
+          const index = day.exercises.findIndex(ex => ex.id === exerciseId);
+          if (index === -1) return;
+          if (direction === 'up' && index > 0) {
+            [day.exercises[index], day.exercises[index - 1]] = [day.exercises[index - 1], day.exercises[index]];
+          } else if (direction === 'down' && index < day.exercises.length - 1) {
+            [day.exercises[index], day.exercises[index + 1]] = [day.exercises[index + 1], day.exercises[index]];
+          }
+        }
     }));
   };
 
@@ -134,7 +160,7 @@ function AddExercisesComponent() {
       id: newPlanId,
       name: planDetails.planName,
       description: planDetails.planDescription,
-      plan: workoutPlan.map(day => ({...day, exercises: day.exercises.map(ex => ({...ex, exerciseId: ex.id})) })), // Ensure exerciseId is set
+      plan: workoutPlan,
       isActive: true,
     };
     
@@ -166,20 +192,31 @@ function AddExercisesComponent() {
                     </div>
                 </AccordionTrigger>
                 <AccordionContent>
-                  <ul className="space-y-2 mt-2">
-                    {day.exercises.map(ex => (
-                      <li key={ex.id} className="flex justify-between items-center bg-secondary/30 p-2 rounded-md">
+                  <ul className="space-y-1 mt-2">
+                    {day.exercises.map((ex, index) => (
+                      <li key={ex.id} className="flex justify-between items-center group hover:bg-secondary/20 p-1 rounded-md">
                         <span className="text-sm">{ex.name} ({ex.sets.length} sets)</span>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleRemoveExercise(day.id, ex.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 items-center">
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'up')} disabled={index === 0}>
+                                <ArrowUp className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'down')} disabled={index === day.exercises.length - 1}>
+                                <ArrowDown className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleOpenExerciseModal(day.id, ex)}>
+                                <Edit className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleRemoveExercise(day.id, ex.id)}>
+                                <Trash2 className="h-3 w-3" />
+                            </Button>
+                        </div>
                       </li>
                     ))}
                     {day.exercises.length === 0 && (
                       <p className="text-sm text-muted-foreground italic text-center py-2">No exercises added yet.</p>
                     )}
                   </ul>
-                  <Button variant="outline" size="sm" className="w-full mt-4" onClick={() => handleOpenExerciseModal(day.id)}>
+                  <Button variant="outline" size="sm" className="w-full mt-4" onClick={() => handleOpenExerciseModal(day.id, null)}>
                     <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise
                   </Button>
                 </AccordionContent>
@@ -202,6 +239,7 @@ function AddExercisesComponent() {
             onSave={handleSaveExercise}
             allExercises={allExercises}
             dayId={dayIdForModal}
+            initialData={exerciseToEdit}
         />
       )}
     </div>
