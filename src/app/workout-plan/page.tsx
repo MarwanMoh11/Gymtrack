@@ -43,9 +43,12 @@ export default function WorkoutPlanPage() {
   const [editableActivePlan, setEditableActivePlan] = useState<WorkoutDay[] | null>(null);
   const [initialActivePlanForEdit, setInitialActivePlanForEdit] = useState<WorkoutDay[] | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  
+  // State for controlling the exercise modal
   const [isExerciseModalOpen, setIsExerciseModalOpen] = useState(false);
   const [dayIdForModal, setDayIdForModal] = useState<string | null>(null);
   const [exerciseToEdit, setExerciseToEdit] = useState<Exercise | null>(null);
+  
   const [isNewPlanDialogVisible, setIsNewPlanDialogVisible] = useState(false);
   const [newPlanNameInput, setNewPlanNameInput] = useState('');
   
@@ -167,20 +170,30 @@ export default function WorkoutPlanPage() {
   };
   
   const handleSaveExerciseToActivePlan = (dayId: string, savedExercise: Exercise) => {
-     if (!editableActivePlan) return;
+     console.log('[WorkoutPlanPage] handleSaveExerciseToActivePlan triggered.', { dayId, savedExercise });
+     if (!editableActivePlan) {
+       console.error('[WorkoutPlanPage] Cannot save exercise, editableActivePlan is null.');
+       return;
+     };
      setEditableActivePlan(
       produce(editableActivePlan, draft => {
         const day = draft.find(d => d.id === dayId);
         if (day) {
+          console.log(`[WorkoutPlanPage] Found day '${day.title}' to add/update exercise.`);
           const existingExerciseIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
-          if (existingExerciseIndex !== -1) { 
+          if (existingExerciseIndex !== -1) {
+            console.log(`[WorkoutPlanPage] Updating existing exercise: '${savedExercise.name}' at index ${existingExerciseIndex}.`);
             day.exercises[existingExerciseIndex] = savedExercise;
           } else { 
+            console.log(`[WorkoutPlanPage] Adding new exercise: '${savedExercise.name}'.`);
             day.exercises.push(savedExercise);
           }
+        } else {
+          console.error(`[WorkoutPlanPage] Could not find day with id: ${dayId}`);
         }
       })
     );
+    // Close the modal and reset state
     setIsExerciseModalOpen(false);
     setDayIdForModal(null);
     setExerciseToEdit(null);
@@ -243,15 +256,23 @@ export default function WorkoutPlanPage() {
     );
   };
 
-  const openExerciseModal = (dayId: string, exercise?: Exercise) => {
+  const openExerciseModal = (dayId: string, exercise?: Exercise | null) => {
+    console.log('[WorkoutPlanPage] openExerciseModal called.', { dayId, exercise });
     setDayIdForModal(dayId);
     setExerciseToEdit(exercise || null);
     setIsExerciseModalOpen(true);
+    console.log('[WorkoutPlanPage] State after setting for modal opening:', {
+        dayIdForModal: dayId,
+        exerciseToEdit: exercise || null,
+        isExerciseModalOpen: true
+    });
   };
   
   if (isLoadingUserData || isLoadingAllExercises) {
     return <LoadingWorkoutPlanPage />;
   }
+  
+  console.log('[WorkoutPlanPage] Rendering. Modal state:', { isExerciseModalOpen, dayIdForModal, exerciseToEdit: exerciseToEdit?.id });
 
   return (
     <div className="container mx-auto py-8 px-4 md:px-6">
@@ -418,7 +439,7 @@ export default function WorkoutPlanPage() {
                     </ul>
                     {isEditMode && (
                         <div className="mt-3 pt-3 border-t border-border/50">
-                            <Button variant="outline" size="sm" className="w-full" onClick={() => openExerciseModal(day.id)}>
+                            <Button variant="outline" size="sm" className="w-full" onClick={() => openExerciseModal(day.id, null)}>
                                 <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise to {getDisplayDayName(day)}
                             </Button>
                         </div>

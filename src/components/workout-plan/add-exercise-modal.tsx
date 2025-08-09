@@ -24,8 +24,9 @@ interface AddExerciseModalProps {
 
 const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
   if (initialData) {
+    console.log('[AddExerciseModal] Initializing state from initialData:', initialData);
     return {
-      id: initialData.id, // Preserve ID if editing
+      id: initialData.id,
       name: initialData.name,
       targetWeight: initialData.targetWeight || '',
       notes: initialData.notes || '',
@@ -35,14 +36,14 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
       isCore: initialData.isCore || false,
       unit: initialData.unit || 'reps',
       sets: initialData.sets.map((s, index) => ({
-        id: s.id || `set-${Date.now()}-${index}`, // Use existing set ID or generate if missing
+        id: s.id || `set-${Date.now()}-${index}`,
         targetReps: String(s.targetReps),
         targetWeight: s.targetWeight || '',
         unit: s.unit || initialData.unit || 'reps',
       })),
     };
   }
-  // Default for adding new exercise
+  console.log('[AddExerciseModal] Initializing new exercise state.');
   return {
     name: '',
     targetWeight: '',
@@ -65,11 +66,12 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const { toast } = useToast();
 
   const isEditing = !!initialData;
+  console.log('[AddExerciseModal] Render. isOpen:', isOpen, 'isEditing:', isEditing, 'InitialData ID:', initialData?.id);
 
   useEffect(() => {
-    // This effect now correctly depends on `initialData` and `dayId`
-    // to ensure it re-initializes the state every time the modal opens for a new purpose.
+    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen);
     if (isOpen) {
+        console.log('[AddExerciseModal] Modal is open, re-initializing state.');
         const stateToSet = getInitialExerciseState(initialData);
         setExerciseData(stateToSet);
         setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
@@ -79,7 +81,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   }, [isOpen, initialData, dayId]);
 
   const filteredExercises = useMemo(() => {
-    if (!searchTerm || isEditing) return []; // Don't show autocomplete if editing an existing item from search
+    if (!searchTerm || isEditing) return [];
     return allExercises.filter(ex => ex.name.toLowerCase().includes(searchTerm.toLowerCase()));
   }, [searchTerm, allExercises, isEditing]);
 
@@ -114,18 +116,16 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleAutocompleteSelect = (selectedExercise: Exercise) => {
-    // This function is mainly for when adding a *new* exercise based on an existing one.
-    // If editing, the initialData useEffect already handles pre-filling.
+    console.log('[AddExerciseModal] Autocomplete selected:', selectedExercise.name);
     const newState = getInitialExerciseState(selectedExercise);
-    // Ensure we don't overwrite the ID if we are *editing* an exercise that was found via search (though unlikely scenario)
-    // For simplicity, autocomplete is primarily for *adding* new exercises based on templates.
-    setExerciseData({ ...newState, id: undefined }); // New exercise, so no existing ID
+    setExerciseData({ ...newState, id: undefined });
     setMuscleGroupsInput((selectedExercise.muscleGroups || []).join(', '));
     setSearchTerm(selectedExercise.name);
     setShowAutocomplete(false);
   };
 
   const handleSubmit = () => {
+    console.log('[AddExerciseModal] handleSubmit called.');
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
@@ -136,27 +136,27 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
     }
 
     const finalMuscleGroups = muscleGroupsInput.split(',').map(s => s.trim()).filter(s => s);
+    const newExerciseId = exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     const exerciseToSave: Exercise = {
       ...exerciseData,
-      id: exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+      id: newExerciseId,
       muscleGroups: finalMuscleGroups,
-      // Ensure sets have proper IDs and structure
       sets: exerciseData.sets.map((s, index) => ({
-        id: s.id || `set-${Date.now()}-final-${index}`, // Ensure every set has an ID
+        id: s.id || `set-${Date.now()}-final-${index}`,
         targetReps: s.targetReps,
         targetWeight: s.targetWeight,
         unit: s.unit,
-        // Add exerciseId to each set for easier data lookup later
-        exerciseId: exerciseData.id || `custom-${dayId}-${exerciseData.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+        exerciseId: newExerciseId,
       })),
     };
+    console.log('[AddExerciseModal] Saving exercise:', exerciseToSave);
     onSave(exerciseToSave);
-    onOpenChange(false);
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
-      if (!open) setShowAutocomplete(false); // Hide autocomplete when dialog closes
+      console.log('[AddExerciseModal] onOpenChange called with:', open);
+      if (!open) setShowAutocomplete(false);
       onOpenChange(open);
     }}>
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
@@ -170,11 +170,11 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
               <Label htmlFor="exerciseName">Exercise Name*</Label>
               <Input
                 id="exerciseName"
-                value={searchTerm} // Use searchTerm for the input field directly
+                value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
-                  handleInputChange('name', e.target.value); // Still update the underlying exerciseData.name
-                  if (!isEditing) setShowAutocomplete(true); // Only show autocomplete if adding new
+                  handleInputChange('name', e.target.value);
+                  if (!isEditing) setShowAutocomplete(true);
                 }}
                 onFocus={() => { if (!isEditing) setShowAutocomplete(true); }}
                 placeholder="e.g., Barbell Squat"
