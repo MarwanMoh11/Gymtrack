@@ -68,11 +68,13 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   const isEditing = !!initialData;
 
   useEffect(() => {
-    const stateToSet = getInitialExerciseState(initialData);
-    setExerciseData(stateToSet);
-    setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
-    setSearchTerm(stateToSet.name || ''); // Initialize search term if editing
-    setShowAutocomplete(false);
+    if (isOpen) {
+        const stateToSet = getInitialExerciseState(initialData);
+        setExerciseData(stateToSet);
+        setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
+        setSearchTerm(stateToSet.name || '');
+        setShowAutocomplete(false);
+    }
   }, [isOpen, initialData, dayId]);
 
   const filteredExercises = useMemo(() => {
