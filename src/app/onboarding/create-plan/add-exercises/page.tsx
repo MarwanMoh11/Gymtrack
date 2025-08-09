@@ -81,9 +81,7 @@ function AddExercisesComponent() {
   });
 
   useEffect(() => {
-    console.log('[AddExercisesPage] useEffect for planDetails running.');
     if (planDetails && workoutPlan.length === 0) {
-      console.log('[AddExercisesPage] planDetails found, initializing workout plan structure.');
       const { configuredDays } = planDetails;
       const initialPlan = configuredDays.map((day: ConfiguredDay, index: number) => ({
         id: `custom-day-${Date.now()}-${index}`,
@@ -98,21 +96,13 @@ function AddExercisesComponent() {
   }, [planDetails, workoutPlan.length]);
 
   const handleOpenExerciseModal = useCallback((dayId: string, exercise: Exercise | null) => {
-    console.log(`[AddExercisesPage] handleOpenExerciseModal called for dayId: ${dayId}`, { exercise });
     setDayIdForModal(dayId);
     setExerciseToEdit(exercise);
     setIsExerciseModalOpen(true);
-    console.log('[AddExercisesPage] State after setting modal to open:', {
-        dayIdForModal: dayId,
-        exerciseToEdit: exercise,
-        isExerciseModalOpen: true,
-    });
   }, []);
 
   const handleSaveExercise = useCallback((savedExercise: Exercise) => {
-    console.log('[AddExercisesPage] handleSaveExercise triggered with:', savedExercise);
     if (!dayIdForModal) {
-        console.error('[AddExercisesPage] handleSaveExercise error: dayIdForModal is null.');
         return;
     }
     setWorkoutPlan(
@@ -121,12 +111,10 @@ function AddExercisesComponent() {
         if (day) {
           const existingIndex = day.exercises.findIndex(ex => ex.id === savedExercise.id);
           if (existingIndex !== -1) {
-            console.log(`[AddExercisesPage] Updating exercise at index ${existingIndex}`);
             day.exercises[existingIndex] = savedExercise;
           } else {
             const newExercise = { ...savedExercise, id: `custom-ex-${Date.now()}` };
             newExercise.sets = newExercise.sets.map((s, i) => ({...s, id: `set-${newExercise.id}-${i}`}));
-            console.log('[AddExercisesPage] Adding new exercise:', newExercise);
             day.exercises.push(newExercise);
           }
         }
@@ -135,7 +123,6 @@ function AddExercisesComponent() {
     setIsExerciseModalOpen(false);
     setDayIdForModal(null);
     setExerciseToEdit(null);
-    console.log('[AddExercisesPage] Modal closed and state reset.');
     toast({
         title: exerciseToEdit ? "Exercise Updated" : "Exercise Added",
         description: `${savedExercise.name} has been staged. Save the plan to finalize changes.`
@@ -167,9 +154,7 @@ function AddExercisesComponent() {
   };
 
   const handleFinishPlan = () => {
-    console.log('[AddExercisesPage] handleFinishPlan triggered.');
     if (!userData || !planDetails) {
-        console.error('[AddExercisesPage] Cannot finish plan: userData or planDetails missing.');
         return;
     }
     
@@ -183,7 +168,6 @@ function AddExercisesComponent() {
       isActive: true,
     };
     
-    console.log('[AddExercisesPage] Final plan object:', newPlan);
 
     const updatedOldPlans = userData.plans.map(p => ({ ...p, isActive: false }));
     const newUserData = { ...userData, plans: [...updatedOldPlans, newPlan], onboardingStatus: 'completed' as const };
@@ -195,8 +179,6 @@ function AddExercisesComponent() {
     return <LoadingAddExercisesPage />;
   }
   
-  console.log(`[AddExercisesPage] Rendering main component. Modal open state: ${isExerciseModalOpen}`);
-
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
       <Card className="w-full max-w-4xl">
@@ -239,10 +221,7 @@ function AddExercisesComponent() {
                       <p className="text-sm text-muted-foreground italic text-center py-2">No exercises added yet.</p>
                     )}
                   </ul>
-                  <Button variant="outline" size="sm" className="w-full mt-4" onClick={() => {
-                    console.log(`[AddExercisesPage] Add Exercise button clicked for dayId: ${day.id}`);
-                    handleOpenExerciseModal(day.id, null);
-                  }}>
+                  <Button variant="outline" size="sm" className="w-full mt-4" onClick={() => handleOpenExerciseModal(day.id, null)}>
                     <PlusCircle className="mr-2 h-4 w-4" /> Add Exercise
                   </Button>
                 </AccordionContent>
