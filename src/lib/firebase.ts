@@ -2,13 +2,9 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-import { config } from 'dotenv';
 
-// Ensure environment variables are loaded
-config({ path: '.env.local' });
-
-
-// This configuration is now driven by your .env.local file.
+// This configuration is now driven by your .env file.
+// Next.js automatically loads environment variables prefixed with NEXT_PUBLIC_.
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -21,11 +17,16 @@ const firebaseConfig = {
 // Initialize Firebase App
 // Check if all required config values are present before initializing
 let app: FirebaseApp;
-const requiredConfig = [firebaseConfig.apiKey, firebaseConfig.authDomain, firebaseConfig.projectId];
-if (requiredConfig.every(value => Boolean(value))) {
+const requiredConfigValues = [
+    firebaseConfig.apiKey, 
+    firebaseConfig.authDomain, 
+    firebaseConfig.projectId
+];
+
+if (requiredConfigValues.every(value => Boolean(value))) {
     app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 } else {
-    console.warn("Firebase configuration is missing or incomplete. Please check your .env.local file. App functionality will be limited.");
+    console.warn("Firebase configuration is missing or incomplete. Please check your .env file. App functionality will be limited.");
     // Provide a mock app object so the rest of the app doesn't crash on import
     app = getApps().length ? getApp() : ({ options: {} } as FirebaseApp);
 }
