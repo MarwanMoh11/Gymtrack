@@ -50,9 +50,8 @@ export default function WorkoutPlanPage() {
   const [newPlanNameInput, setNewPlanNameInput] = useState('');
   
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans', user?.uid],
-    queryFn: () => getAllUserWorkoutPlans(user!.uid),
-    enabled: !!user,
+    queryKey: ['workoutPlans'], // No longer user-dependent
+    queryFn: getAllUserWorkoutPlans,
   });
 
   const { data: allExercisesForModal, isLoading: isLoadingAllExercises } = useQuery({
@@ -71,9 +70,9 @@ export default function WorkoutPlanPage() {
   }, [activePlanDetails, isEditMode]);
 
   const savePlansMutation = useMutation({
-    mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(user!.uid, plansToSave),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workoutPlans', user?.uid] });
+    mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(plansToSave),
+    onSuccess: (data, variables) => {
+        queryClient.setQueryData(['workoutPlans'], variables);
     },
     onError: () => {
       toast({ variant: 'destructive', title: 'Error', description: 'Could not save plan changes.' });
@@ -81,9 +80,18 @@ export default function WorkoutPlanPage() {
   });
 
   const saveSinglePlanMutation = useMutation({
-      mutationFn: (planToSave: NamedWorkoutPlan) => saveUserWorkoutPlan(user!.uid, planToSave),
-      onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ['workoutPlans', user?.uid] });
+      mutationFn: (planToSave: NamedWorkoutPlan) => saveUserWorkoutPlan(planToSave),
+      onSuccess: (data, variables) => {
+          queryClient.setQueryData(['workoutPlans'], (oldData: NamedWorkoutPlan[] | undefined) => {
+            if (!oldData) return [variables];
+            const index = oldData.findIndex(p => p.id === variables.id);
+            if (index > -1) {
+              const newData = [...oldData];
+              newData[index] = variables;
+              return newData;
+            }
+            return [...oldData, variables];
+          });
       },
       onError: () => {
           toast({ variant: 'destructive', title: 'Error', description: 'Could not save plan.' });
@@ -91,7 +99,10 @@ export default function WorkoutPlanPage() {
   });
   
   const setOverrideMutation = useMutation({
-    mutationFn: (dayId: string) => setOverrideService(user!.uid, dayId),
+    mutationFn: (dayId: string) => {
+      if (!user) throw new Error("User not authenticated.");
+      return setOverrideService(user.uid, dayId);
+    },
     onSuccess: (data, dayId) => {
       queryClient.invalidateQueries({ queryKey: ['todayOverride', user?.uid]});
       toast({
@@ -434,7 +445,7 @@ export default function WorkoutPlanPage() {
                             View Day Details <ArrowRight className="ml-auto h-4 w-4" />
                             </Link>
                         </Button>
-                        <Button variant="default" size="sm" className="flex-1" onClick={() => setOverrideMutation.mutate(day.id)} disabled={setOverrideMutation.isPending}>
+                        <Button variant="default" size="sm" className="flex-1" onClick={() => setOverrideMutation.mutate(day.id)} disabled={!user || setOverrideMutation.isPending}>
                             {setOverrideMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <PlayCircle className="mr-2 h-4 w-4" />} Start This Session
                         </Button>
                     </CardFooter>

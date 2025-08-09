@@ -3,7 +3,6 @@ import type { DailyLog, WorkoutDay, NamedWorkoutPlan, Exercise } from '@/types/w
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { CheckCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@/context/auth-context';
 import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
 import { getExerciseById as getExerciseDefById } from '@/data/workout-data';
 
@@ -39,11 +38,9 @@ function getExerciseById(exerciseId: string): Exercise | undefined {
 
 
 export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkoutLogViewProps) {
-  const { user } = useAuth();
   const { data: allPlans, isLoading } = useQuery({
-      queryKey: ['workoutPlans', user?.uid],
-      queryFn: () => getAllUserWorkoutPlans(user!.uid),
-      enabled: !!user,
+      queryKey: ['workoutPlans'],
+      queryFn: getAllUserWorkoutPlans,
   });
 
   if (isLoading) {

@@ -1,7 +1,7 @@
 
 // src/app/workout-plan/loading.tsx
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
 import { CalendarDays } from "lucide-react";
 
 export default function LoadingWorkoutPlanPage() {
@@ -14,6 +14,22 @@ export default function LoadingWorkoutPlanPage() {
         </div>
         <Skeleton className="h-4 w-3/4 sm:w-1/2 mt-2" /> {/* Description */}
       </header>
+       <div className="mb-12">
+            <Skeleton className="h-7 w-1/4 mb-4" /> {/* Available Plans Title */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[...Array(3)].map((_, i) => (
+                <Card key={i}>
+                    <CardHeader>
+                        <Skeleton className="h-6 w-3/4 mb-1" />
+                        <Skeleton className="h-4 w-full" />
+                    </CardHeader>
+                    <CardFooter>
+                        <Skeleton className="h-9 w-full" />
+                    </CardFooter>
+                </Card>
+            ))}
+            </div>
+       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {[...Array(3)].map((_, i) => (

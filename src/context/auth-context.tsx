@@ -7,7 +7,6 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  getAdditionalUserInfo
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useQueryClient } from '@tanstack/react-query';
@@ -31,6 +30,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       if (!user) {
+        // Clear all queries when the user logs out.
         queryClient.clear();
       }
       setLoading(false);

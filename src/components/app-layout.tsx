@@ -199,12 +199,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // This query will only run if a user is logged in.
   const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans', user?.uid],
+    queryKey: ['workoutPlans'],
     queryFn: () => {
-      console.log(`[AppLayout] Querying workout plans for user: ${user!.uid}`);
-      return getAllUserWorkoutPlans(user!.uid);
+      console.log(`[AppLayout] Querying workout plans.`);
+      return getAllUserWorkoutPlans();
     },
-    enabled: !!user,
   });
 
   useEffect(() => {
@@ -235,8 +234,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
     
     // User is logged in
-    if (isLoadingPlans && !isOnboardingRoute) {
-       console.log('[AppLayout EFFECT] User is logged in, but plans are loading and not on onboarding. Waiting.');
+    if (isLoadingPlans) {
+       console.log('[AppLayout EFFECT] User is logged in, but plans are loading. Waiting.');
        return;
     }
     
@@ -257,7 +256,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     
   }, [user, isAuthLoading, isLoadingPlans, allPlans, isPublicRoute, isOnboardingRoute, router, pathname]);
   
-  const isContentLoading = isAuthLoading || (user && !isOnboardingRoute && isLoadingPlans);
+  const isContentLoading = isAuthLoading || (user && isLoadingPlans);
   
   if (isContentLoading) {
     console.log('[AppLayout RENDER] Showing AuthLoadingSkeleton.');

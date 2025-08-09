@@ -28,9 +28,6 @@ function LoadingSkeleton() {
                                 <Skeleton className="h-6 w-1/2" />
                                 <Skeleton className="h-4 w-full mt-2" />
                             </CardHeader>
-                            <CardContent>
-                                <Skeleton className="h-10 w-full" />
-                            </CardContent>
                         </Card>
                     ))}
                 </div>
@@ -48,17 +45,15 @@ export default function ChoosePlanPage() {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   const { data: allPlans, isLoading } = useQuery({
-    queryKey: ['workoutPlans', user?.uid],
-    queryFn: () => getAllUserWorkoutPlans(user!.uid),
-    enabled: !!user,
+    queryKey: ['workoutPlans'],
+    queryFn: getAllUserWorkoutPlans,
   });
 
   const mutation = useMutation({
-    mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(user!.uid, plansToSave),
+    mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(plansToSave),
     onSuccess: (data, variables) => {
-      // Instead of invalidating and causing a refetch loop,
-      // we manually update the query cache with the new data.
-      queryClient.setQueryData(['workoutPlans', user?.uid], variables);
+      // Manually update the query cache with the new data.
+      queryClient.setQueryData(['workoutPlans'], variables);
       
       toast({
         title: "Plan Activated!",
@@ -68,8 +63,9 @@ export default function ChoosePlanPage() {
       // Now that the local state is correct, we can safely redirect.
       router.push('/dashboard/today');
     },
-    onError: () => {
-      toast({ variant: 'destructive', title: 'Error', description: 'Could not activate the selected plan.' });
+    onError: (error) => {
+      console.error("Plan activation failed:", error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Could not activate the selected plan. Please try again.' });
     }
   });
 

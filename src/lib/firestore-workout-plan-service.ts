@@ -1,114 +1,84 @@
 // src/lib/firestore-workout-plan-service.ts
 'use server';
 
-import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import type { NamedWorkoutPlan } from '@/types/workout';
 import { defaultNamedPlans } from '@/data/workout-data';
+
+const WORKOUT_PLANS_STORAGE_KEY = 'gymtrack_workout_plans';
 
 // --- Public Functions ---
 
 /**
- * Fetches all workout plans for a given user.
- * If the user has no plans, it initializes them with the default plans.
- * @param userId The ID of the user.
+ * Fetches all workout plans from localStorage.
+ * If no plans are found, it initializes them with the default plans.
  * @returns A promise that resolves to an array of NamedWorkoutPlan.
  */
-export async function getAllUserWorkoutPlans(userId: string): Promise<NamedWorkoutPlan[]> {
-  if (!userId) {
-    console.error("[FirestoreService] getAllUserWorkoutPlans called without a userId.");
-    throw new Error("User ID is required to fetch workout plans.");
-  }
-  const plansCollectionRef = collection(db, 'users', userId, 'workoutPlans');
-  console.log(`[FirestoreService] Querying plans for user: ${userId}`);
-  const querySnapshot = await getDocs(plansCollectionRef);
-
-  if (querySnapshot.empty) {
-    console.log(`[FirestoreService] No plans found for user ${userId}, initializing with defaults.`);
-    return initializeDefaultPlansForUser(userId);
+export async function getAllUserWorkoutPlans(): Promise<NamedWorkoutPlan[]> {
+  console.log('[LocalStorageService] Getting all workout plans.');
+  if (typeof window === 'undefined') {
+    // Return default plans in SSR/server-side context, won't be active.
+    return defaultNamedPlans.map(p => ({ ...p, isActive: false }));
   }
 
-  const plans: NamedWorkoutPlan[] = [];
-  querySnapshot.forEach((doc) => {
-    plans.push(doc.data() as NamedWorkoutPlan);
-  });
-  console.log(`[FirestoreService] Successfully fetched ${plans.length} plans for user ${userId}.`);
-  return plans;
+  const plansJson = window.localStorage.getItem(WORKOUT_PLANS_STORAGE_KEY);
+
+  if (!plansJson) {
+    console.log('[LocalStorageService] No plans found, initializing with defaults.');
+    const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
+    await saveAllUserWorkoutPlans(plansToSave);
+    return plansToSave;
+  }
+
+  try {
+    const plans = JSON.parse(plansJson) as NamedWorkoutPlan[];
+    console.log(`[LocalStorageService] Successfully fetched ${plans.length} plans.`);
+    return plans;
+  } catch (error) {
+    console.error('[LocalStorageService] Error parsing plans from localStorage:', error);
+    // If parsing fails, reset to default
+    const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
+    await saveAllUserWorkoutPlans(plansToSave);
+    return plansToSave;
+  }
 }
 
 /**
- * Saves all of a user's workout plans to Firestore using a batch write.
- * @param userId The ID of the user.
+ * Saves all workout plans to localStorage.
  * @param plans The array of plans to save.
  */
-export async function saveAllUserWorkoutPlans(userId: string, plans: NamedWorkoutPlan[]): Promise<void> {
-  if (!userId) {
-    console.error("[FirestoreService] saveAllUserWorkoutPlans called without a userId.");
-    throw new Error("User ID is required to save workout plans.");
-  }
-  console.log(`[FirestoreService] Attempting to batch save ${plans.length} plans for user ${userId}.`);
-  const batch = writeBatch(db);
-  const plansCollectionRef = collection(db, 'users', userId, 'workoutPlans');
-
-  plans.forEach((plan) => {
-    const planDocRef = doc(plansCollectionRef, plan.id);
-    // Firestore handles converting plain JS objects. No manual conversion is needed.
-    // The object must be a plain object, which it is.
-    batch.set(planDocRef, plan);
-  });
+export async function saveAllUserWorkoutPlans(plans: NamedWorkoutPlan[]): Promise<void> {
+  console.log(`[LocalStorageService] Attempting to save ${plans.length} plans.`);
+   if (typeof window === 'undefined') return;
 
   try {
-    await batch.commit();
-    console.log(`[FirestoreService] Successfully batch saved all workout plans for user ${userId}.`);
+    window.localStorage.setItem(WORKOUT_PLANS_STORAGE_KEY, JSON.stringify(plans));
+    console.log(`[LocalStorageService] Successfully saved all workout plans.`);
   } catch (error) {
-    console.error(`[FirestoreService] Error batch saving workout plans for user ${userId}:`, error);
-    // Re-throwing the error so the mutation hook can catch it.
-    throw new Error("Failed to save workout plans to the database.");
+    console.error(`[LocalStorageService] Error saving workout plans:`, error);
+    throw new Error("Failed to save workout plans to localStorage.");
   }
 }
 
-
 /**
- * Saves a single workout plan for a user.
- * @param userId The ID of the user.
+ * Saves a single workout plan.
  * @param plan The plan to save.
  */
-export async function saveUserWorkoutPlan(userId: string, plan: NamedWorkoutPlan): Promise<void> {
-    if (!userId) {
-      console.error("[FirestoreService] saveUserWorkoutPlan called without a userId.");
-      throw new Error("User ID is required to save a workout plan.");
-    }
-    console.log(`[FirestoreService] Attempting to save plan '${plan.id}' for user ${userId}.`);
-    const planDocRef = doc(db, 'users', userId, 'workoutPlans', plan.id);
+export async function saveUserWorkoutPlan(plan: NamedWorkoutPlan): Promise<void> {
+    console.log(`[LocalStorageService] Attempting to save plan '${plan.id}'.`);
     try {
-        // As with batch, setDoc directly handles plain JS objects.
-        await setDoc(planDocRef, plan);
-        console.log(`[FirestoreService] Successfully saved plan '${plan.id}' for user ${userId}.`);
+        const allPlans = await getAllUserWorkoutPlans();
+        const planIndex = allPlans.findIndex(p => p.id === plan.id);
+
+        if (planIndex > -1) {
+            allPlans[planIndex] = plan;
+        } else {
+            allPlans.push(plan);
+        }
+
+        await saveAllUserWorkoutPlans(allPlans);
+        console.log(`[LocalStorageService] Successfully saved plan '${plan.id}'.`);
     } catch (error) {
-        console.error(`[FirestoreService] Error saving plan ${plan.id} for user ${userId}:`, error);
+        console.error(`[LocalStorageService] Error saving plan ${plan.id}:`, error);
         throw new Error("Failed to save workout plan.");
     }
-}
-
-
-// --- Private & Initialization Functions ---
-
-/**
- * Initializes the default workout plans for a new user.
- * Sets the 'isActive' flag to false for all plans, forcing the user through onboarding.
- * @param userId The ID of the user.
- * @returns The array of default plans that were just saved.
- */
-async function initializeDefaultPlansForUser(userId: string): Promise<NamedWorkoutPlan[]> {
-  console.log(`[FirestoreService] Initializing default plans for new user ${userId}.`);
-  const plansToSave = defaultNamedPlans.map(p => ({ ...p, isActive: false }));
-  
-  try {
-    // This uses the corrected batch save function.
-    await saveAllUserWorkoutPlans(userId, plansToSave);
-    return plansToSave;
-  } catch (error) {
-     console.error(`[FirestoreService] Failed to initialize default plans for user ${userId}:`, error);
-     throw error; // Propagate error to the caller
-  }
 }

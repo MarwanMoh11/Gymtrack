@@ -3,10 +3,18 @@
 
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DayPicker } from "react-day-picker" // Removed DropdownProps import
+import { DayPicker, DropdownProps } from "react-day-picker"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>
 
@@ -25,8 +33,8 @@ function Calendar({
         months: cn("flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0 flex-grow", classNames?.months),
         month: cn("space-y-4 flex flex-col flex-grow", classNames?.month),
         caption: cn("flex justify-center pt-1 relative items-center h-12 flex-shrink-0 gap-1", classNames?.caption),
-        caption_label: cn("text-sm font-medium", classNames?.caption_label), // Removed hidden class
-        // caption_dropdowns: cn("flex gap-1", classNames?.caption_dropdowns), // Removed dropdown styles
+        caption_label: cn("hidden text-sm font-medium", classNames?.caption_label),
+        caption_dropdowns: cn("flex gap-1", classNames?.caption_dropdowns),
         nav: cn("space-x-1 flex items-center", classNames?.nav),
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -69,13 +77,49 @@ function Calendar({
           classNames?.day_range_middle
         ),
         day_hidden: cn("invisible", classNames?.day_hidden),
-        // Removed dropdown related styles
+        vhidden: cn("hidden", classNames?.vhidden),
+        dropdown_month: cn("relative", classNames?.dropdown_month),
+        dropdown_year: cn("relative", classNames?.dropdown_year),
+        dropdown: cn("absolute inset-0 w-full appearance-none opacity-0", classNames?.dropdown),
         ...classNames,
       }}
       components={{
         IconLeft: ({ ...props }) => <ChevronLeft className="h-4 w-4" {...props} />,
         IconRight: ({ ...props }) => <ChevronRight className="h-4 w-4" {...props} />,
-        // Dropdown component removed
+        Dropdown: ({ value, onChange, children, ...props }: DropdownProps) => {
+          const options = React.Children.toArray(
+            children
+          ) as React.ReactElement<React.HTMLProps<HTMLOptionElement>>[]
+          const selected = options.find((child) => child.props.value === value)
+          const handleChange = (value: string) => {
+            const changeEvent = {
+              target: { value },
+            } as React.ChangeEvent<HTMLSelectElement>
+            onChange?.(changeEvent)
+          }
+          return (
+            <Select
+              value={value?.toString()}
+              onValueChange={(value) => handleChange(value)}
+            >
+              <SelectTrigger>
+                <SelectValue>{selected?.props?.children}</SelectValue>
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <ScrollArea>
+                  {options.map((option, id: number) => (
+                    <SelectItem
+                      key={`${option.props.value}-${id}`}
+                      value={option.props.value?.toString() ?? ""}
+                    >
+                      {option.props.children}
+                    </SelectItem>
+                  ))}
+                </ScrollArea>
+              </SelectContent>
+            </Select>
+          )
+        },
       }}
       {...props}
     />
