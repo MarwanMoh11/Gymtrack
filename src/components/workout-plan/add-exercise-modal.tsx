@@ -24,6 +24,7 @@ interface AddExerciseModalProps {
 
 const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 'id' | 'sets'> & { sets: NewSetData[], id?: string } => {
   if (initialData) {
+     console.log('[AddExerciseModal] Initializing with existing data:', initialData);
     return {
       id: initialData.id,
       name: initialData.name,
@@ -42,6 +43,7 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
       })),
     };
   }
+   console.log('[AddExerciseModal] Initializing with new exercise state.');
   return {
     name: '',
     targetWeight: '',
@@ -56,21 +58,25 @@ const getInitialExerciseState = (initialData?: Exercise | null): Omit<Exercise, 
 };
 
 export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExercises, dayId, initialData }: AddExerciseModalProps) {
+  console.log('[AddExerciseModal] Rendering. isOpen:', isOpen, 'initialData:', initialData);
+  
   const [exerciseData, setExerciseData] = useState(() => getInitialExerciseState(initialData));
   const [muscleGroupsInput, setMuscleGroupsInput] = useState(() => (initialData?.muscleGroups || []).join(', '));
   const [searchTerm, setSearchTerm] = useState(() => initialData?.name || '');
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const { toast } = useToast();
   
-  const isEditing = !!(initialData && initialData.id);
+  const isEditing = useMemo(() => !!(initialData && initialData.id), [initialData]);
 
   useEffect(() => {
+    console.log('[AddExerciseModal] useEffect triggered. isOpen:', isOpen, 'initialData:', initialData);
     if (isOpen) {
       const stateToSet = getInitialExerciseState(initialData);
       setExerciseData(stateToSet);
       setMuscleGroupsInput((stateToSet.muscleGroups || []).join(', '));
       setSearchTerm(stateToSet.name || '');
       setShowAutocomplete(false);
+      console.log('[AddExerciseModal] State has been reset.', stateToSet);
     }
   }, [isOpen, initialData]);
 
@@ -120,6 +126,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
   };
 
   const handleSubmit = () => {
+    console.log('[AddExerciseModal] handleSubmit called. Current exerciseData:', exerciseData);
     if (!exerciseData.name.trim()) {
       toast({ variant: 'destructive', title: 'Validation Error', description: 'Exercise name is required.' });
       return;
@@ -144,6 +151,7 @@ export default function AddExerciseModal({ isOpen, onOpenChange, onSave, allExer
         exerciseId: newExerciseId,
       })),
     };
+    console.log('[AddExerciseModal] Calling onSave with:', exerciseToSave);
     onSave(exerciseToSave);
   };
 
