@@ -7,7 +7,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
 
-import type { Exercise as ExerciseType, LoggedExerciseData, WorkoutDay, NamedWorkoutPlan, SetData } from '@/types/workout';
+import type { Exercise as ExerciseType, LoggedExerciseData, WorkoutDay, NamedWorkoutPlan, SetData, UserData } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,7 +33,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from '@/lib/utils';
-import { getAllUserWorkoutPlans, saveUserWorkoutPlan } from '@/lib/firestore-workout-plan-service';
+import { getUserData, saveUserData } from '@/lib/firestore-workout-plan-service';
 import { getDailyLog, saveDailyLog } from '@/lib/firestore-log-service';
 import { getTargetWeightOverrides, setTargetWeightOverride as saveTargetWeightOverride } from '@/lib/firestore-settings-service';
 import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data';
@@ -82,9 +82,9 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const currentDate = getCurrentDateString();
 
   // --- Data Fetching with React Query ---
-  const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans', user?.uid],
-    queryFn: () => getAllUserWorkoutPlans(user!.uid),
+  const { data: userData, isLoading: isLoadingUserData } = useQuery({
+    queryKey: ['userData', user?.uid],
+    queryFn: () => getUserData(user!.uid),
     enabled: !!user,
   });
 
@@ -107,8 +107,8 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   // --- Memos to derive state from queries ---
   const { baseExercise, currentWorkoutDay, exerciseForLogging, activePlan } = useMemo(() => {
-    if (!allPlans) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
-    const plan = planIdFromQuery ? allPlans.find(p => p.id === planIdFromQuery) : allPlans.find(p => p.isActive);
+    if (!userData) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
+    const plan = planIdFromQuery ? userData.plans.find(p => p.id === planIdFromQuery) : userData.plans.find(p => p.isActive);
     if (!plan) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
     
     let baseEx, workoutDay, exerciseForLog;
@@ -126,7 +126,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     if (!baseEx) baseEx = allExercisesForModal?.find(ex => ex.id === exerciseId);
 
     return { baseExercise: baseEx, currentWorkoutDay: workoutDay, exerciseForLogging: exerciseForLog, activePlan: plan };
-  }, [allPlans, planIdFromQuery, dayIdFromQuery, exerciseId, allExercisesForModal]);
+  }, [userData, planIdFromQuery, dayIdFromQuery, exerciseId, allExercisesForModal]);
   
   const loggedExerciseData = useMemo(() => (dailyLog?.[exerciseId] || {}) as LoggedExerciseData, [dailyLog, exerciseId]);
 
@@ -194,18 +194,20 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   const saveEditedExerciseMutation = useMutation({
     mutationFn: (updatedExercise: ExerciseType) => {
-        if (!activePlan || !dayIdFromQuery) throw new Error("No active plan or day to update");
-        const newPlan = { ...activePlan };
-        const dayIndex = newPlan.plan.findIndex(d => d.id === dayIdFromQuery);
-        if (dayIndex === -1) throw new Error("Day not found in plan");
-        const exIndex = newPlan.plan[dayIndex].exercises.findIndex(ex => ex.id === updatedExercise.id);
-        if (exIndex === -1) throw new Error("Exercise not found in day");
-        
-        newPlan.plan[dayIndex].exercises[exIndex] = updatedExercise;
-        return saveUserWorkoutPlan(user!.uid, newPlan);
+        if (!userData || !activePlan || !dayIdFromQuery) throw new Error("No active plan or day to update");
+        const newPlans = produce(userData.plans, draft => {
+            const plan = draft.find(p => p.id === activePlan.id);
+            if (!plan) return;
+            const day = plan.plan.find(d => d.id === dayIdFromQuery);
+            if (!day) return;
+            const exIndex = day.exercises.findIndex(ex => ex.id === updatedExercise.id);
+            if (exIndex === -1) throw new Error("Exercise not found in day");
+            day.exercises[exIndex] = updatedExercise;
+        });
+        return saveUserData(user!.uid, { ...userData, plans: newPlans });
     },
     onSuccess: (data, updatedExercise) => {
-        queryClient.invalidateQueries({ queryKey: ['workoutPlans', user?.uid] });
+        queryClient.invalidateQueries({ queryKey: ['userData', user?.uid] });
         toast({ title: "Exercise Updated", description: `${updatedExercise.name} has been updated in your plan.`});
         setIsEditExerciseModalOpen(false);
     },
@@ -259,7 +261,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     return exerciseForLogging.sets.every(set => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length >= exerciseForLogging.sets.length;
   }, [exerciseForLogging, loggedExerciseData, dayIdFromQuery]);
 
-  const isLoading = isLoadingPlans || isLoadingLog || isLoadingOverrides || isLoadingAllExercises;
+  const isLoading = isLoadingUserData || isLoadingLog || isLoadingOverrides || isLoadingAllExercises;
 
   if (isLoading) {
     return <LoadingExercisePage />;
@@ -482,7 +484,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
             onOpenChange={setIsAIRecModalOpen}
         />
       )}
-      {exerciseForLogging && dayIdFromQuery && allExercisesForModal && (
+      {exerciseForLogging && dayIdFromQuery && allExercisesForModal && userData && (
         <AddExerciseModal
           isOpen={isEditExerciseModalOpen}
           onOpenChange={setIsEditExerciseModalOpen}

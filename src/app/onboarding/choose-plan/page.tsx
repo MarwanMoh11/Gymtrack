@@ -5,8 +5,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
-import { getAllUserWorkoutPlans, saveAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
-import type { NamedWorkoutPlan } from '@/types/workout';
+import { getUserData, saveUserData } from '@/lib/firestore-workout-plan-service';
+import type { NamedWorkoutPlan, UserData } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CheckCircle, Loader2 } from 'lucide-react';
@@ -36,7 +36,6 @@ function LoadingSkeleton() {
     );
 }
 
-
 export default function ChoosePlanPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -44,27 +43,26 @@ export default function ChoosePlanPage() {
   const { toast } = useToast();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
-  const { data: allPlans, isLoading } = useQuery({
-    queryKey: ['workoutPlans'],
-    queryFn: getAllUserWorkoutPlans,
+  const { data: userData, isLoading: isLoadingUserData } = useQuery({
+    queryKey: ['userData', user?.uid],
+    queryFn: () => getUserData(user!.uid),
+    enabled: !!user,
   });
 
   const mutation = useMutation({
-    mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(plansToSave),
-    onSuccess: (data, variables) => {
-      console.log("[ChoosePlanPage] 🟢 Mutation SUCCEEDED.");
-      // Manually update the query cache with the new data.
-      console.log("[ChoosePlanPage] Updating query cache with activated plan.");
-      queryClient.setQueryData(['workoutPlans', user?.uid], variables);
-      
-      toast({
-        title: "Plan Activated!",
-        description: "You're all set. Let's get started with your first workout.",
-      });
-      
-      // Now that the local state is correct, we can safely redirect.
-      console.log("[ChoosePlanPage] Redirecting to /dashboard/today...");
-      router.push('/dashboard/today');
+    mutationFn: (newUserData: UserData) => saveUserData(user!.uid, newUserData),
+    onSuccess: (data, newUserData) => {
+        console.log("[ChoosePlanPage] 🟢 Mutation SUCCEEDED.");
+        // Manually update the query cache with the new user data.
+        queryClient.setQueryData(['userData', user?.uid], newUserData);
+        
+        toast({
+            title: "Plan Activated!",
+            description: "You're all set. Let's get started with your first workout.",
+        });
+        
+        console.log("[ChoosePlanPage] Redirecting to /dashboard/today...");
+        router.push('/dashboard/today');
     },
     onError: (error) => {
       console.error("[ChoosePlanPage] 🔴 Mutation FAILED:", error);
@@ -73,31 +71,34 @@ export default function ChoosePlanPage() {
   });
 
   const handleSelectPlan = (planId: string) => {
-    console.log(`[ChoosePlanPage] User selected plan with ID: ${planId}`);
     setSelectedPlanId(planId);
   };
   
   const handleConfirmSelection = () => {
-    console.log("[ChoosePlanPage] handleConfirmSelection triggered.");
-    if (!selectedPlanId || !allPlans) {
-        console.error("[ChoosePlanPage] 🔴 Cannot confirm: selectedPlanId or allPlans is missing.", { selectedPlanId, allPlans });
+    if (!selectedPlanId || !user || !userData) {
+        console.error("[ChoosePlanPage] 🔴 Cannot confirm: missing data.", { selectedPlanId, user, userData });
         return;
     }
 
-    console.log(`[ChoosePlanPage] Activating plan ID: ${selectedPlanId}`);
-    const updatedPlans = allPlans.map(p => ({
+    const updatedPlans = userData.plans.map(p => ({
         ...p,
         isActive: p.id === selectedPlanId
     }));
     
-    console.log("[ChoosePlanPage] Generated updated plans array to save:", updatedPlans);
-    console.log("[ChoosePlanPage] Calling mutation.mutate...");
-    mutation.mutate(updatedPlans);
+    const newUserData: UserData = {
+        ...userData,
+        plans: updatedPlans,
+        onboardingStatus: 'completed'
+    };
+    
+    mutation.mutate(newUserData);
   };
 
-  if (isLoading) {
+  if (isLoadingUserData) {
     return <LoadingSkeleton />;
   }
+  
+  const allPlans = userData?.plans || [];
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
@@ -108,7 +109,7 @@ export default function ChoosePlanPage() {
             </div>
 
             <div className="space-y-4">
-                 {allPlans?.map(plan => (
+                 {allPlans.map(plan => (
                     <Card 
                         key={plan.id}
                         className={`cursor-pointer transition-all ${selectedPlanId === plan.id ? 'border-primary ring-2 ring-primary' : 'hover:border-primary/50'}`}
@@ -123,6 +124,14 @@ export default function ChoosePlanPage() {
                         </CardHeader>
                     </Card>
                  ))}
+                 {allPlans.length === 0 && (
+                     <Card>
+                        <CardHeader>
+                            <CardTitle>No Plans Available</CardTitle>
+                            <CardDescription>Could not load default workout plans. Please try refreshing the page.</CardDescription>
+                        </CardHeader>
+                     </Card>
+                 )}
             </div>
             
             <div className="text-center">

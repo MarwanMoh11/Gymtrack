@@ -11,7 +11,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useQueryClient } from '@tanstack/react-query';
-import { initializeDefaultPlansForUser } from '@/lib/firestore-workout-plan-service';
+import { getUserData, initializeUserData } from '@/lib/firestore-workout-plan-service';
 
 interface AuthContextType {
   user: User | null;
@@ -31,24 +31,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     console.log('[AuthContext] Setting up onAuthStateChanged listener.');
     const unsubscribe = onAuthStateChanged(auth, async (newUser) => {
-      const isNewUser = newUser && newUser.metadata.creationTime === newUser.metadata.lastSignInTime;
-      console.log(`[AuthContext] onAuthStateChanged triggered. User: ${newUser?.uid || 'null'}. Is new user: ${isNewUser}`);
-
-      setUser(newUser);
-
-      if (isNewUser) {
-        console.log('[AuthContext] New user detected. Initializing default plans.');
-        await initializeDefaultPlansForUser();
-        // After initializing, we should refetch the plans query to ensure the app has the latest state.
-        await queryClient.invalidateQueries({ queryKey: ['workoutPlans'] });
-      }
-
-      if (!newUser) {
-        console.log('[AuthContext] User logged out. Clearing all query data.');
-        // Clearing the entire cache on logout is safe and ensures no stale data for the next user.
+      console.log(`[AuthContext] onAuthStateChanged triggered. User: ${newUser?.uid || 'null'}.`);
+      
+      if (newUser) {
+        // Check if user data exists in Firestore.
+        const userData = await getUserData(newUser.uid);
+        if (!userData) {
+          console.log('[AuthContext] New user detected or missing data. Initializing user data in Firestore.');
+          await initializeUserData(newUser.uid);
+          // After initializing, invalidate to ensure AppLayout re-fetches the new user data.
+          await queryClient.invalidateQueries({ queryKey: ['userData', newUser.uid] });
+        }
+      } else {
+        console.log('[AuthContext] User logged out. Clearing all user-specific query data.');
+        // Clear all queries upon logout to prevent stale data issues.
         queryClient.clear();
       }
-      
+
+      setUser(newUser);
       console.log('[AuthContext] Auth loading state set to false.');
       setLoading(false);
     });
@@ -66,7 +66,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signup = async (email: string, password: string) => {
     console.log('[AuthContext] Attempting signup for email:', email);
-    // The onAuthStateChanged listener will handle the user state update and plan initialization.
+    // The onAuthStateChanged listener now handles the user data initialization.
     return createUserWithEmailAndPassword(auth, email, password);
   };
 

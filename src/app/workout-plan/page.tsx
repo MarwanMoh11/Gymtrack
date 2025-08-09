@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
-import { getAllUserWorkoutPlans, saveAllUserWorkoutPlans, saveUserWorkoutPlan } from '@/lib/firestore-workout-plan-service';
+import { getUserData, saveUserData } from '@/lib/firestore-workout-plan-service';
 import { setTodayWorkoutOverride as setOverrideService } from '@/lib/firestore-settings-service';
-import type { WorkoutDay, Exercise, NamedWorkoutPlan } from '@/types/workout';
+import type { WorkoutDay, Exercise, NamedWorkoutPlan, UserData } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,9 +49,10 @@ export default function WorkoutPlanPage() {
   const [isNewPlanDialogVisible, setIsNewPlanDialogVisible] = useState(false);
   const [newPlanNameInput, setNewPlanNameInput] = useState('');
   
-  const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans'], // No longer user-dependent
-    queryFn: getAllUserWorkoutPlans,
+  const { data: userData, isLoading: isLoadingUserData } = useQuery({
+    queryKey: ['userData', user?.uid],
+    queryFn: () => getUserData(user!.uid),
+    enabled: !!user,
   });
 
   const { data: allExercisesForModal, isLoading: isLoadingAllExercises } = useQuery({
@@ -59,7 +60,8 @@ export default function WorkoutPlanPage() {
       queryFn: getAllExercisesForAutocompleteGlobal,
   });
 
-  const activePlanDetails = useMemo(() => allPlans?.find(p => p.isActive), [allPlans]);
+  const activePlanDetails = useMemo(() => userData?.plans.find(p => p.isActive), [userData]);
+  const allPlans = useMemo(() => userData?.plans, [userData]);
 
   useEffect(() => {
     if (activePlanDetails && !isEditMode) {
@@ -69,35 +71,16 @@ export default function WorkoutPlanPage() {
     }
   }, [activePlanDetails, isEditMode]);
 
-  const savePlansMutation = useMutation({
-    mutationFn: (plansToSave: NamedWorkoutPlan[]) => saveAllUserWorkoutPlans(plansToSave),
-    onSuccess: (data, variables) => {
-        queryClient.setQueryData(['workoutPlans'], variables);
+  const saveUserDataMutation = useMutation({
+    mutationFn: (newUserData: UserData) => saveUserData(user!.uid, newUserData),
+    onSuccess: (data, newUserData) => {
+        queryClient.setQueryData(['userData', user?.uid], newUserData);
     },
-    onError: () => {
-      toast({ variant: 'destructive', title: 'Error', description: 'Could not save plan changes.' });
+    onError: (error) => {
+      toast({ variant: 'destructive', title: 'Error', description: `Could not save changes. ${error.message}` });
     }
   });
 
-  const saveSinglePlanMutation = useMutation({
-      mutationFn: (planToSave: NamedWorkoutPlan) => saveUserWorkoutPlan(planToSave),
-      onSuccess: (data, variables) => {
-          queryClient.setQueryData(['workoutPlans'], (oldData: NamedWorkoutPlan[] | undefined) => {
-            if (!oldData) return [variables];
-            const index = oldData.findIndex(p => p.id === variables.id);
-            if (index > -1) {
-              const newData = [...oldData];
-              newData[index] = variables;
-              return newData;
-            }
-            return [...oldData, variables];
-          });
-      },
-      onError: () => {
-          toast({ variant: 'destructive', title: 'Error', description: 'Could not save plan.' });
-      }
-  });
-  
   const setOverrideMutation = useMutation({
     mutationFn: (dayId: string) => {
       if (!user) throw new Error("User not authenticated.");
@@ -114,17 +97,19 @@ export default function WorkoutPlanPage() {
   });
 
   const handleSetPlanActive = (planId: string) => {
-    if (!allPlans) return;
-    const updatedPlans = allPlans.map(p => ({ ...p, isActive: p.id === planId }));
-    savePlansMutation.mutate(updatedPlans);
+    if (!userData) return;
+    const updatedPlans = userData.plans.map(p => ({ ...p, isActive: p.id === planId }));
+    saveUserDataMutation.mutate({ ...userData, plans: updatedPlans });
     setIsEditMode(false);
     toast({ title: "Active Plan Switched", description: "The active workout plan has been updated." });
   };
   
   const handleSaveChangesToActivePlan = () => {
-    if (activePlanDetails && editableActivePlan) {
-      const updatedPlan = { ...activePlanDetails, plan: editableActivePlan };
-      saveSinglePlanMutation.mutate(updatedPlan, {
+    if (activePlanDetails && editableActivePlan && userData) {
+      const updatedPlans = userData.plans.map(p => p.id === activePlanDetails.id ? { ...p, plan: editableActivePlan } : p);
+      saveUserDataMutation.mutate(
+        { ...userData, plans: updatedPlans },
+        {
           onSuccess: () => {
              setInitialActivePlanForEdit(JSON.parse(JSON.stringify(editableActivePlan)));
              setIsEditMode(false);
@@ -135,7 +120,7 @@ export default function WorkoutPlanPage() {
   };
 
   const handleActualCreateNewPlan = () => {
-    if (!newPlanNameInput.trim()) {
+    if (!newPlanNameInput.trim() || !userData) {
       toast({ variant: 'destructive', title: 'Plan Name Required', description: 'Please enter a name for the new plan.' });
       return;
     }
@@ -147,7 +132,8 @@ export default function WorkoutPlanPage() {
       plan: [],
       isActive: false,
     };
-    saveSinglePlanMutation.mutate(newPlan, {
+    const newUserData = { ...userData, plans: [...userData.plans, newPlan] };
+    saveUserDataMutation.mutate(newUserData, {
         onSuccess: () => {
             toast({ title: "New Plan Created", description: `Plan '${newPlan.name}' added.` });
             setIsNewPlanDialogVisible(false);
@@ -263,7 +249,7 @@ export default function WorkoutPlanPage() {
     setIsExerciseModalOpen(true);
   };
   
-  if (isLoadingPlans || isLoadingAllExercises) {
+  if (isLoadingUserData || isLoadingAllExercises) {
     return <LoadingWorkoutPlanPage />;
   }
 
@@ -297,7 +283,7 @@ export default function WorkoutPlanPage() {
                 <CardFooter>
                   <Button 
                     onClick={() => handleSetPlanActive(plan.id)} 
-                    disabled={plan.isActive || savePlansMutation.isPending}
+                    disabled={plan.isActive || saveUserDataMutation.isPending}
                     variant={plan.isActive ? "default" : "outline"}
                     size="sm"
                     className="w-full"
@@ -328,10 +314,10 @@ export default function WorkoutPlanPage() {
                 <div className="flex gap-2">
                 {isEditMode ? (
                     <>
-                    <Button onClick={handleSaveChangesToActivePlan} variant="default" size="sm" disabled={saveSinglePlanMutation.isPending}>
-                        {saveSinglePlanMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Save className="mr-2 h-4 w-4" />} Save Changes
+                    <Button onClick={handleSaveChangesToActivePlan} variant="default" size="sm" disabled={saveUserDataMutation.isPending}>
+                        {saveUserDataMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Save className="mr-2 h-4 w-4" />} Save Changes
                     </Button>
-                    <Button onClick={handleCancelChangesToActivePlan} variant="outline" size="sm" disabled={saveSinglePlanMutation.isPending}>
+                    <Button onClick={handleCancelChangesToActivePlan} variant="outline" size="sm" disabled={saveUserDataMutation.isPending}>
                         <XCircle className="mr-2 h-4 w-4" /> Cancel
                     </Button>
                     </>
@@ -498,8 +484,8 @@ export default function WorkoutPlanPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsNewPlanDialogVisible(false)}>Cancel</Button>
-            <Button onClick={handleActualCreateNewPlan} disabled={saveSinglePlanMutation.isPending}>
-                {saveSinglePlanMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : "Create Plan"}
+            <Button onClick={handleActualCreateNewPlan} disabled={saveUserDataMutation.isPending}>
+                {saveUserDataMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : "Create Plan"}
             </Button>
           </DialogFooter>
         </DialogContent>

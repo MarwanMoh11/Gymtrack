@@ -4,11 +4,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import type { DailyLog, WorkoutDay, NamedWorkoutPlan } from '@/types/workout';
+import type { DailyLog, WorkoutDay, NamedWorkoutPlan, UserData } from '@/types/workout';
 import { History, CalendarDays, Flame, BarChart } from 'lucide-react';
 import LoadingProgressiveOverloadDashboard from './loading';
 import { calculateStreaks, calculateProgressDataForChart, ChartData } from '@/lib/workout-utils';
-import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
+import { getUserData } from '@/lib/firestore-workout-plan-service';
 import { getAllUserLogs } from '@/lib/firestore-log-service';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar } from '@/components/ui/calendar';
@@ -47,10 +47,9 @@ export default function ProgressiveOverloadDashboardPage() {
   const [chartData, setChartData] = useState<ChartData[]>([]);
   const [exerciseName, setExerciseName] = useState<string>('');
 
-  // Firestore Queries
-  const { data: allPlans, isLoading: isLoadingPlans } = useQuery({
-    queryKey: ['workoutPlans', user?.uid],
-    queryFn: () => getAllUserWorkoutPlans(user!.uid),
+  const { data: userData, isLoading: isLoadingUserData } = useQuery({
+    queryKey: ['userData', user?.uid],
+    queryFn: () => getUserData(user!.uid),
     enabled: !!user,
   });
 
@@ -60,7 +59,7 @@ export default function ProgressiveOverloadDashboardPage() {
     enabled: !!user,
   });
 
-  const activePlan = useMemo(() => allPlans?.find(p => p.isActive), [allPlans]);
+  const activePlan = useMemo(() => userData?.plans.find(p => p.isActive), [userData]);
 
   // Effects
   useEffect(() => {
@@ -149,7 +148,7 @@ export default function ProgressiveOverloadDashboardPage() {
     weight: { label: 'Weight (kg)', color: 'hsl(var(--primary))' },
   };
 
-  if (!isClient || isLoadingPlans || isLoadingLogs) {
+  if (!isClient || isLoadingUserData || isLoadingLogs) {
     return <LoadingProgressiveOverloadDashboard />;
   }
 

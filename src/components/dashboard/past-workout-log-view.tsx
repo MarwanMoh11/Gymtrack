@@ -1,9 +1,10 @@
 // src/components/dashboard/past-workout-log-view.tsx
-import type { DailyLog, WorkoutDay, NamedWorkoutPlan, Exercise } from '@/types/workout';
+import type { DailyLog, WorkoutDay, NamedWorkoutPlan, Exercise, UserData } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { CheckCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { getAllUserWorkoutPlans } from '@/lib/firestore-workout-plan-service';
+import { useAuth } from '@/context/auth-context';
+import { getUserData } from '@/lib/firestore-workout-plan-service';
 import { getExerciseById as getExerciseDefById } from '@/data/workout-data';
 
 
@@ -38,17 +39,19 @@ function getExerciseById(exerciseId: string): Exercise | undefined {
 
 
 export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkoutLogViewProps) {
-  const { data: allPlans, isLoading } = useQuery({
-      queryKey: ['workoutPlans'],
-      queryFn: getAllUserWorkoutPlans,
+  const { user } = useAuth();
+  const { data: userData, isLoading } = useQuery({
+      queryKey: ['userData', user?.uid],
+      queryFn: () => getUserData(user!.uid),
+      enabled: !!user,
   });
 
   if (isLoading) {
       return <p>Loading exercise definitions...</p>
   }
 
-  if (allPlans) {
-      populateCache(allPlans);
+  if (userData?.plans) {
+      populateCache(userData.plans);
   }
 
   if (!dailyLog || Object.keys(dailyLog).length === 0) {

@@ -5,6 +5,7 @@ export type SetData = {
   unit?: 'reps' | 's' | 'min';
   id: string;
   exerciseId?: string; // Add exerciseId to associate set with its parent
+  notes?: string;
 };
 
 export type Exercise = {
@@ -70,4 +71,12 @@ export type NewSetData = {
   targetReps: string;
   targetWeight: string;
   unit: 'reps' | 's' | 'min';
+};
+
+// Represents the entire data structure for a user in Firestore
+export type UserData = {
+  id: string;
+  onboardingStatus: 'needs_plan_selection' | 'completed';
+  plans: NamedWorkoutPlan[];
+  // other top-level user settings can go here
 };
