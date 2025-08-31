@@ -4,7 +4,7 @@ export type SetData = {
   targetWeight?: string;
   unit?: 'reps' | 's' | 'min';
   id: string;
-  exerciseId?: string; // Add exerciseId to associate set with its parent
+  exerciseId: string; // Add exerciseId to associate set with its parent
   notes?: string;
 };
 

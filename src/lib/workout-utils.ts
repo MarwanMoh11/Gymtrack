@@ -1,3 +1,4 @@
+
 import type { DailyLog, Exercise, WorkoutDay, NamedWorkoutPlan, SetData, LoggedSetData } from '@/types/workout';
 import { defaultNamedPlans } from '@/data/workout-data';
 import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';

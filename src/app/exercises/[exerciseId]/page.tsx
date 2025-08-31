@@ -1,3 +1,4 @@
+
 // src/app/exercises/[exerciseId]/page.tsx
 'use client';
 
@@ -6,6 +7,7 @@ import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
+import { produce } from 'immer';
 
 import type { Exercise as ExerciseType, LoggedExerciseData, WorkoutDay, NamedWorkoutPlan, SetData, UserData } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -288,7 +290,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
         <Dumbbell className="h-16 w-16 text-destructive mb-4" />
         <h1 className="text-2xl font-bold text-destructive mb-2">Exercise Not in Day's Plan</h1>
         <p className="text-muted-foreground mb-6">
-          "{baseExercise.name}" (ID: {exerciseId}) is not part of the plan for "{currentWorkoutDay?.dayName || dayIdFromQuery}".
+          "{baseExercise.name}" (ID: {exerciseId}) is not part of the plan for "{currentWorkoutDay?.title || dayIdFromQuery}".
         </p>
          <Button asChild variant="outline" onClick={() => router.push('/dashboard/today')}>
            <span><ArrowLeft className="mr-2 h-4 w-4" /> Back to Today's Workout</span>
