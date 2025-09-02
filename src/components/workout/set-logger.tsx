@@ -50,6 +50,7 @@ export default function SetLogger({
 
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined && loggedSetData.reps !== null && String(loggedSetData.reps).trim() !== '') return String(loggedSetData.reps);
+    // Pre-fill with last session's reps if available
     if (lastSessionSetPerformance?.reps !== undefined) return String(lastSessionSetPerformance.reps);
     return '';
   };
@@ -66,6 +67,7 @@ export default function SetLogger({
 
 
   const handleLog = () => {
+    // If the input is empty, default to the placeholder (which is last session's reps or target reps)
     const repsToLog = String(currentReps).trim() !== '' 
       ? currentReps 
       : (lastSessionSetPerformance?.reps !== undefined ? String(lastSessionSetPerformance.reps) : String(setData.targetReps));
@@ -108,7 +110,8 @@ export default function SetLogger({
     if (lastSessionSetPerformance?.reps !== undefined) {
         const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
         if (!isNaN(lastRepsNum)) {
-            return String(lastRepsNum);
+            // Suggest an increase if possible
+            return String(lastRepsNum + 1);
         }
         return String(lastSessionSetPerformance.reps);
     }
@@ -121,8 +124,17 @@ export default function SetLogger({
     const currentRepsNum = parseInt(String(loggedSetData.reps), 10);
     const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
     
-    if (!isNaN(currentRepsNum) && !isNaN(lastRepsNum) && currentRepsNum > lastRepsNum) {
-        return { type: 'reps', diff: currentRepsNum - lastRepsNum };
+    if (isNaN(currentRepsNum) || isNaN(lastRepsNum)) return null;
+    
+    // For now, any increase is a PR. More complex logic could be added for weight+reps.
+    if (currentRepsNum > lastRepsNum) {
+        return { type: 'reps', diff: currentRepsNum - lastRepsNum, message: `+${currentRepsNum - lastRepsNum} Reps! Great Progress!` };
+    }
+    if (currentRepsNum === lastRepsNum) {
+        return { type: 'maintained', message: `Maintained, stay consistent.` };
+    }
+    if (currentRepsNum < lastRepsNum) {
+        return { type: 'decreased', message: `Slight drop, aim higher next time.` };
     }
     
     return null;
@@ -151,34 +163,43 @@ export default function SetLogger({
   }
 
   if (!isEditing && loggedSetData?.isCompleted) {
+    const isPR = performanceBeatLast?.type === 'reps';
+    
     return (
       <div className={cn(
-        "flex items-center justify-between p-3 border-t border-border/50",
-        performanceBeatLast ? "bg-primary/10" : "bg-secondary/30"
+        "p-3 border-t border-border/50",
+        isPR ? "bg-primary/10 border-l-4 border-l-primary" : "bg-secondary/30"
       )}>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-          <span className="font-medium w-12">Set {setNumber}:</span>
-          <span>Target: {setData.targetReps} {unitLabel}</span>
-          <span className={cn(
-            "font-semibold flex items-center",
-            performanceBeatLast ? "text-primary" : "text-foreground"
-          )}>
-            Logged: {loggedSetData.reps ?? 'N/A'} {unitLabel}
-            {performanceBeatLast && performanceBeatLast.type === 'reps' && (
-              <span className="ml-1.5 text-xs flex items-center text-green-500">(<Sparkles className="h-3 w-3 mr-0.5" /> +{performanceBeatLast.diff}!)</span>
-            )}
-          </span>
-          {lastSessionSetPerformance && (
-            <span className="text-xs text-muted-foreground/80 flex items-center">
-              <History className="h-3 w-3 mr-1 opacity-70" />
-              Last: {lastSessionSetPerformance.reps} {unitLabel}
-              {lastSessionSetPerformance.weight && ` @ ${lastSessionSetPerformance.weight}`}
-            </span>
-          )}
+        <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-x-4 gap-y-1 text-sm">
+              <span className="font-medium w-12">Set {setNumber}:</span>
+              <span className={cn(
+                "font-semibold flex items-center",
+                isPR ? "text-primary" : "text-foreground"
+              )}>
+                Logged: {loggedSetData.reps ?? 'N/A'} {unitLabel}
+              </span>
+              {lastSessionSetPerformance && (
+                <span className="text-xs text-muted-foreground/80 flex items-center">
+                  <History className="h-3 w-3 mr-1 opacity-70" />
+                  Last: {lastSessionSetPerformance.reps} {unitLabel}
+                </span>
+              )}
+            </div>
+             <Button variant="ghost" size="icon" onClick={handleEdit} className="h-8 w-8">
+              <Edit3 className="h-4 w-4" />
+            </Button>
         </div>
-        <Button variant="ghost" size="icon" onClick={handleEdit} className="h-8 w-8">
-          <Edit3 className="h-4 w-4" />
-        </Button>
+        {performanceBeatLast && (
+           <div className={cn(
+               "text-xs mt-1 pl-[calc(3rem)] flex items-center",
+                isPR ? "text-green-500 font-semibold" : "text-muted-foreground",
+                performanceBeatLast?.type === 'decreased' && "text-amber-500"
+            )}>
+              {isPR && <Sparkles className="h-3 w-3 mr-1" />}
+              {performanceBeatLast.message}
+            </div>
+        )}
       </div>
     );
   }

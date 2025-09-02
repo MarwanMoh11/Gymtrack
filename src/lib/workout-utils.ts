@@ -173,15 +173,14 @@ export const getPreviousSetPerformance = (
     const todayStr = new Date().toISOString().split('T')[0];
     const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
     
-    // To find the set index, we need the plan definition, which isn't available here.
-    // We make an assumption: set IDs are stable and ordered across sessions.
-    // This is fragile. A better approach would be to pass the set index.
-    // For now, we find the first log of this exercise and determine the index from there.
+    // Find the index of the current set within a typical log for this exercise.
+    // This is fragile but necessary without the full plan structure.
     let setIndex = -1;
     for (const date of sortedDates) {
         const log = allLogs.get(date);
         if (log && log[exerciseId]) {
-            const setIds = Object.keys(log[exerciseId]);
+            // Sort keys to maintain order, assuming set IDs are sortable (e.g., 'set-1', 'set-2')
+            const setIds = Object.keys(log[exerciseId]).sort();
             const idx = setIds.indexOf(currentSetId);
             if (idx !== -1) {
                 setIndex = idx;
@@ -189,8 +188,10 @@ export const getPreviousSetPerformance = (
             }
         }
     }
-    if (setIndex === -1) return undefined; // Cannot determine set's position.
+    // If we can't determine the set's order, we can't find its predecessor.
+    if (setIndex === -1) return undefined;
 
+    // Now find the most recent log for this exercise that is not today.
     for (const dateStr of sortedDates) {
         if (dateStr === todayStr) continue;
 
@@ -199,7 +200,8 @@ export const getPreviousSetPerformance = (
 
         const historicalExerciseLog = dailyLog[exerciseId];
         if (historicalExerciseLog && typeof historicalExerciseLog === 'object') {
-            const historicalSetIds = Object.keys(historicalExerciseLog);
+             // Sort keys to ensure we get the correct set at the found index
+            const historicalSetIds = Object.keys(historicalExerciseLog).sort();
             if (historicalSetIds.length > setIndex) {
                 const historicalSetKey = historicalSetIds[setIndex];
                 const previousPerformance = historicalExerciseLog[historicalSetKey];
