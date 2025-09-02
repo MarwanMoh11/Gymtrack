@@ -105,10 +105,12 @@ export default function SetLogger({
   }
 
   const handleMarkAsNotDone = () => {
-    onLogSet({ reps: String(loggedSetData?.reps), isCompleted: false });
+    // When un-completing, we keep the reps data but mark as incomplete.
+    onLogSet({ reps: String(loggedSetData?.reps || ''), isCompleted: false });
     setIsEditing(true);
     setCurrentReps(loggedSetData?.reps !== undefined ? String(loggedSetData.reps) : '');
   }
+
 
   const incrementReps = () => {
     setCurrentReps(prev => String(Number(prev || 0) + 1));
@@ -121,8 +123,8 @@ export default function SetLogger({
   const getPlaceholderReps = () => {
     if (lastSessionSetPerformance?.reps !== undefined) {
         const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
-        if (!isNaN(lastRepsNum)) {
-            // Suggest an increase if possible
+        if (!isNaN(lastRepsNum) && unitLabel === 'reps') {
+            // Suggest an increase if possible for reps-based exercises
             return String(lastRepsNum + 1);
         }
         return String(lastSessionSetPerformance.reps);
