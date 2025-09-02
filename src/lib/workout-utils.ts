@@ -1,4 +1,5 @@
 
+
 import type { DailyLog, Exercise, WorkoutDay, NamedWorkoutPlan, SetData, LoggedSetData } from '@/types/workout';
 import { defaultNamedPlans } from '@/data/workout-data';
 import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
@@ -172,26 +173,8 @@ export const getPreviousSetPerformance = (
 ): LoggedSetData | undefined => {
     const todayStr = new Date().toISOString().split('T')[0];
     const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    
-    // Find the index of the current set within a typical log for this exercise.
-    // This is fragile but necessary without the full plan structure.
-    let setIndex = -1;
-    for (const date of sortedDates) {
-        const log = allLogs.get(date);
-        if (log && log[exerciseId]) {
-            // Sort keys to maintain order, assuming set IDs are sortable (e.g., 'set-1', 'set-2')
-            const setIds = Object.keys(log[exerciseId]).sort();
-            const idx = setIds.indexOf(currentSetId);
-            if (idx !== -1) {
-                setIndex = idx;
-                break;
-            }
-        }
-    }
-    // If we can't determine the set's order, we can't find its predecessor.
-    if (setIndex === -1) return undefined;
 
-    // Now find the most recent log for this exercise that is not today.
+    // Find the most recent log for this exercise that is NOT today.
     for (const dateStr of sortedDates) {
         if (dateStr === todayStr) continue;
 
@@ -199,18 +182,12 @@ export const getPreviousSetPerformance = (
         if (!dailyLog) continue;
 
         const historicalExerciseLog = dailyLog[exerciseId];
-        if (historicalExerciseLog && typeof historicalExerciseLog === 'object') {
-             // Sort keys to ensure we get the correct set at the found index
-            const historicalSetIds = Object.keys(historicalExerciseLog).sort();
-            if (historicalSetIds.length > setIndex) {
-                const historicalSetKey = historicalSetIds[setIndex];
-                const previousPerformance = historicalExerciseLog[historicalSetKey];
-                
-                if (previousPerformance && previousPerformance.isCompleted) {
-                    return previousPerformance;
-                }
-            }
+        // Check if there is a log for this specific set ID in the historical log.
+        if (historicalExerciseLog && historicalExerciseLog[currentSetId] && historicalExerciseLog[currentSetId].isCompleted) {
+             // Found the most recent completed performance for this specific set
+            return historicalExerciseLog[currentSetId];
         }
     }
+    
     return undefined;
 };
