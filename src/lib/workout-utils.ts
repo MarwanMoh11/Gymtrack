@@ -169,23 +169,43 @@ export const calculateStreaks = (dates: Date[]): { current: number; longest: num
 export const getPreviousSetPerformance = (
     exerciseId: string,
     currentSetId: string,
-    allLogs: Map<string, DailyLog>
+    allLogs: Map<string, DailyLog>,
+    currentDayLog?: DailyLog // Pass today's log to search within it
 ): LoggedSetData | undefined => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    
+    const allSetIdsForExercise = Object.keys(currentDayLog?.[exerciseId] ?? {});
+    const currentSetIndex = allSetIdsForExercise.indexOf(currentSetId);
+
+    // 1. Check previous sets in the CURRENT workout session first
+    if (currentDayLog && currentSetIndex > 0) {
+        for (let i = currentSetIndex - 1; i >= 0; i--) {
+            const prevSetId = allSetIdsForExercise[i];
+            const prevSetLog = currentDayLog[exerciseId]?.[prevSetId];
+            if (prevSetLog?.isCompleted) {
+                return prevSetLog;
+            }
+        }
+    }
+
+    // 2. If no prior set today, check historical logs
     const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    const todayStr = new Date().toISOString().split('T')[0];
 
-    // Find the most recent log for this exercise that is NOT today.
     for (const dateStr of sortedDates) {
-        if (dateStr === todayStr) continue;
-
+        // We can look at today's log too, in case we're editing a later set after finishing an earlier one
         const dailyLog = allLogs.get(dateStr);
         if (!dailyLog) continue;
 
         const historicalExerciseLog = dailyLog[exerciseId];
-        // Check if there is a log for this specific set ID in the historical log.
-        if (historicalExerciseLog && historicalExerciseLog[currentSetId] && historicalExerciseLog[currentSetId].isCompleted) {
-             // Found the most recent completed performance for this specific set
-            return historicalExerciseLog[currentSetId];
+        if (historicalExerciseLog) {
+             // Find the last completed set from that day for the exercise
+             const historicalSetIds = Object.keys(historicalExerciseLog).reverse();
+             for (const setId of historicalSetIds) {
+                 const historicalSet = historicalExerciseLog[setId];
+                 if (historicalSet?.isCompleted) {
+                     return historicalSet;
+                 }
+             }
         }
     }
     

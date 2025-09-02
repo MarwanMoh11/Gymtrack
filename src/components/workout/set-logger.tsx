@@ -1,7 +1,7 @@
 
 'use client';
 
-import type { LoggedSetData, SetData } from '@/types/workout';
+import type { LoggedSetData, SetData, DailyLog } from '@/types/workout';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -9,7 +9,7 @@ import { Check, Edit3, Plus, Minus, History, Sparkles } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAllUserLogs } from '@/lib/firestore-log-service';
+import { getAllUserLogs, getDailyLog } from '@/lib/firestore-log-service';
 import { useAuth } from '@/context/auth-context';
 import { getPreviousSetPerformance } from '@/lib/workout-utils';
 
@@ -24,6 +24,11 @@ interface SetLoggerProps {
   isEditingInitially?: boolean; 
 }
 
+const getCurrentDateString = (): string => {
+  return new Date().toISOString().split('T')[0];
+};
+
+
 export default function SetLogger({
   setNumber,
   setData,
@@ -36,6 +41,7 @@ export default function SetLogger({
 }: SetLoggerProps) {
   const { user } = useAuth();
   const unitLabel = setData.unit || exerciseUnit || 'reps';
+  const currentDate = getCurrentDateString();
 
   const { data: allLogs, isLoading: isLoadingLogs } = useQuery({
     queryKey: ['allUserLogs', user?.uid],
@@ -43,10 +49,16 @@ export default function SetLogger({
     enabled: !!user,
   });
 
+  const { data: todayLog } = useQuery<DailyLog | null>({
+    queryKey: ['dailyLog', user?.uid, currentDate],
+    queryFn: () => getDailyLog(user!.uid, currentDate),
+    enabled: !!user,
+  });
+
   const lastSessionSetPerformance = useMemo(() => {
-    if (!allLogs || !setData.exerciseId) return undefined;
-    return getPreviousSetPerformance(setData.exerciseId, setData.id, allLogs);
-  }, [allLogs, setData.exerciseId, setData.id]);
+    if (!allLogs) return undefined;
+    return getPreviousSetPerformance(setData.exerciseId, setData.id, allLogs, todayLog ?? undefined);
+  }, [allLogs, todayLog, setData.exerciseId, setData.id]);
 
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined && loggedSetData.reps !== null && String(loggedSetData.reps).trim() !== '') return String(loggedSetData.reps);
@@ -182,7 +194,7 @@ export default function SetLogger({
               {lastSessionSetPerformance && (
                 <span className="text-xs text-muted-foreground/80 flex items-center">
                   <History className="h-3 w-3 mr-1 opacity-70" />
-                  Last: {lastSessionSetPerformance.reps} {unitLabel}
+                  Last time: {lastSessionSetPerformance.reps} {unitLabel}
                 </span>
               )}
             </div>
