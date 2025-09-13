@@ -253,6 +253,7 @@ export const getVolumeForMuscleGroups = (
           const completedSets = Object.values(exerciseLog).filter(set => set.isCompleted).length;
           if (completedSets > 0) {
             exerciseDef.muscleGroups.forEach(muscle => {
+              // **THE FIX**: Use += to accumulate volume instead of overwriting it.
               muscleVolumes[muscle] = (muscleVolumes[muscle] || 0) + completedSets;
             });
           }
