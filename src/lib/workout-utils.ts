@@ -1,7 +1,5 @@
-
-
-import type { DailyLog, Exercise, WorkoutDay, NamedWorkoutPlan, SetData, LoggedSetData } from '@/types/workout';
-import { defaultNamedPlans } from '@/data/workout-data';
+// src/lib/workout-utils.ts
+import type { DailyLog, NamedWorkoutPlan, SetData, LoggedSetData, Exercise } from '@/types/workout';
 import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
 
 
@@ -10,7 +8,7 @@ export const getAllExercises = (allPlans: NamedWorkoutPlan[]): Array<{ id: strin
   allPlans?.forEach(namedPlan => {
     namedPlan.plan.forEach(day => {
       day.exercises.forEach(ex => {
-        if (!ex.isWarmup && !ex.isConditioning && !ex.stretch && !ex.isFoamRoll && !ex.isActivity && !ex.isMatch && !ex.isRecovery && !ex.isCore && ex.unit === 'reps') {
+        if (!ex.isWarmup && !ex.isConditioning && !ex.isStretch && !ex.isFoamRoll && !ex.isActivity && !ex.isMatch && !ex.isRecovery && !ex.isCore && ex.unit === 'reps') {
           if (!exercisesMap.has(ex.id)) {
             exercisesMap.set(ex.id, ex.name);
           }
@@ -47,17 +45,23 @@ export type ChartData = {
 export const calculateProgressDataForChart = (exerciseId: string, allLogs: Map<string, DailyLog>): ChartData[] => {
     const relevantLogs: Array<{ date: string, weightStr: string, repsPerSet: string[] }> = [];
 
-    allLogs.forEach((dailyLog, dateStr) => {
+    const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    sortedDates.forEach(dateStr => {
+        const dailyLog = allLogs.get(dateStr);
+        if (!dailyLog) return;
         const exerciseLog = dailyLog[exerciseId];
+        
         if (exerciseLog && typeof exerciseLog === 'object' && Object.keys(exerciseLog).length > 0) {
             const repsPerSet: string[] = [];
             let sessionWeight: string | undefined;
 
+            // Find the first completed set to determine the session's weight
             for (const setId in exerciseLog) {
                 const loggedSet = exerciseLog[setId];
                 if (loggedSet.isCompleted && loggedSet.weight) {
                     sessionWeight = loggedSet.weight;
-                    break; 
+                    break;
                 }
             }
             if (sessionWeight === undefined) return;
@@ -74,8 +78,6 @@ export const calculateProgressDataForChart = (exerciseId: string, allLogs: Map<s
         }
     });
 
-    relevantLogs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
     let maxWeight = -1;
     const chartData: ChartData[] = relevantLogs.map(log => {
         const weight = parseWeightToNumber(log.weightStr);
@@ -173,7 +175,24 @@ export const getPreviousSetPerformance = (
     currentDayLog?: DailyLog // Pass today's log to search within it
 ): LoggedSetData | undefined => {
     
-    const allSetIdsForExercise = Object.keys(currentDayLog?.[exerciseId] ?? {});
+    // Find the definition for the current exercise to know all its sets
+    const queryClient: any = (window as any).queryClient;
+    const userData: any = queryClient.getQueryData(['userData', 'some-user-id']); // This is a hack, proper DI would be better.
+    let currentExercise: Exercise | undefined;
+    if (userData?.plans) {
+        for (const plan of userData.plans) {
+            for (const day of plan.plan) {
+                const found = day.exercises.find(ex => ex.id === exerciseId);
+                if (found) {
+                    currentExercise = found;
+                    break;
+                }
+            }
+            if (currentExercise) break;
+        }
+    }
+
+    const allSetIdsForExercise = currentExercise ? currentExercise.sets.map(s => s.id) : Object.keys(currentDayLog?.[exerciseId] ?? {});
     const currentSetIndex = allSetIdsForExercise.indexOf(currentSetId);
 
     // 1. Check previous sets in the CURRENT workout session first
@@ -192,22 +211,55 @@ export const getPreviousSetPerformance = (
     const todayStr = new Date().toISOString().split('T')[0];
 
     for (const dateStr of sortedDates) {
-        // We can look at today's log too, in case we're editing a later set after finishing an earlier one
+        if (dateStr >= todayStr) continue; // Only look at logs from before today
+
         const dailyLog = allLogs.get(dateStr);
         if (!dailyLog) continue;
 
         const historicalExerciseLog = dailyLog[exerciseId];
         if (historicalExerciseLog) {
-             // Find the last completed set from that day for the exercise
-             const historicalSetIds = Object.keys(historicalExerciseLog).reverse();
-             for (const setId of historicalSetIds) {
-                 const historicalSet = historicalExerciseLog[setId];
-                 if (historicalSet?.isCompleted) {
-                     return historicalSet;
-                 }
+             const lastSetId = allSetIdsForExercise[allSetIdsForExercise.length - 1];
+             const historicalSet = historicalExerciseLog[lastSetId];
+             if (historicalSet?.isCompleted) {
+                 return historicalSet;
              }
         }
     }
     
     return undefined;
+};
+
+
+// New function for Muscle Heatmap
+export const getVolumeForMuscleGroups = (
+  dates: string[],
+  allLogs: Map<string, DailyLog>,
+  allPlans: NamedWorkoutPlan[]
+): { [muscle: string]: number } => {
+  const muscleVolumes: { [muscle: string]: number } = {};
+  const exerciseCache = new Map<string, Exercise>();
+
+  // Pre-populate exercise cache from all plans
+  allPlans.forEach(p => p.plan.forEach(d => d.exercises.forEach(e => exerciseCache.set(e.id, e))));
+
+  dates.forEach(dateStr => {
+    const log = allLogs.get(dateStr);
+    if (log) {
+      for (const exerciseId in log) {
+        const exerciseLog = log[exerciseId];
+        const exerciseDef = exerciseCache.get(exerciseId);
+
+        if (exerciseDef && exerciseDef.muscleGroups) {
+          const completedSets = Object.values(exerciseLog).filter(set => set.isCompleted).length;
+          if (completedSets > 0) {
+            exerciseDef.muscleGroups.forEach(muscle => {
+              muscleVolumes[muscle] = (muscleVolumes[muscle] || 0) + completedSets;
+            });
+          }
+        }
+      }
+    }
+  });
+
+  return muscleVolumes;
 };
