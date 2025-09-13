@@ -1,7 +1,8 @@
+
 // src/components/dashboard/muscle-heatmap.tsx
 import React from 'react';
-import AnteriorView from './anterior-view';
-import PosteriorView from './posterior-view';
+import AnteriorView from '../icons/muscle-groups/anterior';
+import PosteriorView from '../icons/muscle-groups/posterior';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 
@@ -26,13 +27,16 @@ export default function MuscleHeatmap({ muscleVolumes, onMuscleClick, selectedMu
 
   const muscleGroups = {
     // Anterior
-    'Chest': ['Chest', 'Pectoralis Major', 'Upper Pectoralis', 'Lower Pectoralis', 'Serratus Anterior'],
-    'Shoulders': ['Shoulders', 'Deltoids', 'Anterior Deltoids', 'All three Deltoid heads'],
+    'Chest': ['Chest', 'Pectoralis Major', 'Upper Pectoralis', 'Lower Pectoralis'],
+    'Shoulders': ['Shoulders', 'Deltoids', 'Anterior Deltoids', 'All three Deltoid heads', 'Lateral Deltoids'],
     'Biceps': ['Biceps', 'Biceps Brachii', 'Brachialis'],
     'Abs': ['Abs', 'Rectus Abdominis', 'Transverse Abdominis', 'Lower Rectus Abdominis', 'Core'],
     'Obliques': ['Obliques'],
-    'Quads': ['Quadriceps'],
+    'Quads': ['Quadriceps', 'Quads'],
     'Hip Adductors': ['Hip Adductors', 'Groin', 'Adductors'],
+    'Serratus Anterior': ['Serratus Anterior'],
+    'Hip Flexors': ['Hip Flexors'],
+
     // Posterior
     'Traps': ['Traps', 'Trapezius', 'Upper Trapezius'],
     'Upper Back': ['Upper Back', 'Rhomboids'],
@@ -43,8 +47,8 @@ export default function MuscleHeatmap({ muscleVolumes, onMuscleClick, selectedMu
     'Calves': ['Calves', 'Gastrocnemius', 'Soleus'],
     'Triceps': ['Triceps', 'Triceps Brachii'],
     'Forearms': ['Forearms', 'Forearm Flexors', 'Forearm Extensors', 'Brachioradialis'],
-    'Rear Delts': ['Posterior Deltoids']
-  };
+    'Rear Delts': ['Posterior Deltoids', 'Rear Delts']
+};
 
   const aggregatedVolumes: { [key: string]: number } = {};
   for (const group in muscleGroups) {
