@@ -75,8 +75,8 @@ export default function MuscleDetailView({ muscle, volume, allLogs, activePlan }
                     }
                   />
                   <Line type="monotone" dataKey="weight" stroke="hsl(var(--primary))" strokeWidth={2} dot={(props) => {
-                    const { cx, cy, payload } = props;
-                    return <circle cx={cx} cy={cy} r={payload.isPR ? 4 : 2} fill="hsl(var(--primary))" />;
+                    const { cx, cy, payload, index } = props;
+                    return <circle key={index} cx={cx} cy={cy} r={payload.isPR ? 4 : 2} fill="hsl(var(--primary))" className={payload.isPR ? "pr-dot" : ""} />;
                   }} />
                 </LineChart>
               </ChartContainer>
