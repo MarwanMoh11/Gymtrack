@@ -11,38 +11,65 @@ export default function AnteriorView({ onMuscleClick, getMuscleClass, ...props }
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 350 800"
+      viewBox="0 0 200 400"
       aria-label="Anterior view of muscle groups"
       {...props}
+      shapeRendering="crispEdges"
     >
-        <g id="ant-shoulders" className={getMuscleClass('Shoulders')} onClick={() => onMuscleClick('Shoulders')}>
-            <path d="M 198.2,143.4l-31.5,13.3l-34.9-13.3L130.6,128l37.7-10.6l31.5,13.3V143.4z"/>
-        </g>
-        <g id="ant-chest" className={getMuscleClass('Chest')} onClick={() => onMuscleClick('Chest')}>
-            <path d="M168.3,156.7v38.8h-11.7v12.2H150v-12.2h-16.1v-38.8L130.6,145l37.7-10.6l31.5,13.3v8.4H168.3z"/>
-            <path d="M170,156.7v38.8h11.7v12.2H188v-12.2h16.1v-38.8L207.4,145l-37.7-10.6l-31.5,13.3v8.4H170z"/>
-        </g>
-        <g id="ant-biceps" className={getMuscleClass('Biceps')} onClick={() => onMuscleClick('Biceps')}>
-            <path d="M 231.6,195.5v32.2h-14.5v12.2h-8.9V212h-9.9v-16.5H231.6z"/>
-            <path d="M 102.8,195.5v32.2h14.5v12.2h8.9V212h9.9v-16.5H102.8z"/>
-        </g>
-        <g id="ant-forearms" className={getMuscleClass('Forearms')} onClick={() => onMuscleClick('Forearms')}>
-            <path d="M 231.6,239.9v35.4h-10.9v10.1h-10.9v-11.2h-11.9v-34.3H231.6z"/>
-            <path d="M 102.8,239.9v35.4h10.9v10.1h10.9v-11.2h11.9v-34.3H102.8z"/>
-        </g>
-        <g id="ant-abs" className={getMuscleClass('Abs')} onClick={() => onMuscleClick('Abs')}>
-            <path d="M 186.5,207.7v81.1h-74.8V207.7H186.5z"/>
-        </g>
-        <g id="ant-obliques" className={getMuscleClass('Obliques')} onClick={() => onMuscleClick('Obliques')}>
-            <path d="M 206.5,207.7v63.3h-19.9V207.7H206.5z"/>
-            <path d="M 96.1,207.7v63.3h19.9V207.7H96.1z"/>
-        </g>
-        <g id="ant-quads" className={getMuscleClass('Quads')} onClick={() => onMuscleClick('Quads')}>
-             <path d="M186.5,309.5v140h-24.8v-140z M136.7,309.5v140H112v-140H136.7z"/>
-        </g>
-        <g id="ant-hip-adductors" className={getMuscleClass('Hip Adductors')} onClick={() => onMuscleClick('Hip Adductors')}>
-            <path d="M 161.7,309.5v100h-24.8v-100H161.7z"/>
-        </g>
+      {/* Head */}
+      <rect x="80" y="20" width="40" height="40" className="fill-muted-foreground/20" />
+      
+      {/* Neck */}
+      <rect x="90" y="60" width="20" height="10" className="fill-muted-foreground/20" />
+
+      {/* Shoulders */}
+      <g id="ant-shoulders" className={getMuscleClass('Shoulders')} onClick={() => onMuscleClick('Shoulders')}>
+        <rect x="50" y="70" width="100" height="20" />
+      </g>
+      
+      {/* Chest */}
+      <g id="ant-chest" className={getMuscleClass('Chest')} onClick={() => onMuscleClick('Chest')}>
+        <rect x="70" y="90" width="60" height="40" />
+      </g>
+
+      {/* Biceps */}
+      <g id="ant-biceps" className={getMuscleClass('Biceps')} onClick={() => onMuscleClick('Biceps')}>
+        <rect x="50" y="90" width="20" height="50" />
+        <rect x="130" y="90" width="20" height="50" />
+      </g>
+
+      {/* Abs */}
+      <g id="ant-abs" className={getMuscleClass('Abs')} onClick={() => onMuscleClick('Abs')}>
+        <rect x="70" y="130" width="60" height="60" />
+      </g>
+
+      {/* Obliques */}
+      <g id="ant-obliques" className={getMuscleClass('Obliques')} onClick={() => onMuscleClick('Obliques')}>
+        <rect x="60" y="130" width="10" height="60" />
+        <rect x="130" y="130" width="10" height="60" />
+      </g>
+
+      {/* Forearms */}
+      <g id="ant-forearms" className={getMuscleClass('Forearms')} onClick={() => onMuscleClick('Forearms')}>
+        <rect x="50" y="140" width="10" height="60" />
+        <rect x="140" y="140" width="10" height="60" />
+      </g>
+      
+      {/* Hip Adductors */}
+      <g id="ant-hip-adductors" className={getMuscleClass('Hip Adductors')} onClick={() => onMuscleClick('Hip Adductors')}>
+        <rect x="80" y="190" width="40" height="40" />
+      </g>
+
+      {/* Quads */}
+      <g id="ant-quads" className={getMuscleClass('Quads')} onClick={() => onMuscleClick('Quads')}>
+        <rect x="60" y="190" width="20" height="100" />
+        <rect x="120" y="190" width="20" height="100" />
+      </g>
+
+      {/* Lower Legs */}
+       <rect x="60" y="290" width="20" height="80" className="fill-muted-foreground/20" />
+       <rect x="120" y="290" width="20" height="80" className="fill-muted-foreground/20" />
+
     </svg>
   );
 }
