@@ -1,5 +1,5 @@
 // src/lib/workout-utils.ts
-import type { DailyLog, NamedWorkoutPlan, SetData, LoggedSetData, Exercise } from '@/types/workout';
+import type { DailyLog, NamedWorkoutPlan, SetData, LoggedSetData, Exercise, WorkoutDay } from '@/types/workout';
 import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
 
 
@@ -8,7 +8,7 @@ export const getAllExercises = (allPlans: NamedWorkoutPlan[]): Array<{ id: strin
   allPlans?.forEach(namedPlan => {
     namedPlan.plan.forEach(day => {
       day.exercises.forEach(ex => {
-        if (!ex.isWarmup && !ex.isConditioning && !ex.isStretch && !ex.isFoamRoll && !ex.isActivity && !ex.isMatch && !ex.isRecovery && !ex.isCore && ex.unit === 'reps') {
+        if (!ex.isWarmup && !ex.isConditioning && !ex.stretch && !ex.isFoamRoll && !ex.isActivity && !ex.isMatch && !ex.isRecovery && !ex.isCore && ex.unit === 'reps') {
           if (!exercisesMap.has(ex.id)) {
             exercisesMap.set(ex.id, ex.name);
           }
@@ -169,64 +169,71 @@ export const calculateStreaks = (dates: Date[]): { current: number; longest: num
 };
 
 export const getPreviousSetPerformance = (
-    exerciseId: string,
-    currentSetId: string,
-    allLogs: Map<string, DailyLog>,
-    currentDayLog?: DailyLog // Pass today's log to search within it
+  exerciseId: string,
+  currentSetId: string,
+  allLogs: Map<string, DailyLog>,
+  activePlan: NamedWorkoutPlan | undefined,
+  currentDayLog?: DailyLog
 ): LoggedSetData | undefined => {
-    
-    // Find the definition for the current exercise to know all its sets
-    const queryClient: any = (window as any).queryClient;
-    const userData: any = queryClient.getQueryData(['userData', 'some-user-id']); // This is a hack, proper DI would be better.
-    let currentExercise: Exercise | undefined;
-    if (userData?.plans) {
-        for (const plan of userData.plans) {
-            for (const day of plan.plan) {
-                const found = day.exercises.find(ex => ex.id === exerciseId);
-                if (found) {
-                    currentExercise = found;
-                    break;
-                }
-            }
-            if (currentExercise) break;
-        }
+  if (!activePlan) return undefined;
+
+  let currentExercise: Exercise | undefined;
+  for (const day of activePlan.plan) {
+    const found = day.exercises.find(ex => ex.id === exerciseId);
+    if (found) {
+      currentExercise = found;
+      break;
     }
+  }
 
-    const allSetIdsForExercise = currentExercise ? currentExercise.sets.map(s => s.id) : Object.keys(currentDayLog?.[exerciseId] ?? {});
-    const currentSetIndex = allSetIdsForExercise.indexOf(currentSetId);
+  if (!currentExercise) return undefined;
 
-    // 1. Check previous sets in the CURRENT workout session first
-    if (currentDayLog && currentSetIndex > 0) {
-        for (let i = currentSetIndex - 1; i >= 0; i--) {
-            const prevSetId = allSetIdsForExercise[i];
-            const prevSetLog = currentDayLog[exerciseId]?.[prevSetId];
-            if (prevSetLog?.isCompleted) {
-                return prevSetLog;
-            }
-        }
+  const allSetIdsForExercise = currentExercise.sets.map(s => s.id);
+  const currentSetIndex = allSetIdsForExercise.indexOf(currentSetId);
+
+  // 1. Check previous sets in the CURRENT workout session first
+  if (currentDayLog && currentSetIndex > 0) {
+    for (let i = currentSetIndex - 1; i >= 0; i--) {
+      const prevSetId = allSetIdsForExercise[i];
+      const prevSetLog = currentDayLog[exerciseId]?.[prevSetId];
+      if (prevSetLog?.isCompleted) {
+        return prevSetLog;
+      }
     }
+  }
 
-    // 2. If no prior set today, check historical logs
-    const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    const todayStr = new Date().toISOString().split('T')[0];
+  // 2. If no prior set today, check historical logs
+  const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  const todayStr = new Date().toISOString().split('T')[0];
 
-    for (const dateStr of sortedDates) {
-        if (dateStr >= todayStr) continue; // Only look at logs from before today
+  for (const dateStr of sortedDates) {
+    // We should not look at today's log for *historical* data, only previous days.
+    // The check for previous sets *within* today's session is handled above.
+    if (dateStr === todayStr) continue;
 
-        const dailyLog = allLogs.get(dateStr);
-        if (!dailyLog) continue;
+    const dailyLog = allLogs.get(dateStr);
+    if (!dailyLog) continue;
 
-        const historicalExerciseLog = dailyLog[exerciseId];
-        if (historicalExerciseLog) {
-             const lastSetId = allSetIdsForExercise[allSetIdsForExercise.length - 1];
-             const historicalSet = historicalExerciseLog[lastSetId];
-             if (historicalSet?.isCompleted) {
-                 return historicalSet;
-             }
+    const historicalExerciseLog = dailyLog[exerciseId];
+    if (historicalExerciseLog) {
+      // Find the performance for the corresponding set from the last session this exercise was performed.
+      // We look at the set with the same index.
+      if (currentSetIndex !== -1) {
+        const correspondingSetId = allSetIdsForExercise[currentSetIndex];
+        const historicalSet = historicalExerciseLog[correspondingSetId];
+        if (historicalSet?.isCompleted) {
+          return historicalSet;
         }
+      }
+      // Fallback: If set IDs don't match (e.g., plan changed), find the last completed set from that day's log for the exercise.
+      const lastCompletedSet = Object.values(historicalExerciseLog).reverse().find(s => s.isCompleted);
+      if (lastCompletedSet) {
+        return lastCompletedSet;
+      }
     }
-    
-    return undefined;
+  }
+
+  return undefined;
 };
 
 

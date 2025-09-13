@@ -460,6 +460,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                   isSimpleLog={isSpecialActivity}
                   isEditingInitially={!loggedExerciseData?.[set.id]?.isCompleted}
                   effectiveTargetWeight={sessionTargetWeight}
+                  activePlan={activePlan}
                 />
               ))}
           </CardContent>

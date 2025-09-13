@@ -1,7 +1,7 @@
 
 'use client';
 
-import type { LoggedSetData, SetData, DailyLog } from '@/types/workout';
+import type { LoggedSetData, SetData, DailyLog, NamedWorkoutPlan } from '@/types/workout';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -22,6 +22,7 @@ interface SetLoggerProps {
   exerciseUnit?: 'reps' | 's' | 'min';
   isSimpleLog?: boolean; 
   isEditingInitially?: boolean; 
+  activePlan?: NamedWorkoutPlan;
 }
 
 const getCurrentDateString = (): string => {
@@ -38,6 +39,7 @@ export default function SetLogger({
   exerciseUnit,
   isSimpleLog = false,
   isEditingInitially = !loggedSetData?.isCompleted,
+  activePlan,
 }: SetLoggerProps) {
   const { user } = useAuth();
   const unitLabel = setData.unit || exerciseUnit || 'reps';
@@ -56,9 +58,9 @@ export default function SetLogger({
   });
 
   const lastSessionSetPerformance = useMemo(() => {
-    if (!allLogs) return undefined;
-    return getPreviousSetPerformance(setData.exerciseId, setData.id, allLogs, todayLog ?? undefined);
-  }, [allLogs, todayLog, setData.exerciseId, setData.id]);
+    if (!allLogs || !activePlan) return undefined;
+    return getPreviousSetPerformance(setData.exerciseId, setData.id, allLogs, activePlan, todayLog ?? undefined);
+  }, [allLogs, todayLog, setData.exerciseId, setData.id, activePlan]);
 
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined && loggedSetData.reps !== null && String(loggedSetData.reps).trim() !== '') return String(loggedSetData.reps);
