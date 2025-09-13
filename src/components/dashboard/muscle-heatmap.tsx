@@ -1,7 +1,7 @@
 // src/components/dashboard/muscle-heatmap.tsx
 import React from 'react';
-import AnteriorView from '@/components/icons/muscle-groups/anterior';
-import PosteriorView from '@/components/icons/muscle-groups/posterior';
+import AnteriorView from '../icons/muscle-groups/anterior';
+import PosteriorView from '../icons/muscle-groups/posterior';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 
