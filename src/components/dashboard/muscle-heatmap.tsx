@@ -1,7 +1,7 @@
 // src/components/dashboard/muscle-heatmap.tsx
 import React from 'react';
-import AnteriorView from '../icons/muscle-groups/anterior';
-import PosteriorView from '../icons/muscle-groups/posterior';
+import AnteriorView from './anterior-view';
+import PosteriorView from './posterior-view';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 
@@ -26,23 +26,23 @@ export default function MuscleHeatmap({ muscleVolumes, onMuscleClick, selectedMu
 
   const muscleGroups = {
     // Anterior
-    'Chest': ['Pectoralis Major', 'Upper Pectoralis', 'Lower Pectoralis'],
-    'Shoulders': ['Deltoids', 'Anterior Deltoids', 'Lateral Deltoids'],
-    'Biceps': ['Biceps', 'Biceps Brachii'],
-    'Abs': ['Rectus Abdominis', 'Transverse Abdominis', 'Lower Rectus Abdominis'],
+    'Chest': ['Chest', 'Pectoralis Major', 'Upper Pectoralis', 'Lower Pectoralis', 'Serratus Anterior'],
+    'Shoulders': ['Shoulders', 'Deltoids', 'Anterior Deltoids', 'All three Deltoid heads'],
+    'Biceps': ['Biceps', 'Biceps Brachii', 'Brachialis'],
+    'Abs': ['Abs', 'Rectus Abdominis', 'Transverse Abdominis', 'Lower Rectus Abdominis', 'Core'],
     'Obliques': ['Obliques'],
     'Quads': ['Quadriceps'],
-    'Hip Adductors': ['Hip Adductors', 'Groin'],
+    'Hip Adductors': ['Hip Adductors', 'Groin', 'Adductors'],
     // Posterior
-    'Traps': ['Trapezius', 'Upper Trapezius'],
-    'Upper Back': ['Rhomboids'],
-    'Lats': ['Latissimus Dorsi'],
-    'Lower Back': ['Erector Spinae'],
+    'Traps': ['Traps', 'Trapezius', 'Upper Trapezius'],
+    'Upper Back': ['Upper Back', 'Rhomboids'],
+    'Lats': ['Lats', 'Latissimus Dorsi'],
+    'Lower Back': ['Lower Back', 'Erector Spinae'],
     'Glutes': ['Glutes'],
     'Hamstrings': ['Hamstrings'],
     'Calves': ['Calves', 'Gastrocnemius', 'Soleus'],
     'Triceps': ['Triceps', 'Triceps Brachii'],
-    'Forearms': ['Forearms', 'Forearm Flexors', 'Forearm Extensors', 'Brachialis', 'Brachioradialis'],
+    'Forearms': ['Forearms', 'Forearm Flexors', 'Forearm Extensors', 'Brachioradialis'],
     'Rear Delts': ['Posterior Deltoids']
   };
 
