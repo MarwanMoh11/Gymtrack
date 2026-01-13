@@ -277,14 +277,14 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const canShowAISuggestionButton = dayIdFromQuery && !isSpecialActivity && displayExercise.category !== 'core' && !isSkipped;
 
   return (
-    <div className="w-full max-w-3xl mx-auto space-y-8 pb-20 animate-in fade-in duration-700">
+    <div className="w-full max-w-3xl mx-auto space-y-8 pb-20 animate-in fade-in duration-700 md:px-0">
       {/* Navigation & Status Header */}
       <div className="flex items-center justify-between">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => dayIdFromQuery ? router.push('/dashboard/today') : router.back()}
-          className="h-10 rounded-xl hover:bg-white/5 text-muted-foreground hover:text-foreground transition-all flex items-center gap-2 group"
+          className="h-10 rounded-xl hover:bg-white/5 text-muted-foreground hover:text-foreground transition-all flex items-center gap-2 group -ml-2"
         >
           <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" />
           <span className="text-[10px] font-bold uppercase tracking-widest">Return to Training</span>
