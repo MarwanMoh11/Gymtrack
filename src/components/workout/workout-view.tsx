@@ -6,10 +6,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
-import { getUserData } from '@/lib/firestore-workout-plan-service';
+import { useUser } from '@/context/user-context';
 import { getDailyLog, deleteDailyLog } from '@/lib/firestore-log-service';
 import { getTodayWorkoutOverride, clearTodayWorkoutOverride as clearOverrideService } from '@/lib/firestore-settings-service';
-import type { WorkoutDay, DailyLog, Exercise as ExerciseType, UserData } from '@/types/workout';
+import type { WorkoutDay, DailyLog, Exercise as ExerciseType, LoggedSetData } from '@/types/workout';
 import LoadingWorkoutPage from '@/app/workout/[day]/loading';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,7 @@ const calculateWorkoutProgress = (workoutDay: WorkoutDay | null, dailyLog: Daily
   let completedSets = 0;
   workoutDay.exercises.forEach(exercise => {
     const exerciseLog = dailyLog[exercise.id];
-    const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => set.isCompleted === false);
+    const isSkipped = exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
     if (!isSkipped) {
       exercise.sets.forEach(() => { totalSets++; });
     }
@@ -59,12 +59,8 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
   const [workoutDay, setWorkoutDay] = useState<WorkoutDay | null | undefined>(undefined);
   const [currentDate, setCurrentDate] = useState('');
   const [isOverrideActive, setIsOverrideActive] = useState(false);
-  
-  const { data: userData, isLoading: isLoadingUserData } = useQuery({
-    queryKey: ['userData', user?.uid],
-    queryFn: () => getUserData(user!.uid),
-    enabled: !!user,
-  });
+
+  const { userData, isLoading: isLoadingUserData } = useUser();
 
   const { data: weightOverrides, isLoading: isLoadingOverrides } = useQuery({
     queryKey: ['weightOverrides', user?.uid],
@@ -73,27 +69,27 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
   });
 
   const { data: overrideIdFromDB, isLoading: isLoadingOverrideId } = useQuery({
-      queryKey: ['todayOverride', user?.uid],
-      queryFn: () => getTodayWorkoutOverride(user!.uid),
-      enabled: !!user && dayIdFromProps === null,
+    queryKey: ['todayOverride', user?.uid],
+    queryFn: () => getTodayWorkoutOverride(user!.uid),
+    enabled: !!user && dayIdFromProps === null,
   });
-  
+
   useEffect(() => {
     const dateStr = getCurrentDateString();
     setCurrentDate(dateStr);
   }, []);
 
   const { data: dailyLog, isLoading: isLoadingLog } = useQuery({
-      queryKey: ['dailyLog', user?.uid, currentDate],
-      queryFn: () => getDailyLog(user!.uid, currentDate),
-      enabled: !!user && !!currentDate && (dayIdFromProps === null),
-      initialData: {},
+    queryKey: ['dailyLog', user?.uid, currentDate],
+    queryFn: () => getDailyLog(user!.uid, currentDate),
+    enabled: !!user && !!currentDate && (dayIdFromProps === null),
+    initialData: {},
   });
 
   const loadWorkoutForDisplay = useCallback(() => {
     if (!userData) {
-        setWorkoutDay(undefined); // Loading state
-        return;
+      setWorkoutDay(undefined); // Loading state
+      return;
     }
 
     const date = new Date();
@@ -103,9 +99,9 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
       setWorkoutDay(null); // No workout scheduled
       return;
     }
-    
+
     let dayToSet: WorkoutDay | undefined | null = null;
-    
+
     if (dayIdFromProps === null) { // "Today's Session" page
       const finalOverrideId = overrideIdFromDB || null;
       setIsOverrideActive(!!finalOverrideId);
@@ -116,14 +112,14 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
         dayToSet = activePlan.plan.find(d => d.mapsToActualDayOfWeek === todayNumeric);
       }
     } else { // Specific [day] page
-        dayToSet = activePlan.plan.find(d => d.id === dayIdFromProps);
-        setIsOverrideActive(false);
+      dayToSet = activePlan.plan.find(d => d.id === dayIdFromProps);
+      setIsOverrideActive(false);
     }
     setWorkoutDay(dayToSet || null);
   }, [userData, overrideIdFromDB, dayIdFromProps]);
-  
+
   useEffect(() => {
-    if(!isLoadingUserData && !isLoadingOverrideId) {
+    if (!isLoadingUserData && !isLoadingOverrideId) {
       loadWorkoutForDisplay();
     }
   }, [isLoadingUserData, isLoadingOverrideId, loadWorkoutForDisplay]);
@@ -131,8 +127,8 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
 
   const clearLogMutation = useMutation({
     mutationFn: () => {
-        if (!user || !currentDate) throw new Error("User or date not available");
-        return deleteDailyLog(user.uid, currentDate)
+      if (!user || !currentDate) throw new Error("User or date not available");
+      return deleteDailyLog(user.uid, currentDate)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dailyLog', user?.uid, currentDate] });
@@ -145,27 +141,27 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
 
   const clearOverrideMutation = useMutation({
     mutationFn: () => {
-        if (!user) throw new Error("User not authenticated.");
-        return clearOverrideService(user.uid);
+      if (!user) throw new Error("User not authenticated.");
+      return clearOverrideService(user.uid);
     },
     onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['todayOverride', user?.uid]});
-        setIsOverrideActive(false);
-        toast({ title: "Override Cleared", description: "Now showing your regularly scheduled workout."});
+      queryClient.invalidateQueries({ queryKey: ['todayOverride', user?.uid] });
+      setIsOverrideActive(false);
+      toast({ title: "Override Cleared", description: "Now showing your regularly scheduled workout." });
     }
   });
-  
+
   const { completedSets, totalSets, score } = useMemo(
-    () => (dayIdFromProps === null) ? calculateWorkoutProgress(workoutDay, dailyLog || {}) : { completedSets: 0, totalSets: 0, score: 0},
+    () => (dayIdFromProps === null) ? calculateWorkoutProgress(workoutDay ?? null, dailyLog || {}) : { completedSets: 0, totalSets: 0, score: 0 },
     [workoutDay, dailyLog, dayIdFromProps]
   );
-  
+
   const isLoading = workoutDay === undefined || isLoadingUserData || isLoadingLog || isLoadingOverrides || (dayIdFromProps === null && isLoadingOverrideId);
-  
+
   if (isLoading) {
     return <LoadingWorkoutPage />;
   }
-  
+
   if (!workoutDay) {
     const scheduledDayName = days[new Date().getDay()];
     return (
@@ -183,9 +179,9 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
                 ? `Could not find the overridden workout. It might have been deleted from the plan.`
                 : `No workout is scheduled for ${dayIdFromProps || scheduledDayName} in your active plan.`}
             </p>
-             <p className="mt-2 text-sm text-muted-foreground">
-                You can start any workout for today from the "Full Workout Plan" page.
-             </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              You can start any workout for today from the "Full Workout Plan" page.
+            </p>
             {isOverrideActive && (
               <Button onClick={() => clearOverrideMutation.mutate()} variant="outline" className="mt-4 mr-2">
                 <RefreshCcw className="mr-2 h-4 w-4" /> Clear Override
@@ -199,7 +195,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
       </div>
     );
   }
-  
+
   const isExerciseCompleted = (exercise: ExerciseType): boolean => {
     if (!dailyLog) return false;
     const exerciseLog = dailyLog[exercise.id];
@@ -209,7 +205,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
 
   return (
     <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8">
-       {isOverrideActive && dayIdFromProps === null && (
+      {isOverrideActive && dayIdFromProps === null && (
         <Card className="mb-6 bg-accent/20 border-accent shadow-md">
           <CardHeader className="flex-row items-center justify-between pb-3 pt-3">
             <div className="flex items-center gap-2">
@@ -233,7 +229,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
               </CardTitle>
               <CardDescription className="text-lg text-muted-foreground">{workoutDay.title} - {currentDate}</CardDescription>
             </div>
-             {dayIdFromProps === null && (
+            {dayIdFromProps === null && (
               <Button variant="outline" onClick={() => clearLogMutation.mutate()} size="sm" className="rounded-full shrink-0">
                 Clear Today's Full Log
               </Button>
@@ -266,7 +262,7 @@ export default function WorkoutView({ dayId: dayIdFromProps }: WorkoutViewProps)
           const effectiveWeight = weightOverrides?.[exercise.id] ?? exercise.targetWeight;
           const exerciseCompleted = (dayIdFromProps === null) ? isExerciseCompleted(exercise) : false;
           const exerciseLog = dailyLog ? dailyLog[exercise.id] : undefined;
-          const isSkipped = dayIdFromProps === null && exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => set.isCompleted === false);
+          const isSkipped = dayIdFromProps === null && exerciseLog && exercise.sets.length > 0 && Object.values(exerciseLog).length >= exercise.sets.length && exercise.sets.every(set => exerciseLog[set.id]?.isCompleted === false);
 
           return (
             <Card key={exercise.id} className="shadow-md hover:shadow-lg transition-shadow duration-300">

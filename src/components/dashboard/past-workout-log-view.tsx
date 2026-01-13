@@ -1,57 +1,33 @@
 // src/components/dashboard/past-workout-log-view.tsx
-import type { DailyLog, WorkoutDay, NamedWorkoutPlan, Exercise, UserData } from '@/types/workout';
+import { useMemo } from 'react';
+import type { DailyLog, WorkoutDay, Exercise } from '@/types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { CheckCircle } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@/context/auth-context';
-import { getUserData } from '@/lib/firestore-workout-plan-service';
-import { getExerciseById as getExerciseDefById } from '@/data/workout-data';
-
+import { useUser } from '@/context/user-context';
+import { useAllExercises } from '@/hooks/use-workout-data';
 
 interface PastWorkoutLogViewProps {
-  workoutDay: WorkoutDay | null; 
+  workoutDay: WorkoutDay | null;
   dailyLog: DailyLog;
 }
 
-// Global cache for exercise definitions
-const exerciseDefCache = new Map<string, Exercise>();
-
-function populateCache(plans: NamedWorkoutPlan[]) {
-    if (exerciseDefCache.size > 0) return; // Cache already populated
-    plans.forEach(plan => {
-        plan.plan.forEach(day => {
-            day.exercises.forEach(ex => {
-                if (!exerciseDefCache.has(ex.id)) {
-                    exerciseDefCache.set(ex.id, ex);
-                }
-            });
-        });
-    });
-}
-
-function getExerciseById(exerciseId: string): Exercise | undefined {
-    if (exerciseDefCache.size > 0) {
-        return exerciseDefCache.get(exerciseId);
-    }
-    // Fallback if cache isn't populated for some reason, though less efficient.
-    return getExerciseDefById(exerciseId);
-}
-
-
 export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkoutLogViewProps) {
-  const { user } = useAuth();
-  const { data: userData, isLoading } = useQuery({
-      queryKey: ['userData', user?.uid],
-      queryFn: () => getUserData(user!.uid),
-      enabled: !!user,
-  });
+  const { isLoading } = useUser();
+  const allExercises = useAllExercises();
 
-  if (isLoading) {
-      return <p>Loading exercise definitions...</p>
+  // Create a quick lookup map from the hook result
+  const exerciseMap = useMemo(() => {
+    const map = new Map<string, Exercise>();
+    allExercises.forEach(ex => map.set(ex.id, ex));
+    return map;
+  }, [allExercises]);
+
+  function getExerciseById(exerciseId: string) {
+    return exerciseMap.get(exerciseId);
   }
 
-  if (userData?.plans) {
-      populateCache(userData.plans);
+  if (isLoading) {
+    return <p>Loading exercise definitions...</p>
   }
 
   if (!dailyLog || Object.keys(dailyLog).length === 0) {
@@ -103,9 +79,9 @@ export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkout
                   <div key={setId} className="flex justify-between items-center text-muted-foreground border-t border-border/30 pt-1 mt-1 first:mt-0 first:border-t-0">
                     <span>Set {setNumber}:</span>
                     <span className="text-foreground font-medium flex items-center">
-                       <CheckCircle className="h-3 w-3 mr-1.5 text-primary"/>
-                       {loggedSet.reps ?? 'N/A'} {unitDisplay}
-                       {loggedSet.weight && ` @ ${loggedSet.weight}`}
+                      <CheckCircle className="h-3 w-3 mr-1.5 text-primary" />
+                      {loggedSet.reps ?? 'N/A'} {unitDisplay}
+                      {loggedSet.weight && ` @ ${loggedSet.weight}`}
                     </span>
                   </div>
                 );

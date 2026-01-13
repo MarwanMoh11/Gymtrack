@@ -1,5 +1,5 @@
 // src/lib/firestore-settings-service.ts
-'use server';
+
 
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
@@ -100,11 +100,11 @@ export async function clearTodayWorkoutOverride(userId: string): Promise<void> {
   const settingsDocRef = doc(db, 'users', userId, 'settings', 'userSettings');
   console.log(`[FirestoreService-Settings] Clearing session override for user ${userId}.`);
   try {
-     // Setting the field to null is how we clear it in Firestore when merging.
+    // Setting the field to null is how we clear it in Firestore when merging.
     await setDoc(settingsDocRef, {
-        sessionOverride: null 
+      sessionOverride: null
     }, { merge: true });
-     console.log(`[FirestoreService-Settings] Successfully cleared session override for user ${userId}.`);
+    console.log(`[FirestoreService-Settings] Successfully cleared session override for user ${userId}.`);
   } catch (error) {
     console.error(`[FirestoreService-Settings] Error clearing session override for user ${userId}:`, error);
     throw new Error("Failed to clear session override.");

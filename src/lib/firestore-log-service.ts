@@ -1,5 +1,5 @@
 // src/lib/firestore-log-service.ts
-'use server';
+
 import { db } from '@/lib/firebase';
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import type { DailyLog } from '@/types/workout';

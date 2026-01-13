@@ -1,4 +1,3 @@
-
 // src/app/onboarding/create-plan/add-exercises/page.tsx
 'use client';
 
@@ -10,7 +9,7 @@ import { produce } from 'immer';
 
 import type { WorkoutDay, Exercise, NamedWorkoutPlan, UserData, NewSetData } from '@/types/workout';
 import { getUserData, saveUserData } from '@/lib/firestore-workout-plan-service';
-import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data';
+import { useAllExercises } from '@/hooks/use-workout-data';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -61,10 +60,7 @@ function AddExercisesComponent() {
     enabled: !!user,
   });
 
-  const { data: allExercises, isLoading: isLoadingAllExercises } = useQuery({
-    queryKey: ['allExercisesForAutocomplete'],
-    queryFn: getAllExercisesForAutocompleteGlobal,
-  });
+  const allExercises = useAllExercises();
 
   const mutation = useMutation({
     mutationFn: (newUserData: UserData) => saveUserData(user!.uid, newUserData),
@@ -104,7 +100,7 @@ function AddExercisesComponent() {
 
   const handleSaveExercise = useCallback((savedExercise: Exercise) => {
     if (!dayIdForModal) {
-        return;
+      return;
     }
     setWorkoutPlan(
       produce(draft => {
@@ -115,7 +111,7 @@ function AddExercisesComponent() {
             day.exercises[existingIndex] = savedExercise;
           } else {
             const newExercise = { ...savedExercise, id: `custom-ex-${Date.now()}` };
-            newExercise.sets = newExercise.sets.map((s, i) => ({...s, id: `set-${newExercise.id}-${i}`}));
+            newExercise.sets = newExercise.sets.map((s, i) => ({ ...s, id: `set-${newExercise.id}-${i}` }));
             day.exercises.push(newExercise);
           }
         }
@@ -125,8 +121,8 @@ function AddExercisesComponent() {
     setDayIdForModal(null);
     setExerciseToEdit(null);
     toast({
-        title: exerciseToEdit ? "Exercise Updated" : "Exercise Added",
-        description: `${savedExercise.name} has been staged. Save the plan to finalize changes.`
+      title: exerciseToEdit ? "Exercise Updated" : "Exercise Added",
+      description: `${savedExercise.name} has been staged. Save the plan to finalize changes.`
     })
   }, [dayIdForModal, exerciseToEdit, toast]);
 
@@ -138,29 +134,29 @@ function AddExercisesComponent() {
       }
     }));
   };
-  
+
   const handleMoveExercise = (dayId: string, exerciseId: string, direction: 'up' | 'down') => {
     setWorkoutPlan(produce(draft => {
-        const day = draft.find(d => d.id === dayId);
-        if (day) {
-          const index = day.exercises.findIndex(ex => ex.id === exerciseId);
-          if (index === -1) return;
-          if (direction === 'up' && index > 0) {
-            [day.exercises[index], day.exercises[index - 1]] = [day.exercises[index - 1], day.exercises[index]];
-          } else if (direction === 'down' && index < day.exercises.length - 1) {
-            [day.exercises[index], day.exercises[index + 1]] = [day.exercises[index + 1], day.exercises[index]];
-          }
+      const day = draft.find(d => d.id === dayId);
+      if (day) {
+        const index = day.exercises.findIndex(ex => ex.id === exerciseId);
+        if (index === -1) return;
+        if (direction === 'up' && index > 0) {
+          [day.exercises[index], day.exercises[index - 1]] = [day.exercises[index - 1], day.exercises[index]];
+        } else if (direction === 'down' && index < day.exercises.length - 1) {
+          [day.exercises[index], day.exercises[index + 1]] = [day.exercises[index + 1], day.exercises[index]];
         }
+      }
     }));
   };
 
   const handleFinishPlan = () => {
     if (!userData || !planDetails) {
-        return;
+      return;
     }
-    
+
     const newPlanId = `custom-plan-${planDetails.planName.trim().toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
-    
+
     const newPlan: NamedWorkoutPlan = {
       id: newPlanId,
       name: planDetails.planName,
@@ -168,15 +164,15 @@ function AddExercisesComponent() {
       plan: workoutPlan,
       isActive: true,
     };
-    
+
 
     const updatedOldPlans = userData.plans.map(p => ({ ...p, isActive: false }));
     const newUserData = { ...userData, plans: [...updatedOldPlans, newPlan], onboardingStatus: 'completed' as const };
-    
+
     mutation.mutate(newUserData);
   };
-  
-  if (!planDetails || isLoadingUser || isLoadingAllExercises) {
+
+  if (!planDetails || isLoadingUser) {
     return <LoadingAddExercisesPage />;
   }
 
@@ -192,10 +188,10 @@ function AddExercisesComponent() {
             {workoutPlan.map(day => (
               <AccordionItem key={day.id} value={day.id} className="border rounded-lg bg-card/50 px-4">
                 <AccordionTrigger className="hover:no-underline">
-                    <div className="text-left">
-                        <h3 className="font-semibold text-lg text-secondary-foreground">{day.dayName}</h3>
-                        <p className="text-sm text-muted-foreground">{day.title}</p>
-                    </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-lg text-secondary-foreground">{day.dayName}</h3>
+                    <p className="text-sm text-muted-foreground">{day.title}</p>
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent>
                   <ul className="space-y-1 mt-2">
@@ -203,18 +199,18 @@ function AddExercisesComponent() {
                       <li key={ex.id} className="flex justify-between items-center group hover:bg-secondary/20 p-1 rounded-md">
                         <span className="text-sm">{ex.name} ({ex.sets.length} sets)</span>
                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 items-center">
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'up')} disabled={index === 0}>
-                                <ArrowUp className="h-3 w-3" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'down')} disabled={index === day.exercises.length - 1}>
-                                <ArrowDown className="h-3 w-3" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleOpenExerciseModal(day.id, ex)}>
-                                <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleRemoveExercise(day.id, ex.id)}>
-                                <Trash2 className="h-3 w-3" />
-                            </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'up')} disabled={index === 0}>
+                            <ArrowUp className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleMoveExercise(day.id, ex.id, 'down')} disabled={index === day.exercises.length - 1}>
+                            <ArrowDown className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleOpenExerciseModal(day.id, ex)}>
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleRemoveExercise(day.id, ex.id)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
                         </div>
                       </li>
                     ))}
@@ -237,23 +233,23 @@ function AddExercisesComponent() {
           </Button>
         </CardFooter>
       </Card>
-      
+
       <AddExerciseModal
-          isOpen={isExerciseModalOpen}
-          onOpenChange={setIsExerciseModalOpen}
-          onSave={handleSaveExercise}
-          allExercises={allExercises || []}
-          dayId={dayIdForModal}
-          initialData={exerciseToEdit}
+        isOpen={isExerciseModalOpen}
+        onOpenChange={setIsExerciseModalOpen}
+        onSave={handleSaveExercise}
+        allExercises={allExercises || []}
+        dayId={dayIdForModal}
+        initialData={exerciseToEdit}
       />
     </div>
   );
 }
 
 export default function AddExercisesPage() {
-    return (
-        <Suspense fallback={<LoadingAddExercisesPage />}>
-            <AddExercisesComponent />
-        </Suspense>
-    )
+  return (
+    <Suspense fallback={<LoadingAddExercisesPage />}>
+      <AddExercisesComponent />
+    </Suspense>
+  )
 }

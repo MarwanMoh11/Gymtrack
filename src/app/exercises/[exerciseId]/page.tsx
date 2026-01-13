@@ -1,4 +1,3 @@
-
 // src/app/exercises/[exerciseId]/page.tsx
 'use client';
 
@@ -9,20 +8,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
 import { produce } from 'immer';
 
-import type { Exercise as ExerciseType, LoggedExerciseData, WorkoutDay, NamedWorkoutPlan, SetData, UserData } from '@/types/workout';
+import type { Exercise as ExerciseType, LoggedExerciseData, DailyLog, SetData, UserData } from '@/types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, Dumbbell, Sparkles, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle, Pencil, Loader2 } from 'lucide-react'; 
+import { ArrowLeft, Dumbbell, Sparkles, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle, Pencil, Loader2 } from 'lucide-react';
 import SetLogger from '@/components/workout/set-logger';
 import AIRecommendationModal from '@/components/workout/ai-recommendation-modal';
-import AddExerciseModal from '@/components/workout-plan/add-exercise-modal'; 
+import AddExerciseModal from '@/components/workout-plan/add-exercise-modal';
 import { useToast } from '@/hooks/use-toast';
 import LoadingExercisePage from './loading';
-import { getPreviousSetPerformance } from '@/lib/workout-utils'; 
+import { getPreviousSetPerformance } from '@/lib/workout-utils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,25 +37,25 @@ import { cn } from '@/lib/utils';
 import { getUserData, saveUserData } from '@/lib/firestore-workout-plan-service';
 import { getDailyLog, saveDailyLog } from '@/lib/firestore-log-service';
 import { getTargetWeightOverrides, setTargetWeightOverride as saveTargetWeightOverride } from '@/lib/firestore-settings-service';
-import { getAllExercisesFromPlan as getAllExercisesForAutocompleteGlobal } from '@/data/workout-data';
+import { useAllExercises } from '@/hooks/use-workout-data';
 
 const getCurrentDateString = (): string => {
   return new Date().toISOString().split('T')[0];
 };
 
 const parseMaxTargetReps = (target: string | number): number | null => {
-    if (typeof target === 'number') return target;
-    if (typeof target === 'string') {
-        const rangeMatch = target.match(/(\d+)\s*-\s*(\d+)/);
-        if (rangeMatch) return Math.max(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
-        const minMatch = target.match(/(\d+)\+/);
-        if (minMatch) return parseInt(minMatch[1], 10);
-        const numMatch = target.match(/^(\d+)$/);
-        if (numMatch) return parseInt(numMatch[1], 10);
-        if (target.toLowerCase().includes('failure') || target.toLowerCase().includes('min') || target.toLowerCase().includes('—')) return null;
-    }
-    const parsed = parseInt(String(target), 10);
-    return isNaN(parsed) ? null : parsed;
+  if (typeof target === 'number') return target;
+  if (typeof target === 'string') {
+    const rangeMatch = target.match(/(\d+)\s*-\s*(\d+)/);
+    if (rangeMatch) return Math.max(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
+    const minMatch = target.match(/(\d+)\+/);
+    if (minMatch) return parseInt(minMatch[1], 10);
+    const numMatch = target.match(/^(\d+)$/);
+    if (numMatch) return parseInt(numMatch[1], 10);
+    if (target.toLowerCase().includes('failure') || target.toLowerCase().includes('min') || target.toLowerCase().includes('—')) return null;
+  }
+  const parsed = parseInt(String(target), 10);
+  return isNaN(parsed) ? null : parsed;
 };
 
 type ExercisePageProps = {
@@ -65,7 +64,7 @@ type ExercisePageProps = {
 
 export default function ExerciseDetailPage({ params: paramsFromProps }: ExercisePageProps) {
   const resolvedParams = use(paramsFromProps as any);
-  const { exerciseId } = resolvedParams;
+  const exerciseId = (resolvedParams as any).exerciseId;
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -80,7 +79,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const [isEditExerciseModalOpen, setIsEditExerciseModalOpen] = useState(false);
   const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
   const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
-  
+
   const currentDate = getCurrentDateString();
 
   // --- Data Fetching with React Query ---
@@ -101,46 +100,43 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     queryFn: () => getDailyLog(user!.uid, currentDate),
     enabled: !!user && !!dayIdFromQuery, // Only enable if we're on a specific workout day
   });
-  
-  const { data: allExercisesForModal, isLoading: isLoadingAllExercises } = useQuery({
-      queryKey: ['allExercisesForAutocomplete'],
-      queryFn: getAllExercisesForAutocompleteGlobal,
-  });
+
+  const allExercisesForModal = useAllExercises();
 
   // --- Memos to derive state from queries ---
   const { baseExercise, currentWorkoutDay, exerciseForLogging, activePlan } = useMemo(() => {
     if (!userData) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
     const plan = planIdFromQuery ? userData.plans.find(p => p.id === planIdFromQuery) : userData.plans.find(p => p.isActive);
     if (!plan) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
-    
+
     let baseEx, workoutDay, exerciseForLog;
 
-    for(const day of plan.plan) {
-        const found = day.exercises.find(ex => ex.id === exerciseId);
-        if (found) {
-            baseEx = found;
-            if (day.id === dayIdFromQuery) {
-                workoutDay = day;
-                exerciseForLog = found;
-            }
+    for (const day of plan.plan) {
+      const found = day.exercises.find(ex => ex.id === exerciseId);
+      if (found) {
+        baseEx = found;
+        if (day.id === dayIdFromQuery) {
+          workoutDay = day;
+          exerciseForLog = found;
         }
+      }
     }
     if (!baseEx) baseEx = allExercisesForModal?.find(ex => ex.id === exerciseId);
 
     return { baseExercise: baseEx, currentWorkoutDay: workoutDay, exerciseForLogging: exerciseForLog, activePlan: plan };
   }, [userData, planIdFromQuery, dayIdFromQuery, exerciseId, allExercisesForModal]);
-  
+
   const loggedExerciseData = useMemo(() => (dailyLog?.[exerciseId] || {}) as LoggedExerciseData, [dailyLog, exerciseId]);
 
   // --- Effects to sync state with fetched data ---
   useEffect(() => {
     if (exerciseForLogging && weightOverrides) {
-        const initialEffectiveWeight = weightOverrides[exerciseId] ?? exerciseForLogging.targetWeight ?? '';
-        setSessionTargetWeight(initialEffectiveWeight);
-        setManualTargetWeightInput(initialEffectiveWeight);
+      const initialEffectiveWeight = weightOverrides[exerciseId] ?? exerciseForLogging.targetWeight ?? '';
+      setSessionTargetWeight(initialEffectiveWeight);
+      setManualTargetWeightInput(initialEffectiveWeight);
     }
   }, [exerciseForLogging, weightOverrides, exerciseId]);
-  
+
   const checkCompletionAndPlanReps = useCallback((currentLogData?: LoggedExerciseData) => {
     if (!currentLogData || !exerciseForLogging || exerciseForLogging.sets.length === 0) return false;
     const allSetsCompleted = exerciseForLogging.sets.every(set => currentLogData[set.id]?.isCompleted);
@@ -159,30 +155,30 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   useEffect(() => {
     setCanSuggestWeightIncrease(checkCompletionAndPlanReps(loggedExerciseData));
   }, [loggedExerciseData, checkCompletionAndPlanReps]);
-  
+
   // --- Mutations ---
   const saveLogMutation = useMutation({
     mutationFn: (newLog: LoggedExerciseData) => {
-        if (!user) throw new Error("User not authenticated");
-        const newDailyLog = { ...(dailyLog || {}), [exerciseId]: newLog };
-        return saveDailyLog(user.uid, currentDate, newDailyLog);
+      if (!user) throw new Error("User not authenticated");
+      const newDailyLog = { ...(dailyLog || {}), [exerciseId]: newLog };
+      return saveDailyLog(user.uid, currentDate, newDailyLog);
     },
     onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['dailyLog', user?.uid, currentDate] });
+      queryClient.invalidateQueries({ queryKey: ['dailyLog', user?.uid, currentDate] });
     },
     onError: () => {
-        toast({ variant: 'destructive', title: "Save Error", description: "Could not save your log." });
+      toast({ variant: 'destructive', title: "Save Error", description: "Could not save your log." });
     }
   });
-  
+
   const saveWeightOverrideMutation = useMutation({
     mutationFn: (newWeight: string) => saveTargetWeightOverride(user!.uid, exerciseId, newWeight),
     onSuccess: (data, newWeight) => {
-      queryClient.invalidateQueries({ queryKey: ['weightOverrides', user?.uid]});
+      queryClient.invalidateQueries({ queryKey: ['weightOverrides', user?.uid] });
       queryClient.setQueryData(['dailyLog', user?.uid, currentDate], (oldData: DailyLog | undefined) => {
-          if (!oldData) return { [exerciseId]: {} };
-          const { [exerciseId]: _, ...rest } = oldData;
-          return rest;
+        if (!oldData) return { [exerciseId]: {} };
+        const { [exerciseId]: _, ...rest } = oldData;
+        return rest;
       });
       setSessionTargetWeight(newWeight);
       setCanSuggestWeightIncrease(false);
@@ -190,31 +186,31 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       setIsEditingTarget(false);
     },
     onError: () => {
-       toast({ variant: 'destructive', title: "Save Error", description: "Could not save weight override." });
+      toast({ variant: 'destructive', title: "Save Error", description: "Could not save weight override." });
     }
   });
 
   const saveEditedExerciseMutation = useMutation({
     mutationFn: (updatedExercise: ExerciseType) => {
-        if (!userData || !activePlan || !dayIdFromQuery) throw new Error("No active plan or day to update");
-        const newPlans = produce(userData.plans, draft => {
-            const plan = draft.find(p => p.id === activePlan.id);
-            if (!plan) return;
-            const day = plan.plan.find(d => d.id === dayIdFromQuery);
-            if (!day) return;
-            const exIndex = day.exercises.findIndex(ex => ex.id === updatedExercise.id);
-            if (exIndex === -1) throw new Error("Exercise not found in day");
-            day.exercises[exIndex] = updatedExercise;
-        });
-        return saveUserData(user!.uid, { ...userData, plans: newPlans });
+      if (!userData || !activePlan || !dayIdFromQuery) throw new Error("No active plan or day to update");
+      const newPlans = produce(userData.plans, draft => {
+        const plan = draft.find(p => p.id === activePlan.id);
+        if (!plan) return;
+        const day = plan.plan.find(d => d.id === dayIdFromQuery);
+        if (!day) return;
+        const exIndex = day.exercises.findIndex(ex => ex.id === updatedExercise.id);
+        if (exIndex === -1) throw new Error("Exercise not found in day");
+        day.exercises[exIndex] = updatedExercise;
+      });
+      return saveUserData(user!.uid, { ...userData, plans: newPlans });
     },
     onSuccess: (data, updatedExercise) => {
-        queryClient.invalidateQueries({ queryKey: ['userData', user?.uid] });
-        toast({ title: "Exercise Updated", description: `${updatedExercise.name} has been updated in your plan.`});
-        setIsEditExerciseModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['userData', user?.uid] });
+      toast({ title: "Exercise Updated", description: `${updatedExercise.name} has been updated in your plan.` });
+      setIsEditExerciseModalOpen(false);
     },
     onError: (error) => {
-        toast({ variant: 'destructive', title: "Save Error", description: `Could not save exercise changes. ${error.message}` });
+      toast({ variant: 'destructive', title: "Save Error", description: `Could not save exercise changes. ${error.message}` });
     }
   });
 
@@ -224,7 +220,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     const newLoggedExerciseData = { ...loggedExerciseData, [setId]: newLogEntry };
     saveLogMutation.mutate(newLoggedExerciseData);
   };
-  
+
   const handleSkipExercise = () => {
     if (!exerciseForLogging) return;
     const skippedLog: LoggedExerciseData = {};
@@ -232,12 +228,12 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       skippedLog[set.id] = { reps: loggedExerciseData[set.id]?.reps || '', weight: loggedExerciseData[set.id]?.weight, isCompleted: false };
     });
     saveLogMutation.mutate(skippedLog);
-    toast({ variant: "default", title: "Exercise Skipped", description: `"${baseExercise?.name}" marked as skipped.`});
+    toast({ variant: "default", title: "Exercise Skipped", description: `"${baseExercise?.name}" marked as skipped.` });
   };
 
   const handleUnskipExercise = () => {
     saveLogMutation.mutate({}); // Passing empty object resets the log for this exercise
-    toast({ title: "Exercise Unskipped", description: `"${baseExercise?.name}" is no longer skipped.`});
+    toast({ title: "Exercise Unskipped", description: `"${baseExercise?.name}" is no longer skipped.` });
   };
 
   const handleSaveManualTarget = () => {
@@ -263,7 +259,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     return exerciseForLogging.sets.every(set => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length >= exerciseForLogging.sets.length;
   }, [exerciseForLogging, loggedExerciseData, dayIdFromQuery]);
 
-  const isLoading = isLoadingUserData || isLoadingLog || isLoadingOverrides || isLoadingAllExercises;
+  const isLoading = isLoadingUserData || isLoadingLog || isLoadingOverrides;
 
   if (isLoading) {
     return <LoadingExercisePage />;
@@ -283,26 +279,26 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       </div>
     );
   }
-  
+
   if (dayIdFromQuery && !exerciseForLogging && currentWorkoutDay) {
-     return (
+    return (
       <div className="container mx-auto px-4 py-8 flex flex-col items-center text-center">
         <Dumbbell className="h-16 w-16 text-destructive mb-4" />
         <h1 className="text-2xl font-bold text-destructive mb-2">Exercise Not in Day's Plan</h1>
         <p className="text-muted-foreground mb-6">
           "{baseExercise.name}" (ID: {exerciseId}) is not part of the plan for "{currentWorkoutDay?.title || dayIdFromQuery}".
         </p>
-         <Button asChild variant="outline" onClick={() => router.push('/dashboard/today')}>
-           <span><ArrowLeft className="mr-2 h-4 w-4" /> Back to Today's Workout</span>
+        <Button asChild variant="outline" onClick={() => router.push('/dashboard/today')}>
+          <span><ArrowLeft className="mr-2 h-4 w-4" /> Back to Today's Workout</span>
         </Button>
       </div>
     );
   }
-  
+
   const displayExercise = exerciseForLogging || baseExercise;
   const hasVideo = displayExercise.videoUrl && displayExercise.videoUrl.includes('youtube.com/embed');
   const allSetsCompletedCheck = dayIdFromQuery && exerciseForLogging?.sets.every(set => loggedExerciseData?.[set.id]?.isCompleted);
-  
+
   const isSpecialActivity = displayExercise.isActivity || displayExercise.isConditioning || displayExercise.isWarmup || displayExercise.isMatch || displayExercise.isStretch || displayExercise.isFoamRoll || displayExercise.isRecovery || displayExercise.isSkill || displayExercise.isMobility;
   const canShowAISuggestionButton = dayIdFromQuery && !isSpecialActivity && !displayExercise.isCore && !isSkipped;
 
@@ -310,12 +306,12 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8 space-y-6">
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={() => dayIdFromQuery ? router.push('/dashboard/today') : router.back()} className="mr-auto">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back to {dayIdFromQuery ? "Workout" : "Previous"}
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back to {dayIdFromQuery ? "Workout" : "Previous"}
         </Button>
         {isSkipped && dayIdFromQuery && (
-            <Badge variant="destructive" className="text-xs font-normal">
-                <Lock className="h-3 w-3 mr-1" /> Skipped
-            </Badge>
+          <Badge variant="destructive" className="text-xs font-normal">
+            <Lock className="h-3 w-3 mr-1" /> Skipped
+          </Badge>
         )}
       </div>
 
@@ -323,17 +319,17 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
         <CardHeader>
           <div className="flex justify-between items-start">
             <CardTitle className="text-2xl font-bold text-primary flex items-center">
-               <Dumbbell className="mr-3 h-7 w-7" />
-               {displayExercise.name}
+              <Dumbbell className="mr-3 h-7 w-7" />
+              {displayExercise.name}
             </CardTitle>
-            {dayIdFromQuery && exerciseForLogging && ( 
+            {dayIdFromQuery && exerciseForLogging && (
               <Button variant="ghost" size="icon" onClick={() => setIsEditExerciseModalOpen(true)} className="shrink-0">
                 <Pencil className="h-4 w-4" />
                 <span className="sr-only">Edit Exercise Details</span>
               </Button>
             )}
           </div>
-          {displayExercise.notes && !isSkipped &&(
+          {displayExercise.notes && !isSkipped && (
             <Badge variant="secondary" className="text-xs mt-1 w-fit">{displayExercise.notes}</Badge>
           )}
         </CardHeader>
@@ -355,7 +351,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
               </div>
             </div>
           )}
-          
+
           <Separator />
 
           {displayExercise.videoUrl && (
@@ -388,30 +384,30 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
         <Card className={cn("shadow-lg rounded-2xl", isSkipped && "bg-card/60")}>
           <CardHeader className="pb-3">
             <div className="flex justify-between items-center">
-                <CardTitle className="text-xl">Log Your Sets</CardTitle>
-                {isSkipped ? (
-                    <Button variant="outline" size="sm" onClick={handleUnskipExercise}><Undo2 className="mr-2 h-4 w-4" />Unskip</Button>
-                ) : (
-                    <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"><XSquare className="mr-2 h-4 w-4" />Skip Exercise</Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                            <AlertDialogTitle>Skip: {displayExercise.name}?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                                This marks all sets as not completed for today, affecting your score. You can log sets later if you unskip.
-                            </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={handleSkipExercise} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                                Skip Exercise
-                            </AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                )}
+              <CardTitle className="text-xl">Log Your Sets</CardTitle>
+              {isSkipped ? (
+                <Button variant="outline" size="sm" onClick={handleUnskipExercise}><Undo2 className="mr-2 h-4 w-4" />Unskip</Button>
+              ) : (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"><XSquare className="mr-2 h-4 w-4" />Skip Exercise</Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Skip: {displayExercise.name}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This marks all sets as not completed for today, affecting your score. You can log sets later if you unskip.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleSkipExercise} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                        Skip Exercise
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
             </div>
             {!(isSpecialActivity || displayExercise.isCore || isSkipped) && (
               <div className="mt-3 p-3 bg-secondary/30 rounded-md border border-secondary/50">
@@ -428,19 +424,19 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                       disabled={saveWeightOverrideMutation.isPending}
                     />
                     <Button size="icon" variant="ghost" onClick={handleSaveManualTarget} className="h-8 w-8 text-primary shrink-0" aria-label="Save weight" disabled={saveWeightOverrideMutation.isPending}>
-                        {saveWeightOverrideMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin"/> : <Save className="h-4 w-4" />}
+                      {saveWeightOverrideMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     </Button>
                     <Button size="icon" variant="ghost" onClick={handleCancelEditTarget} className="h-8 w-8 shrink-0" aria-label="Cancel edit weight" disabled={saveWeightOverrideMutation.isPending}><XCircle className="h-4 w-4" /></Button>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between mt-1">
                     <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-foreground">{sessionTargetWeight || 'Not set'}</p>
-                        {canSuggestWeightIncrease && (
-                           <Badge variant="default" className="px-1.5 py-0.5 text-xs bg-green-600 hover:bg-green-700 text-white">
-                              <ArrowUpCircle className="h-3 w-3 mr-0.5" /> Suggest Inc.
-                           </Badge>
-                        )}
+                      <p className="text-sm font-semibold text-foreground">{sessionTargetWeight || 'Not set'}</p>
+                      {canSuggestWeightIncrease && (
+                        <Badge variant="default" className="px-1.5 py-0.5 text-xs bg-green-600 hover:bg-green-700 text-white">
+                          <ArrowUpCircle className="h-3 w-3 mr-0.5" /> Suggest Inc.
+                        </Badge>
+                      )}
                     </div>
                     <Button size="icon" variant="ghost" onClick={handleEditClick} className="h-8 w-8 shrink-0" aria-label="Edit weight"><Edit className="h-4 w-4" /></Button>
                   </div>
@@ -450,19 +446,19 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
           </CardHeader>
           <CardContent className={cn("p-0", isSkipped && "opacity-40 pointer-events-none")}>
             {exerciseForLogging.sets.map((set, index) => (
-                <SetLogger
-                  key={set.id}
-                  setNumber={index + 1}
-                  setData={set}
-                  loggedSetData={loggedExerciseData?.[set.id]}
-                  onLogSet={(logData) => handleLogSet(set.id, logData)}
-                  exerciseUnit={exerciseForLogging.unit || baseExercise.unit}
-                  isSimpleLog={isSpecialActivity}
-                  isEditingInitially={!loggedExerciseData?.[set.id]?.isCompleted}
-                  effectiveTargetWeight={sessionTargetWeight}
-                  activePlan={activePlan}
-                />
-              ))}
+              <SetLogger
+                key={set.id}
+                setNumber={index + 1}
+                setData={set}
+                loggedSetData={loggedExerciseData?.[set.id]}
+                onLogSet={(logData) => handleLogSet(set.id, logData)}
+                exerciseUnit={exerciseForLogging.unit || baseExercise.unit}
+                isSimpleLog={isSpecialActivity}
+                isEditingInitially={!loggedExerciseData?.[set.id]?.isCompleted}
+                effectiveTargetWeight={sessionTargetWeight}
+                activePlan={activePlan}
+              />
+            ))}
           </CardContent>
           {canShowAISuggestionButton && (
             <CardFooter className="pt-4 justify-end">
@@ -471,7 +467,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                 size="sm"
                 onClick={() => setIsAIRecModalOpen(true)}
                 disabled={!allSetsCompletedCheck}
-                 className="bg-accent/20 hover:bg-accent/30 text-accent-foreground border-accent/50"
+                className="bg-accent/20 hover:bg-accent/30 text-accent-foreground border-accent/50"
               >
                 <Sparkles className="mr-2 h-4 w-4" />
                 AI Weight Advice
@@ -481,10 +477,10 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
         </Card>
       )}
       {canShowAISuggestionButton && exerciseForLogging && dayIdFromQuery && (
-         <AIRecommendationModal
-            exercise={exerciseForLogging}
-            isOpen={isAIRecModalOpen}
-            onOpenChange={setIsAIRecModalOpen}
+        <AIRecommendationModal
+          exercise={exerciseForLogging}
+          isOpen={isAIRecModalOpen}
+          onOpenChange={setIsAIRecModalOpen}
         />
       )}
       {exerciseForLogging && dayIdFromQuery && allExercisesForModal && userData && (
@@ -494,7 +490,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
           onSave={(exercise) => saveEditedExerciseMutation.mutate(exercise)}
           allExercises={allExercisesForModal}
           dayId={dayIdFromQuery}
-          initialData={exerciseForLogging} 
+          initialData={exerciseForLogging}
         />
       )}
     </div>
