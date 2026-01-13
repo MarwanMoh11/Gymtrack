@@ -299,7 +299,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       </div>
 
       {/* Main Exercise Branding Card */}
-      <div className="relative overflow-hidden rounded-[2.5rem] glass-panel border-none p-8 md:p-10 shadow-2xl">
+      <div className="relative overflow-hidden rounded-[2.5rem] glass-panel border-none p-5 sm:p-8 md:p-10 shadow-2xl">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
           <div className="flex items-start gap-6">
             <div className="w-16 h-16 rounded-[2rem] bg-primary flex items-center justify-center border border-primary/20 shadow-xl shadow-primary/20 -rotate-3 group-hover:rotate-0 transition-transform duration-500 flex-shrink-0">
@@ -337,7 +337,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
       {/* Collapsible Info Section */}
       <Collapsible className="glass-panel border-none rounded-[2rem] overflow-hidden">
-        <CollapsibleTrigger className="w-full p-6 flex items-center justify-between group">
+        <CollapsibleTrigger className="w-full p-5 sm:p-6 flex items-center justify-between group">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
               <Info className="h-4 w-4 text-primary" />
@@ -346,7 +346,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
           </div>
           <ChevronDown className="h-4 w-4 text-foreground/40 group-data-[state=open]:rotate-180 transition-transform" />
         </CollapsibleTrigger>
-        <CollapsibleContent className="px-6 pb-8 space-y-8 animate-in slide-in-from-top-2 duration-300">
+        <CollapsibleContent className="px-5 sm:px-6 pb-8 space-y-8 animate-in slide-in-from-top-2 duration-300">
           {displayExercise.description && (
             <div className="space-y-3">
               <div className="h-[1px] w-full bg-white/5" />
@@ -394,7 +394,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
       {/* Core Protocol Logging Section */}
       {exerciseForLogging && dayIdFromQuery && (
         <div className={cn(
-          "relative glass-panel border-none rounded-[2.5rem] p-8 md:p-10 shadow-2xl transition-all duration-500",
+          "relative glass-panel border-none rounded-[2.5rem] p-5 sm:p-8 md:p-10 shadow-2xl transition-all duration-500",
           isSkipped && "opacity-40 grayscale pointer-events-none scale-[0.98]"
         )}>
           {/* Section Header */}
