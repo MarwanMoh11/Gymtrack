@@ -4,31 +4,21 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // This configuration is now driven by your .env file.
-// Next.js automatically loads environment variables prefixed with NEXT_PUBLIC_.
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIza-build-time-placeholder",
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "gymtrack-placeholder.firebaseapp.com",
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "gymtrack-placeholder",
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "gymtrack-placeholder.appspot.com",
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "000000000000",
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:000000000000:web:000000000000",
 };
 
 // Initialize Firebase App
-// Check if all required config values are present before initializing
-let app: FirebaseApp;
-const requiredConfigValues = [
-    firebaseConfig.apiKey, 
-    firebaseConfig.authDomain, 
-    firebaseConfig.projectId
-];
+// We allow initialization even with missing keys during build to prevent prerender crashes.
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-if (requiredConfigValues.every(value => Boolean(value))) {
-    app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-} else {
-    console.warn("Firebase configuration is missing or incomplete. Please check your .env file. App functionality will be limited.");
-    // Provide a mock app object so the rest of the app doesn't crash on import
-    app = getApps().length ? getApp() : ({ options: {} } as FirebaseApp);
+if (!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && typeof window !== 'undefined') {
+    console.warn("Firebase configuration is missing. Please check your environment variables.");
 }
 
 
