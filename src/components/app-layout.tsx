@@ -168,8 +168,8 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content Area */}
       <SidebarInset className="flex flex-col bg-transparent">
         {/* Mobile/Tablet Header */}
-        <header className="sticky top-0 z-40 flex h-16 items-center justify-between px-6 md:px-8 glass-panel border-b border-glass-border">
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between px-4 sm:px-6 md:px-8 glass-panel border-b border-glass-border">
+          <div className="flex items-center gap-3 min-w-0 flex-shrink">
             <div className="p-2 rounded-xl bg-primary/10 border border-primary/20">
               <Dumbbell className="h-6 w-6 text-primary" />
             </div>
@@ -177,7 +177,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
               {navigationItems.find(item => pathname === item.href)?.label || "GymTrack"}
             </h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <Button
               variant="ghost"
               size="icon"
