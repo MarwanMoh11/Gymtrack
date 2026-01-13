@@ -133,7 +133,7 @@ export default function SettingsForm() {
 
 
     return (
-        <div className="container mx-auto max-w-3xl py-8 px-4 md:px-6 space-y-8">
+        <div className="w-full max-w-3xl mx-auto py-6 space-y-8">
             <div className="space-y-2">
                 <h1 className="text-3xl font-bold text-primary">Settings</h1>
                 <p className="text-muted-foreground">Manage your account and app preferences.</p>
