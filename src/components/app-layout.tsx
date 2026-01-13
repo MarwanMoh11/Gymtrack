@@ -166,14 +166,14 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
       </Sidebar>
 
       {/* Main Content Area */}
-      <SidebarInset className="flex flex-col bg-transparent">
+      <SidebarInset className="flex flex-col bg-transparent overflow-x-hidden w-full">
         {/* Mobile/Tablet Header */}
-        <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between px-4 sm:px-6 md:px-8 glass-panel border-b border-glass-border">
-          <div className="flex items-center gap-3 min-w-0 flex-shrink">
-            <div className="p-2 rounded-xl bg-primary/10 border border-primary/20">
+        <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between px-4 sm:px-6 md:px-8 glass-panel border-b border-glass-border shrink-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
+            <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 shrink-0">
               <Dumbbell className="h-6 w-6 text-primary" />
             </div>
-            <h1 className="text-lg font-bold tracking-tight uppercase">
+            <h1 className="text-lg font-bold tracking-tight uppercase truncate">
               {(() => {
                 const navItem = navigationItems.find(item => pathname === item.href);
                 if (navItem) return navItem.label;
@@ -184,7 +184,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
               })()}
             </h1>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
             <Button
               variant="ghost"
               size="icon"
@@ -197,8 +197,8 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 pb-24 md:pb-8 pt-6 sm:pt-8 overflow-y-auto">
-          <div className="max-w-5xl mx-auto px-6 md:px-12">
+        <main className="flex-1 pb-24 md:pb-8 pt-6 sm:pt-8 overflow-y-auto overflow-x-hidden w-full">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 md:px-12 w-full">
             {children}
           </div>
         </main>
