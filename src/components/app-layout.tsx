@@ -174,7 +174,14 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
               <Dumbbell className="h-6 w-6 text-primary" />
             </div>
             <h1 className="text-lg font-bold tracking-tight uppercase">
-              {navigationItems.find(item => pathname === item.href)?.label || "GymTrack"}
+              {(() => {
+                const navItem = navigationItems.find(item => pathname === item.href);
+                if (navItem) return navItem.label;
+                if (pathname.startsWith('/exercises')) return "Exercise Details";
+                if (pathname.startsWith('/workout-plan')) return "Workout Plan";
+                if (pathname.startsWith('/workout')) return "Live Session";
+                return "GymTrack";
+              })()}
             </h1>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
