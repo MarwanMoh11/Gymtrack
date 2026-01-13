@@ -4,104 +4,118 @@
 
 @layer base {
   :root {
-    /* New Theme: Pitch Black, Neon Lime, White Text */
-    --background: 240 5% 5.5%; /* #0E0E10 pitch black */
-    --foreground: 0 0% 100%; /* #FFFFFF white */
-
-    --card: 240 5% 10%; /* #1A1A1A very dark gray for cards */
-    --card-foreground: 0 0% 100%; /* white text on cards */
-
-    --popover: 240 5% 10%; /* very dark gray for popovers */
-    --popover-foreground: 0 0% 100%; /* white text on popovers */
-
-    --primary: 84 100% 53.5%; /* #A3FF12 neon lime */
-    --primary-foreground: 240 5% 5.5%; /* pitch black text on lime */
-
-    --secondary: 240 5% 15%; /* dark gray for secondary elements */
-    --secondary-foreground: 84 100% 53.5%; /* neon lime on secondary */
-
-    --muted: 240 5% 20%; /* slightly lighter dark gray for muted */
-    --muted-foreground: 0 0% 65%; /* light gray for muted text */
-
-    --accent: 84 100% 60%; /* slightly brighter lime for accent hover */
-    --accent-foreground: 240 5% 5.5%; /* pitch black text on accent */
-
-    --destructive: 0 84.2% 60.2%; /* Standard destructive red */
-    --destructive-foreground: 0 0% 98%; /* Standard destructive foreground */
-
-    --border: 240 5% 20%; /* #333333 or similar dark gray for borders */
-    --input: 240 5% 20%; /* dark gray for input borders */
-    --ring: 84 100% 53.5%; /* neon lime for focus rings */
-
-    --radius: 0.75rem; /* default 0.5rem, slightly more rounded for "pills" */
-
-    /* Sidebar specific theme */
-    --sidebar-background: 240 5% 8%; /* slightly lighter black for sidebar */
-    --sidebar-foreground: 0 0% 90%; /* off-white for sidebar text */
-    --sidebar-primary: 84 100% 53.5%; /* neon lime */
-    --sidebar-primary-foreground: 240 5% 5.5%; /* pitch black */
-    --sidebar-accent: 240 5% 15%; /* dark gray for hover */
-    --sidebar-accent-foreground: 84 100% 53.5%; /* neon lime */
-    --sidebar-border: 240 5% 12%; /* darker border for sidebar */
-    --sidebar-ring: 84 100% 53.5%; /* neon lime */
-
-    --chart-1: 84 100% 53.5%; /* neon lime */
-    --chart-2: 200 100% 50%; /* a contrasting blue or cyan */
-    --chart-3: 300 100% 50%; /* a contrasting magenta or purple */
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-  }
-
-  /* Dark theme variables (currently same as light for pitch black theme) */
-  .dark {
-    --background: 240 5% 5.5%;
+    /* Matrix Theme: Pitch Black & Neon Green */
+    --background: 0 0% 0%;
     --foreground: 0 0% 100%;
-    --card: 240 5% 10%;
+    /* #FFFFFF white */
+
+    --card: 0 0% 3%;
+    /* slightly lighter black for cards */
     --card-foreground: 0 0% 100%;
-    --popover: 240 5% 10%;
+
+    --popover: 0 0% 3%;
     --popover-foreground: 0 0% 100%;
+
     --primary: 84 100% 53.5%;
-    --primary-foreground: 240 5% 5.5%;
-    --secondary: 240 5% 15%;
+    /* #A3FF12 neon lime/green */
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 8%;
     --secondary-foreground: 84 100% 53.5%;
-    --muted: 240 5% 20%;
+
+    --muted: 0 0% 12%;
     --muted-foreground: 0 0% 65%;
+
     --accent: 84 100% 60%;
-    --accent-foreground: 240 5% 5.5%;
-    --destructive: 0 70% 50%; /* Adjusted destructive for dark */
-    --destructive-foreground: 0 0% 100%;
-    --border: 240 5% 20%;
-    --input: 240 5% 20%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 12%;
+    --input: 0 0% 12%;
     --ring: 84 100% 53.5%;
-    
-    --sidebar-background: 240 5% 8%; 
+
+    --radius: 1.25rem;
+
+    /* Sidebar specific theme (Matrix style) */
+    --sidebar-background: 0 0% 2%;
     --sidebar-foreground: 0 0% 90%;
     --sidebar-primary: 84 100% 53.5%;
-    --sidebar-primary-foreground: 240 5% 5.5%;
-    --sidebar-accent: 240 5% 15%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 8%;
     --sidebar-accent-foreground: 84 100% 53.5%;
-    --sidebar-border: 240 5% 12%;
+    --sidebar-border: 0 0% 6%;
     --sidebar-ring: 84 100% 53.5%;
 
     --chart-1: 84 100% 53.5%;
-    --chart-2: 200 100% 60%;
-    --chart-3: 300 100% 60%;
-    --chart-4: 43 74% 70%;
-    --chart-5: 27 87% 70%;
+    --chart-2: 84 80% 40%;
+    --chart-3: 0 0% 40%;
+    --chart-4: 84 60% 30%;
+    --chart-5: 0 0% 20%;
+
+    /* Custom Glassmorphism Tokens for Matrix Theme */
+    --glass-bg: rgba(5, 5, 5, 0.7);
+    --glass-border: rgba(163, 255, 18, 0.1);
+  }
+
+  /* Force dark mode behavior as the default/only mode for this premium look */
+  .dark,
+  :root {
+    --glass-bg: rgba(5, 5, 5, 0.8);
+    --glass-border: rgba(163, 255, 18, 0.08);
   }
 }
 
 @layer base {
   * {
-    @apply border-border;
+    @apply border-border outline-ring/50;
   }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Outfit', sans-serif;
   }
 }
 
-/* Styling for glowing PR dots on chart */
-.pr-dot {
-  stroke-width: 2px;
-  filter: drop-shadow(0 0 3px hsl(var(--primary))) drop-shadow(0 0 6px hsl(var(--primary)));
+@layer components {
+  .glass-panel {
+    @apply bg-[var(--glass-bg)] border border-[var(--glass-border)] backdrop-blur-xl shadow-2xl;
+  }
+
+  .premium-gradient-bg {
+    background: radial-gradient(circle at top right, hsla(84, 100%, 53%, 0.05), transparent),
+      radial-gradient(circle at bottom left, hsla(84, 100%, 53%, 0.03), transparent),
+      hsl(var(--background));
+  }
+
+  .interactive-scale {
+    @apply transition-transform duration-200 active:scale-95;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-muted rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/30;
 }

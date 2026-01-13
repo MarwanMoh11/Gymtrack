@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Badge } from '@/components/ui/badge';
-import type { DailyLog, NamedWorkoutPlan } from '@/types/workout';
+import type { DailyLog, NamedWorkoutPlan, PlanExercise } from '../../types/workout';
 import { calculateProgressDataForChart, ChartData } from '@/lib/workout-utils';
 import { Target } from 'lucide-react';
 
@@ -21,8 +21,9 @@ export default function MuscleDetailView({ muscle, volume, allLogs, activePlan }
     const seenIds = new Set<string>();
 
     activePlan?.plan.forEach(day => {
-      day.exercises.forEach(ex => {
-        if (ex.muscleGroups?.includes(muscle) && !ex.isCore && !ex.isActivity && !seenIds.has(ex.id)) {
+      day.exercises.forEach((ex: PlanExercise) => {
+        const isSpecialCategory = ['cardio', 'mobility', 'warmup', 'cooldown'].includes(ex.category as string);
+        if (ex.muscleGroups?.includes(muscle) && ex.category !== 'core' && !isSpecialCategory && !seenIds.has(ex.id)) {
           const chartData = calculateProgressDataForChart(ex.id, allLogs);
           if (chartData.length > 1) {
             exercises.push({ id: ex.id, name: ex.name, chartData });
@@ -66,10 +67,10 @@ export default function MuscleDetailView({ muscle, volume, allLogs, activePlan }
                     content={
                       <ChartTooltipContent
                         formatter={(value, name, props) => (
-                           <div className="text-xs">
-                             <div>Weight: {value} kg</div>
-                             <div>Reps: {props.payload.reps}</div>
-                           </div>
+                          <div className="text-xs">
+                            <div>Weight: {value} kg</div>
+                            <div>Reps: {props.payload.reps}</div>
+                          </div>
                         )}
                       />
                     }

@@ -4,7 +4,7 @@ import React, { createContext, useContext, ReactNode, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
 import { getUserData, saveUserData, initializeUserData } from '@/lib/firestore-workout-plan-service';
-import type { UserData, NamedWorkoutPlan, WorkoutDay } from '@/types/workout';
+import type { UserData, NamedWorkoutPlan, WorkoutDay } from '../types/workout';
 
 interface UserContextType {
     userData: UserData | null;
@@ -26,16 +26,25 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     const { data: userData, isLoading, error, refetch } = useQuery({
         queryKey: ['userData', user?.uid],
         queryFn: async () => {
-            if (!user?.uid) return null;
+            console.log("[UserContext] queryFn running for UID:", user?.uid);
+            if (!user?.uid) {
+                console.log("[UserContext] No UID, returning null");
+                return null;
+            }
             const data = await getUserData(user.uid);
+            console.log("[UserContext] getUserData result:", !!data);
             if (!data) {
+                console.log("[UserContext] No data found, initializing...");
                 // If no data exists, initialize it (fallback for safety)
-                return await initializeUserData(user.uid);
+                const initializedData = await initializeUserData(user.uid, user.email || '');
+                console.log("[UserContext] initialization complete:", !!initializedData);
+                return initializedData;
             }
             return data;
         },
         enabled: !!user?.uid,
         staleTime: 1000 * 60 * 5, // 5 minutes
+        retry: false, // Don't retry initialization errors - they are usually data or permission issues
     });
 
     // Mutation to save user data

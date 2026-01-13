@@ -16,6 +16,7 @@ import {
   updateProfile as firebaseUpdateProfile,
   reauthenticateWithCredential,
   reauthenticateWithPopup,
+  reauthenticateWithRedirect,
   EmailAuthProvider,
   deleteUser,
 } from 'firebase/auth';

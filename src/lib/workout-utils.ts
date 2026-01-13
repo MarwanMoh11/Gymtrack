@@ -1,14 +1,15 @@
 // src/lib/workout-utils.ts
-import type { DailyLog, NamedWorkoutPlan, SetData, LoggedSetData, Exercise, WorkoutDay } from '@/types/workout';
-import type { NextSessionRecommendationInput } from '@/ai/flows/next-session-recommendation';
+import type { DailyLog, NamedWorkoutPlan, SetData, LoggedSetData, Exercise, WorkoutDay, PlanExercise } from '../types/workout';
+
 
 
 export const getAllExercises = (allPlans: NamedWorkoutPlan[]): Array<{ id: string; name: string }> => {
   const exercisesMap = new Map<string, string>();
-  allPlans?.forEach(namedPlan => {
-    namedPlan.plan.forEach(day => {
-      day.exercises.forEach(ex => {
-        if (!ex.isWarmup && !ex.isConditioning && !ex.stretch && !ex.isFoamRoll && !ex.isActivity && !ex.isMatch && !ex.isRecovery && !ex.isCore && ex.unit === 'reps') {
+  allPlans?.forEach((namedPlan: NamedWorkoutPlan) => {
+    namedPlan.plan.forEach((day: WorkoutDay) => {
+      day.exercises.forEach((ex: PlanExercise) => {
+        const isSpecialCategory = ['cardio', 'mobility', 'warmup', 'cooldown'].includes(ex.category as string);
+        if (!isSpecialCategory && ex.category !== 'core' && ex.unit === 'reps') {
           if (!exercisesMap.has(ex.id)) {
             exercisesMap.set(ex.id, ex.name);
           }
@@ -16,23 +17,23 @@ export const getAllExercises = (allPlans: NamedWorkoutPlan[]): Array<{ id: strin
       });
     });
   });
-  return Array.from(exercisesMap, ([id, name]) => ({ id, name })).sort((a,b) => a.name.localeCompare(b.name));
+  return Array.from(exercisesMap, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 };
 
 export const parseWeightToNumber = (weightString: string | number | undefined): number => {
-    if (typeof weightString === 'number') return weightString;
-    if (typeof weightString !== 'string' || !weightString.trim()) return 0;
-    const lowerWeightString = weightString.toLowerCase();
-    if (['bodyweight', 'bw', '0', '0 kg', 'n/a'].includes(lowerWeightString)) return 0;
-    const addMatch = lowerWeightString.match(/(?:bw|bodyweight)\s*\+\s*([\d.]+)/i);
-    if (addMatch && addMatch[1]) return parseFloat(addMatch[1]);
-    const stackMatch = lowerWeightString.match(/([\d.]+)(?:st|nd|rd|th)?\s*stack/i);
-    if (stackMatch && stackMatch[1]) return parseFloat(stackMatch[1]) * 5;
-    const eachSideMatch = lowerWeightString.match(/([\d.]+)\s*kg\s*each\s*side/i);
-    if (eachSideMatch && eachSideMatch[1]) return (parseFloat(eachSideMatch[1]) * 2) + 20;
-    const numericMatch = lowerWeightString.match(/([\d.]+)/);
-    if (numericMatch && numericMatch[1]) return parseFloat(numericMatch[1]);
-    return 0;
+  if (typeof weightString === 'number') return weightString;
+  if (typeof weightString !== 'string' || !weightString.trim()) return 0;
+  const lowerWeightString = weightString.toLowerCase();
+  if (['bodyweight', 'bw', '0', '0 kg', 'n/a'].includes(lowerWeightString)) return 0;
+  const addMatch = lowerWeightString.match(/(?:bw|bodyweight)\s*\+\s*([\d.]+)/i);
+  if (addMatch && addMatch[1]) return parseFloat(addMatch[1]);
+  const stackMatch = lowerWeightString.match(/([\d.]+)(?:st|nd|rd|th)?\s*stack/i);
+  if (stackMatch && stackMatch[1]) return parseFloat(stackMatch[1]) * 5;
+  const eachSideMatch = lowerWeightString.match(/([\d.]+)\s*kg\s*each\s*side/i);
+  if (eachSideMatch && eachSideMatch[1]) return (parseFloat(eachSideMatch[1]) * 2) + 20;
+  const numericMatch = lowerWeightString.match(/([\d.]+)/);
+  if (numericMatch && numericMatch[1]) return parseFloat(numericMatch[1]);
+  return 0;
 };
 
 export type ChartData = {
@@ -43,106 +44,68 @@ export type ChartData = {
 };
 
 export const calculateProgressDataForChart = (exerciseId: string, allLogs: Map<string, DailyLog>): ChartData[] => {
-    const relevantLogs: Array<{ date: string, weightStr: string, repsPerSet: string[] }> = [];
+  const relevantLogs: Array<{ date: string, weightStr: string, repsPerSet: string[] }> = [];
 
-    const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  const sortedDates = Array.from(allLogs.keys()).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
-    sortedDates.forEach(dateStr => {
-        const dailyLog = allLogs.get(dateStr);
-        if (!dailyLog) return;
-        const exerciseLog = dailyLog[exerciseId];
-        
-        if (exerciseLog && typeof exerciseLog === 'object' && Object.keys(exerciseLog).length > 0) {
-            const repsPerSet: string[] = [];
-            let sessionWeight: string | undefined;
+  sortedDates.forEach(dateStr => {
+    const dailyLog = allLogs.get(dateStr);
+    if (!dailyLog) return;
+    const exerciseLog = dailyLog[exerciseId];
 
-            // Find the first completed set to determine the session's weight
-            for (const setId in exerciseLog) {
-                const loggedSet = exerciseLog[setId];
-                if (loggedSet.isCompleted && loggedSet.weight) {
-                    sessionWeight = loggedSet.weight;
-                    break;
-                }
-            }
-            if (sessionWeight === undefined) return;
+    if (exerciseLog && typeof exerciseLog === 'object' && Object.keys(exerciseLog).length > 0) {
+      const repsPerSet: string[] = [];
+      let sessionWeight: string | undefined;
 
-            Object.values(exerciseLog).forEach(loggedSet => {
-                if (loggedSet.isCompleted) {
-                    repsPerSet.push(String(loggedSet.reps ?? '0'));
-                }
-            });
-
-            if (repsPerSet.length > 0) {
-                relevantLogs.push({ date: dateStr, weightStr: sessionWeight, repsPerSet });
-            }
+      // Find the first completed set to determine the session's weight
+      for (const setId in exerciseLog) {
+        const loggedSet = exerciseLog[setId] as LoggedSetData;
+        if (loggedSet.isCompleted && loggedSet.weight) {
+          sessionWeight = String(loggedSet.weight);
+          break;
         }
-    });
+      }
+      if (sessionWeight === undefined) return;
 
-    let maxWeight = -1;
-    const chartData: ChartData[] = relevantLogs.map(log => {
-        const weight = parseWeightToNumber(log.weightStr);
-        let isPR = false;
-        if (weight > maxWeight) {
-            isPR = true;
-            maxWeight = weight;
+      Object.values(exerciseLog).forEach((loggedSet: any) => {
+        const s = loggedSet as LoggedSetData;
+        if (s.isCompleted) {
+          repsPerSet.push(String(s.reps ?? '0'));
         }
-        return {
-            date: log.date,
-            weight: weight,
-            reps: log.repsPerSet.join(', '),
-            isPR,
-        };
-    });
-    return chartData;
+      });
+
+      if (repsPerSet.length > 0) {
+        relevantLogs.push({ date: dateStr, weightStr: sessionWeight, repsPerSet });
+      }
+    }
+  });
+
+  let maxWeight = -1;
+  const chartData: ChartData[] = relevantLogs.map(log => {
+    const weight = parseWeightToNumber(log.weightStr);
+    let isPR = false;
+    if (weight > maxWeight) {
+      isPR = true;
+      maxWeight = weight;
+    }
+    return {
+      date: log.date,
+      weight: weight,
+      reps: log.repsPerSet.join(', '),
+      isPR,
+    };
+  });
+  return chartData;
 };
 
 
-export const transformHistoricalDataForAI = (exerciseId: string, allLogs: Map<string, DailyLog>): NextSessionRecommendationInput['recentPerformance'] => {
-    const relevantLogs: Array<{ date: string, weight: string, repsPerSet: string[] }> = [];
 
-    const sortedDates = Array.from(allLogs.keys()).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
-
-    sortedDates.forEach(dateStr => {
-        const dailyLog = allLogs.get(dateStr);
-        if (!dailyLog) return;
-        const exerciseLog = dailyLog[exerciseId];
-        
-        if (exerciseLog && typeof exerciseLog === 'object' && Object.keys(exerciseLog).length > 0) {
-            const repsPerSet: string[] = [];
-            let sessionWeight: string | undefined;
-
-            for (const setId in exerciseLog) {
-                const set = exerciseLog[setId];
-                if (set.isCompleted && set.weight) {
-                    sessionWeight = set.weight;
-                    break;
-                }
-            }
-            if (sessionWeight === undefined) return;
-
-            Object.values(exerciseLog).forEach(set => {
-                if (set.isCompleted) {
-                    repsPerSet.push(String(set.reps ?? '0'));
-                }
-            });
-
-            if (repsPerSet.length > 0) {
-               relevantLogs.push({
-                   date: dateStr,
-                   weight: sessionWeight,
-                   repsPerSet: repsPerSet,
-               });
-            }
-        }
-    });
-    return relevantLogs.slice(-8);
-};
 
 export const calculateStreaks = (dates: Date[]): { current: number; longest: number } => {
   if (dates.length === 0) return { current: 0, longest: 0 };
   const uniqueSortedTimestamps = Array.from(new Set(dates.map(d => d.getTime()))).sort((a, b) => a - b);
   if (uniqueSortedTimestamps.length === 0) return { current: 0, longest: 0 };
-  let currentStreak = 0; 
+  let currentStreak = 0;
   let longestStreak = 0;
   const oneDayMillis = 24 * 60 * 60 * 1000;
   for (let i = 0; i < uniqueSortedTimestamps.length; i++) {
@@ -179,7 +142,7 @@ export const getPreviousSetPerformance = (
 
   let currentExercise: Exercise | undefined;
   for (const day of activePlan.plan) {
-    const found = day.exercises.find(ex => ex.id === exerciseId);
+    const found = day.exercises.find((ex: PlanExercise) => ex.id === exerciseId);
     if (found) {
       currentExercise = found;
       break;
@@ -188,7 +151,7 @@ export const getPreviousSetPerformance = (
 
   if (!currentExercise) return undefined;
 
-  const allSetIdsForExercise = currentExercise.sets.map(s => s.id);
+  const allSetIdsForExercise = currentExercise.sets.map((s: SetData) => s.id);
   const currentSetIndex = allSetIdsForExercise.indexOf(currentSetId);
 
   // 1. Check previous sets in the CURRENT workout session first
@@ -247,7 +210,7 @@ export const getVolumeForMuscleGroups = (
   const exerciseCache = new Map<string, Exercise>();
 
   // Pre-populate exercise cache from all plans
-  allPlans.forEach(p => p.plan.forEach(d => d.exercises.forEach(e => exerciseCache.set(e.id, e))));
+  allPlans.forEach((p: NamedWorkoutPlan) => p.plan.forEach((d: WorkoutDay) => d.exercises.forEach((e: PlanExercise) => exerciseCache.set(e.id, e))));
 
   dates.forEach(dateStr => {
     const log = allLogs.get(dateStr);
@@ -257,9 +220,9 @@ export const getVolumeForMuscleGroups = (
         const exerciseDef = exerciseCache.get(exerciseId);
 
         if (exerciseDef && exerciseDef.muscleGroups) {
-          const completedSets = Object.values(exerciseLog).filter(set => set.isCompleted).length;
+          const completedSets = Object.values(exerciseLog).filter((set: any) => (set as LoggedSetData).isCompleted).length;
           if (completedSets > 0) {
-            exerciseDef.muscleGroups.forEach(muscle => {
+            exerciseDef.muscleGroups.forEach((muscle: string) => {
               // **THE FIX**: Use += to accumulate volume instead of overwriting it.
               muscleVolumes[muscle] = (muscleVolumes[muscle] || 0) + completedSets;
             });

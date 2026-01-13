@@ -8,19 +8,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/auth-context';
 import { produce } from 'immer';
 
-import type { Exercise as ExerciseType, LoggedExerciseData, DailyLog, SetData, UserData } from '@/types/workout';
+import type { Exercise as ExerciseType, ExerciseLogData, DailyLog, SetData, UserData, NamedWorkoutPlan, WorkoutDay } from '../../../types/workout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, Dumbbell, Sparkles, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle, Pencil, Loader2 } from 'lucide-react';
+import { ArrowLeft, Dumbbell, CheckCircle, Edit, Save, XCircle, XSquare, Undo2, Lock, Info, ArrowUpCircle, Pencil, Loader2, Sparkles, ChevronDown, ChevronUp, PlayCircle } from 'lucide-react';
 import SetLogger from '@/components/workout/set-logger';
-import AIRecommendationModal from '@/components/workout/ai-recommendation-modal';
 import AddExerciseModal from '@/components/workout-plan/add-exercise-modal';
 import { useToast } from '@/hooks/use-toast';
 import LoadingExercisePage from './loading';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getPreviousSetPerformance } from '@/lib/workout-utils';
 import {
   AlertDialog,
@@ -37,7 +37,6 @@ import { cn } from '@/lib/utils';
 import { getUserData, saveUserData } from '@/lib/firestore-workout-plan-service';
 import { getDailyLog, saveDailyLog } from '@/lib/firestore-log-service';
 import { getTargetWeightOverrides, setTargetWeightOverride as saveTargetWeightOverride } from '@/lib/firestore-settings-service';
-import { useAllExercises } from '@/hooks/use-workout-data';
 
 const getCurrentDateString = (): string => {
   return new Date().toISOString().split('T')[0];
@@ -58,13 +57,13 @@ const parseMaxTargetReps = (target: string | number): number | null => {
   return isNaN(parsed) ? null : parsed;
 };
 
-type ExercisePageProps = {
-  params: { exerciseId: string; };
-};
+interface ExercisePageProps {
+  params: Promise<{ exerciseId: string; }>;
+}
 
 export default function ExerciseDetailPage({ params: paramsFromProps }: ExercisePageProps) {
-  const resolvedParams = use(paramsFromProps as any);
-  const exerciseId = (resolvedParams as any).exerciseId;
+  const resolvedParams = use(paramsFromProps);
+  const exerciseId = resolvedParams.exerciseId;
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -77,8 +76,6 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const [manualTargetWeightInput, setManualTargetWeightInput] = useState('');
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [isEditExerciseModalOpen, setIsEditExerciseModalOpen] = useState(false);
-  const [isAIRecModalOpen, setIsAIRecModalOpen] = useState(false);
-  const [canSuggestWeightIncrease, setCanSuggestWeightIncrease] = useState(false);
 
   const currentDate = getCurrentDateString();
 
@@ -101,18 +98,17 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     enabled: !!user && !!dayIdFromQuery, // Only enable if we're on a specific workout day
   });
 
-  const allExercisesForModal = useAllExercises();
 
   // --- Memos to derive state from queries ---
   const { baseExercise, currentWorkoutDay, exerciseForLogging, activePlan } = useMemo(() => {
     if (!userData) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
-    const plan = planIdFromQuery ? userData.plans.find(p => p.id === planIdFromQuery) : userData.plans.find(p => p.isActive);
+    const plan = planIdFromQuery ? userData.plans.find((p: NamedWorkoutPlan) => p.id === planIdFromQuery) : userData.plans.find((p: NamedWorkoutPlan) => p.isActive);
     if (!plan) return { baseExercise: undefined, currentWorkoutDay: undefined, exerciseForLogging: undefined, activePlan: undefined };
 
     let baseEx, workoutDay, exerciseForLog;
 
     for (const day of plan.plan) {
-      const found = day.exercises.find(ex => ex.id === exerciseId);
+      const found = day.exercises.find((ex: ExerciseType) => ex.id === exerciseId);
       if (found) {
         baseEx = found;
         if (day.id === dayIdFromQuery) {
@@ -121,12 +117,10 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
         }
       }
     }
-    if (!baseEx) baseEx = allExercisesForModal?.find(ex => ex.id === exerciseId);
-
     return { baseExercise: baseEx, currentWorkoutDay: workoutDay, exerciseForLogging: exerciseForLog, activePlan: plan };
-  }, [userData, planIdFromQuery, dayIdFromQuery, exerciseId, allExercisesForModal]);
+  }, [userData, planIdFromQuery, dayIdFromQuery, exerciseId]);
 
-  const loggedExerciseData = useMemo(() => (dailyLog?.[exerciseId] || {}) as LoggedExerciseData, [dailyLog, exerciseId]);
+  const loggedExerciseData = useMemo(() => (dailyLog?.[exerciseId] || {}) as ExerciseLogData, [dailyLog, exerciseId]);
 
   // --- Effects to sync state with fetched data ---
   useEffect(() => {
@@ -137,28 +131,9 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
     }
   }, [exerciseForLogging, weightOverrides, exerciseId]);
 
-  const checkCompletionAndPlanReps = useCallback((currentLogData?: LoggedExerciseData) => {
-    if (!currentLogData || !exerciseForLogging || exerciseForLogging.sets.length === 0) return false;
-    const allSetsCompleted = exerciseForLogging.sets.every(set => currentLogData[set.id]?.isCompleted);
-    if (!allSetsCompleted) return false;
-
-    for (const set of exerciseForLogging.sets) {
-      const loggedSet = currentLogData[set.id];
-      const maxTarget = parseMaxTargetReps(set.targetReps);
-      const loggedRepsNum = loggedSet?.reps !== undefined ? parseInt(String(loggedSet.reps), 10) : NaN;
-      if (maxTarget === null) continue;
-      if (isNaN(loggedRepsNum) || loggedRepsNum < maxTarget) return false;
-    }
-    return true;
-  }, [exerciseForLogging]);
-
-  useEffect(() => {
-    setCanSuggestWeightIncrease(checkCompletionAndPlanReps(loggedExerciseData));
-  }, [loggedExerciseData, checkCompletionAndPlanReps]);
-
   // --- Mutations ---
   const saveLogMutation = useMutation({
-    mutationFn: (newLog: LoggedExerciseData) => {
+    mutationFn: (newLog: ExerciseLogData) => {
       if (!user) throw new Error("User not authenticated");
       const newDailyLog = { ...(dailyLog || {}), [exerciseId]: newLog };
       return saveDailyLog(user.uid, currentDate, newDailyLog);
@@ -181,7 +156,6 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
         return rest;
       });
       setSessionTargetWeight(newWeight);
-      setCanSuggestWeightIncrease(false);
       toast({ title: "Target Weight Updated", description: `New weight for ${baseExercise?.name} is ${newWeight}. Sets reset.` });
       setIsEditingTarget(false);
     },
@@ -193,12 +167,12 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const saveEditedExerciseMutation = useMutation({
     mutationFn: (updatedExercise: ExerciseType) => {
       if (!userData || !activePlan || !dayIdFromQuery) throw new Error("No active plan or day to update");
-      const newPlans = produce(userData.plans, draft => {
+      const newPlans = produce(userData.plans, (draft: NamedWorkoutPlan[]) => {
         const plan = draft.find(p => p.id === activePlan.id);
         if (!plan) return;
-        const day = plan.plan.find(d => d.id === dayIdFromQuery);
+        const day = plan.plan.find((d: WorkoutDay) => d.id === dayIdFromQuery);
         if (!day) return;
-        const exIndex = day.exercises.findIndex(ex => ex.id === updatedExercise.id);
+        const exIndex = day.exercises.findIndex((ex: ExerciseType) => ex.id === updatedExercise.id);
         if (exIndex === -1) throw new Error("Exercise not found in day");
         day.exercises[exIndex] = updatedExercise;
       });
@@ -223,9 +197,9 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   const handleSkipExercise = () => {
     if (!exerciseForLogging) return;
-    const skippedLog: LoggedExerciseData = {};
-    exerciseForLogging.sets.forEach(set => {
-      skippedLog[set.id] = { reps: loggedExerciseData[set.id]?.reps || '', weight: loggedExerciseData[set.id]?.weight, isCompleted: false };
+    const skippedLog: ExerciseLogData = {};
+    exerciseForLogging.sets.forEach((set: SetData) => {
+      skippedLog[set.id] = { id: set.id, reps: loggedExerciseData[set.id]?.reps || 0, weight: loggedExerciseData[set.id]?.weight, isCompleted: false };
     });
     saveLogMutation.mutate(skippedLog);
     toast({ variant: "default", title: "Exercise Skipped", description: `"${baseExercise?.name}" marked as skipped.` });
@@ -256,7 +230,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   const isSkipped = useMemo(() => {
     if (!exerciseForLogging || exerciseForLogging.sets.length === 0 || !dayIdFromQuery) return false;
-    return exerciseForLogging.sets.every(set => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length >= exerciseForLogging.sets.length;
+    return exerciseForLogging.sets.every((set: SetData) => loggedExerciseData[set.id]?.isCompleted === false) && Object.keys(loggedExerciseData).length >= exerciseForLogging.sets.length;
   }, [exerciseForLogging, loggedExerciseData, dayIdFromQuery]);
 
   const isLoading = isLoadingUserData || isLoadingLog || isLoadingOverrides;
@@ -297,68 +271,99 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
 
   const displayExercise = exerciseForLogging || baseExercise;
   const hasVideo = displayExercise.videoUrl && displayExercise.videoUrl.includes('youtube.com/embed');
-  const allSetsCompletedCheck = dayIdFromQuery && exerciseForLogging?.sets.every(set => loggedExerciseData?.[set.id]?.isCompleted);
+  const allSetsCompletedCheck = dayIdFromQuery && exerciseForLogging?.sets.every((set: SetData) => loggedExerciseData?.[set.id]?.isCompleted);
 
-  const isSpecialActivity = displayExercise.isActivity || displayExercise.isConditioning || displayExercise.isWarmup || displayExercise.isMatch || displayExercise.isStretch || displayExercise.isFoamRoll || displayExercise.isRecovery || displayExercise.isSkill || displayExercise.isMobility;
-  const canShowAISuggestionButton = dayIdFromQuery && !isSpecialActivity && !displayExercise.isCore && !isSkipped;
+  const isSpecialActivity = ['cardio', 'mobility', 'warmup', 'cooldown'].includes(displayExercise.category as string);
+  const canShowAISuggestionButton = dayIdFromQuery && !isSpecialActivity && displayExercise.category !== 'core' && !isSkipped;
 
   return (
-    <div className="container mx-auto max-w-3xl px-2 sm:px-4 py-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => dayIdFromQuery ? router.push('/dashboard/today') : router.back()} className="mr-auto">
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to {dayIdFromQuery ? "Workout" : "Previous"}
+    <div className="w-full space-y-8 pb-20 animate-in fade-in duration-700">
+      {/* Navigation & Status Header */}
+      <div className="flex items-center justify-between px-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => dayIdFromQuery ? router.push('/dashboard/today') : router.back()}
+          className="h-10 rounded-xl hover:bg-white/5 text-muted-foreground hover:text-foreground transition-all flex items-center gap-2 group"
+        >
+          <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" />
+          <span className="text-[10px] font-bold uppercase tracking-widest">Return to Training</span>
         </Button>
+
         {isSkipped && dayIdFromQuery && (
-          <Badge variant="destructive" className="text-xs font-normal">
-            <Lock className="h-3 w-3 mr-1" /> Skipped
-          </Badge>
+          <div className="px-3 py-1 rounded-full bg-destructive/10 border border-destructive/20 flex items-center gap-2">
+            <Lock className="h-3 w-3 text-destructive" />
+            <span className="text-[9px] font-bold uppercase tracking-widest text-destructive">Protocol Suspended</span>
+          </div>
         )}
       </div>
 
-      <Card className="shadow-lg rounded-2xl">
-        <CardHeader>
-          <div className="flex justify-between items-start">
-            <CardTitle className="text-2xl font-bold text-primary flex items-center">
-              <Dumbbell className="mr-3 h-7 w-7" />
-              {displayExercise.name}
-            </CardTitle>
-            {dayIdFromQuery && exerciseForLogging && (
-              <Button variant="ghost" size="icon" onClick={() => setIsEditExerciseModalOpen(true)} className="shrink-0">
-                <Pencil className="h-4 w-4" />
-                <span className="sr-only">Edit Exercise Details</span>
-              </Button>
-            )}
-          </div>
-          {displayExercise.notes && !isSkipped && (
-            <Badge variant="secondary" className="text-xs mt-1 w-fit">{displayExercise.notes}</Badge>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {displayExercise.description && (
-            <div>
-              <h3 className="text-md font-semibold mb-1 text-foreground">Description</h3>
-              <p className="text-sm text-muted-foreground whitespace-pre-line">{displayExercise.description}</p>
+      {/* Main Exercise Branding Card */}
+      <div className="relative overflow-hidden rounded-[2.5rem] glass-panel border-none p-8 md:p-10 shadow-2xl">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
+          <div className="flex items-start gap-6">
+            <div className="w-16 h-16 rounded-[2rem] bg-primary flex items-center justify-center border border-primary/20 shadow-xl shadow-primary/20 -rotate-3 group-hover:rotate-0 transition-transform duration-500 flex-shrink-0">
+              <Dumbbell className="h-8 w-8 text-background" />
             </div>
-          )}
-
-          {displayExercise.muscleGroups && displayExercise.muscleGroups.length > 0 && (
-            <div>
-              <h3 className="text-md font-semibold mb-1 text-foreground">Primary Muscle Groups</h3>
-              <div className="flex flex-wrap gap-1">
-                {displayExercise.muscleGroups.map((group) => (
-                  <Badge key={group} variant="outline" className="text-xs">{group}</Badge>
+            <div className="space-y-1">
+              <h1 className="text-3xl md:text-4xl font-black tracking-tighter leading-none">{displayExercise.name}</h1>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {displayExercise.muscleGroups?.map((group: string) => (
+                  <span key={group} className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md bg-white/5 border border-white/5 text-foreground/40 italic">
+                    {group}
+                  </span>
                 ))}
               </div>
             </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {dayIdFromQuery && exerciseForLogging && (
+              <Button
+                variant="outline"
+                onClick={() => setIsEditExerciseModalOpen(true)}
+                className="h-12 w-12 rounded-xl border-white/10 hover:bg-white/5 flex items-center justify-center interactive-scale p-0"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Decorative Background Glows */}
+        <div className="absolute -top-24 -left-24 w-64 h-64 bg-primary/10 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-primary/5 rounded-full blur-[100px] pointer-events-none" />
+      </div>
+
+      {/* Collapsible Info Section */}
+      <Collapsible className="glass-panel border-none rounded-[2rem] overflow-hidden">
+        <CollapsibleTrigger className="w-full p-6 flex items-center justify-between group">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
+              <Info className="h-4 w-4 text-primary" />
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/60">Execution & Methodology</span>
+          </div>
+          <ChevronDown className="h-4 w-4 text-foreground/40 group-data-[state=open]:rotate-180 transition-transform" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-6 pb-8 space-y-8 animate-in slide-in-from-top-2 duration-300">
+          {displayExercise.description && (
+            <div className="space-y-3">
+              <div className="h-[1px] w-full bg-white/5" />
+              <p className="text-sm leading-relaxed text-muted-foreground font-medium italic">
+                {displayExercise.description}
+              </p>
+            </div>
           )}
 
-          <Separator />
-
           {displayExercise.videoUrl && (
-            <div>
-              <h3 className="text-md font-semibold mb-2 text-foreground">Instructional Video</h3>
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <PlayCircle className="h-4 w-4 text-primary" />
+                <h3 className="text-[10px] font-black uppercase tracking-widest">Visual Guidance</h3>
+              </div>
               {hasVideo ? (
-                <div className="aspect-video rounded-lg overflow-hidden border border-border">
+                <div className="aspect-video rounded-[1.5rem] overflow-hidden border border-white/5 shadow-2xl relative group">
                   <iframe
                     width="100%"
                     height="100%"
@@ -367,85 +372,118 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                     frameBorder="0"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                     allowFullScreen
-                    className="bg-muted"
+                    className="bg-black/50"
                   ></iframe>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  Video link: <a href={displayExercise.videoUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{displayExercise.videoUrl}</a>
-                </p>
+                <a
+                  href={displayExercise.videoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors"
+                >
+                  <span className="text-xs font-bold text-primary">Open External Demonstration</span>
+                  <ArrowUpCircle className="h-4 w-4 text-primary rotate-45" />
+                </a>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </CollapsibleContent>
+      </Collapsible>
 
+      {/* Core Protocol Logging Section */}
       {exerciseForLogging && dayIdFromQuery && (
-        <Card className={cn("shadow-lg rounded-2xl", isSkipped && "bg-card/60")}>
-          <CardHeader className="pb-3">
-            <div className="flex justify-between items-center">
-              <CardTitle className="text-xl">Log Your Sets</CardTitle>
-              {isSkipped ? (
-                <Button variant="outline" size="sm" onClick={handleUnskipExercise}><Undo2 className="mr-2 h-4 w-4" />Unskip</Button>
-              ) : (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"><XSquare className="mr-2 h-4 w-4" />Skip Exercise</Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Skip: {displayExercise.name}?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This marks all sets as not completed for today, affecting your score. You can log sets later if you unskip.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleSkipExercise} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                        Skip Exercise
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              )}
-            </div>
-            {!(isSpecialActivity || displayExercise.isCore || isSkipped) && (
-              <div className="mt-3 p-3 bg-secondary/30 rounded-md border border-secondary/50">
-                <Label className="text-xs font-medium text-muted-foreground">Planned Weight for Today</Label>
-                {isEditingTarget ? (
-                  <div className="flex items-center gap-2 mt-1">
-                    <Input
-                      type="text"
-                      value={manualTargetWeightInput}
-                      onChange={(e) => setManualTargetWeightInput(e.target.value)}
-                      className="h-8 text-sm flex-grow"
-                      placeholder="e.g. 80 kg or Bodyweight"
-                      aria-label="Edit target weight"
-                      disabled={saveWeightOverrideMutation.isPending}
-                    />
-                    <Button size="icon" variant="ghost" onClick={handleSaveManualTarget} className="h-8 w-8 text-primary shrink-0" aria-label="Save weight" disabled={saveWeightOverrideMutation.isPending}>
-                      {saveWeightOverrideMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    </Button>
-                    <Button size="icon" variant="ghost" onClick={handleCancelEditTarget} className="h-8 w-8 shrink-0" aria-label="Cancel edit weight" disabled={saveWeightOverrideMutation.isPending}><XCircle className="h-4 w-4" /></Button>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between mt-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground">{sessionTargetWeight || 'Not set'}</p>
-                      {canSuggestWeightIncrease && (
-                        <Badge variant="default" className="px-1.5 py-0.5 text-xs bg-green-600 hover:bg-green-700 text-white">
-                          <ArrowUpCircle className="h-3 w-3 mr-0.5" /> Suggest Inc.
-                        </Badge>
-                      )}
-                    </div>
-                    <Button size="icon" variant="ghost" onClick={handleEditClick} className="h-8 w-8 shrink-0" aria-label="Edit weight"><Edit className="h-4 w-4" /></Button>
-                  </div>
-                )}
+        <div className={cn(
+          "relative glass-panel border-none rounded-[2.5rem] p-8 md:p-10 shadow-2xl transition-all duration-500",
+          isSkipped && "opacity-40 grayscale pointer-events-none scale-[0.98]"
+        )}>
+          {/* Section Header */}
+          <div className="flex justify-between items-center mb-10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center border border-primary/20">
+                <Edit className="h-5 w-5 text-primary" />
               </div>
+              <h2 className="text-2xl font-black tracking-tight uppercase italic">Active Protocol</h2>
+            </div>
+
+            {!isSkipped ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-10 rounded-xl text-destructive hover:bg-destructive/10 text-[10px] font-bold uppercase tracking-widest px-4">
+                    Suspend Protocol
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="glass-panel border-none rounded-[2.5rem] p-10">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-2xl font-black tracking-tight">Suspend: {displayExercise.name}?</AlertDialogTitle>
+                    <AlertDialogDescription className="text-muted-foreground font-medium pt-2">
+                      Marking this protocol as suspended will impact your session score. This should only be done for essential recovery or fatigue management.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter className="pt-6 gap-4">
+                    <AlertDialogCancel className="h-12 rounded-xl border-white/10 hover:bg-white/5 font-bold uppercase tracking-widest text-[10px]">Resume Execution</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleSkipExercise} className="h-12 rounded-xl bg-destructive hover:bg-destructive/90 text-background font-bold uppercase tracking-widest text-[10px] shadow-xl shadow-destructive/20">
+                      Confirm Suspension
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Button variant="outline" size="sm" onClick={handleUnskipExercise} className="h-10 rounded-xl border-primary/20 text-primary hover:bg-primary/5 text-[10px] font-bold uppercase tracking-widest px-4">
+                <Undo2 className="mr-2 h-4 w-4" /> Reactivate Protocol
+              </Button>
             )}
-          </CardHeader>
-          <CardContent className={cn("p-0", isSkipped && "opacity-40 pointer-events-none")}>
-            {exerciseForLogging.sets.map((set, index) => (
+          </div>
+
+          {/* Target Weight Setting */}
+          {!(isSpecialActivity || displayExercise.category === 'core' || isSkipped) && (
+            <div className="mb-10 p-6 rounded-[1.5rem] bg-white/5 border border-white/5 relative group overflow-hidden">
+              <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                <div>
+                  <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/40 mb-2 block">Planned Intensity</Label>
+                  {isEditingTarget ? (
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex-grow">
+                        <Input
+                          type="text"
+                          value={manualTargetWeightInput}
+                          onChange={(e) => setManualTargetWeightInput(e.target.value)}
+                          className="h-12 bg-white/5 border-white/10 rounded-xl font-black text-lg focus-visible:ring-primary/50"
+                          placeholder="e.g. 100 kg"
+                          disabled={saveWeightOverrideMutation.isPending}
+                        />
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black uppercase tracking-widest opacity-30">WEIGHT</div>
+                      </div>
+                      <Button onClick={handleSaveManualTarget} disabled={saveWeightOverrideMutation.isPending} className="h-12 w-12 rounded-xl bg-primary text-background flex-shrink-0 shadow-lg shadow-primary/20">
+                        {saveWeightOverrideMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+                      </Button>
+                      <Button variant="ghost" onClick={handleCancelEditTarget} disabled={saveWeightOverrideMutation.isPending} className="h-12 w-12 rounded-xl bg-white/5 flex-shrink-0">
+                        <XCircle className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4 group/weight cursor-pointer" onClick={handleEditClick}>
+                      <span className="text-3xl font-black tracking-tighter text-primary">{sessionTargetWeight || 'N/A'}</span>
+                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center opacity-0 group-hover/weight:opacity-100 transition-opacity">
+                        <Pencil className="h-3 w-3 text-primary" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col items-end">
+                  <span className="text-[9px] font-black uppercase tracking-widest opacity-20 mb-1">Methodology</span>
+                  <span className="text-xs font-black tracking-tight">{displayExercise.sets.length} High Tension Sets</span>
+                </div>
+              </div>
+              {/* Decorative accent */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full -mr-16 -mt-16 blur-2xl opacity-50" />
+            </div>
+          )}
+
+          {/* Set List */}
+          <div className="space-y-2">
+            {exerciseForLogging.sets.map((set: SetData, index: number) => (
               <SetLogger
                 key={set.id}
                 setNumber={index + 1}
@@ -459,36 +497,15 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
                 activePlan={activePlan}
               />
             ))}
-          </CardContent>
-          {canShowAISuggestionButton && (
-            <CardFooter className="pt-4 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsAIRecModalOpen(true)}
-                disabled={!allSetsCompletedCheck}
-                className="bg-accent/20 hover:bg-accent/30 text-accent-foreground border-accent/50"
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                AI Weight Advice
-              </Button>
-            </CardFooter>
-          )}
-        </Card>
+          </div>
+        </div>
       )}
-      {canShowAISuggestionButton && exerciseForLogging && dayIdFromQuery && (
-        <AIRecommendationModal
-          exercise={exerciseForLogging}
-          isOpen={isAIRecModalOpen}
-          onOpenChange={setIsAIRecModalOpen}
-        />
-      )}
-      {exerciseForLogging && dayIdFromQuery && allExercisesForModal && userData && (
+
+      {exerciseForLogging && dayIdFromQuery && userData && (
         <AddExerciseModal
           isOpen={isEditExerciseModalOpen}
           onOpenChange={setIsEditExerciseModalOpen}
           onSave={(exercise) => saveEditedExerciseMutation.mutate(exercise)}
-          allExercises={allExercisesForModal}
           dayId={dayIdFromQuery}
           initialData={exerciseForLogging}
         />

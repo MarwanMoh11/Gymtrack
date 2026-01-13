@@ -1,10 +1,9 @@
 // src/components/dashboard/past-workout-log-view.tsx
 import { useMemo } from 'react';
-import type { DailyLog, WorkoutDay, Exercise } from '@/types/workout';
+import type { DailyLog, WorkoutDay, Exercise, ExerciseLogData, LoggedSetData, SetData } from '../../types/workout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { CheckCircle } from 'lucide-react';
 import { useUser } from '@/context/user-context';
-import { useAllExercises } from '@/hooks/use-workout-data';
 
 interface PastWorkoutLogViewProps {
   workoutDay: WorkoutDay | null;
@@ -13,17 +12,9 @@ interface PastWorkoutLogViewProps {
 
 export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkoutLogViewProps) {
   const { isLoading } = useUser();
-  const allExercises = useAllExercises();
-
-  // Create a quick lookup map from the hook result
-  const exerciseMap = useMemo(() => {
-    const map = new Map<string, Exercise>();
-    allExercises.forEach(ex => map.set(ex.id, ex));
-    return map;
-  }, [allExercises]);
-
+  // Helper to find exercise definition if available in the passed workout day
   function getExerciseById(exerciseId: string) {
-    return exerciseMap.get(exerciseId);
+    return workoutDay?.exercises.find((ex: Exercise) => ex.id === exerciseId);
   }
 
   if (isLoading) {
@@ -35,7 +26,7 @@ export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkout
   }
 
   const exerciseIdsToRender = workoutDay
-    ? workoutDay.exercises.map(ex => ex.id).filter(id => dailyLog[id])
+    ? workoutDay.exercises.map((ex: Exercise) => ex.id).filter((id: string) => dailyLog[id])
     : Object.keys(dailyLog);
 
   if (exerciseIdsToRender.length === 0) {
@@ -45,20 +36,21 @@ export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkout
   return (
     <div className="space-y-4 pt-2 pb-6">
       {exerciseIdsToRender.map((exerciseId) => {
-        const exerciseLog = dailyLog[exerciseId];
+        const exerciseLog = dailyLog[exerciseId] as ExerciseLogData;
         const exerciseDefinition = getExerciseById(exerciseId);
 
         if (!exerciseLog || typeof exerciseLog !== 'object') return null;
 
-        const wasExercisedLogged = Object.values(exerciseLog).some(set => set && typeof set === 'object' && set.isCompleted);
+        // Use type narrowing or casting
+        const wasExercisedLogged = Object.values(exerciseLog).some((set: any) => set && typeof set === 'object' && (set as LoggedSetData).isCompleted);
         if (!wasExercisedLogged) return null;
 
-        const exerciseName = exerciseDefinition?.name || `Exercise ID: ${exerciseId}`;
+        const exerciseName = exerciseDefinition?.name || exerciseLog.name || `Exercise ID: ${exerciseId}`;
         const exerciseNotes = exerciseDefinition?.notes;
         const exerciseUnit = exerciseDefinition?.unit;
 
         const setIdsToRender = exerciseDefinition
-          ? exerciseDefinition.sets.map(set => set.id)
+          ? exerciseDefinition.sets.map((set: SetData) => set.id)
           : Object.keys(exerciseLog).sort();
 
         return (
@@ -68,12 +60,13 @@ export default function PastWorkoutLogView({ workoutDay, dailyLog }: PastWorkout
               {exerciseNotes && <CardDescription className="text-xs">{exerciseNotes}</CardDescription>}
             </CardHeader>
             <CardContent className="px-4 pb-3 text-xs space-y-1">
-              {setIdsToRender.map((setId, index) => {
-                const loggedSet = exerciseLog[setId];
+              {setIdsToRender.map((setId: string, index: number) => {
+                const loggedSet = exerciseLog[setId] as LoggedSetData;
                 if (!loggedSet || !loggedSet.isCompleted) return null;
 
                 const setNumber = index + 1;
-                const unitDisplay = exerciseDefinition?.sets.find(s => s.id === setId)?.unit || exerciseUnit || 'reps';
+                const setDef = exerciseDefinition?.sets.find((s: SetData) => s.id === setId);
+                const unitDisplay = setDef?.unit || exerciseUnit || 'reps';
 
                 return (
                   <div key={setId} className="flex justify-between items-center text-muted-foreground border-t border-border/30 pt-1 mt-1 first:mt-0 first:border-t-0">

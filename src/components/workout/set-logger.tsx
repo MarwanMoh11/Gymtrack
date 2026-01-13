@@ -5,7 +5,7 @@ import type { LoggedSetData, SetData, DailyLog, NamedWorkoutPlan } from '@/types
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Check, Edit3, Plus, Minus, History, Sparkles } from 'lucide-react';
+import { Check, Edit3, Plus, Minus, History, Sparkles, ChevronRight } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,13 +15,13 @@ import { getPreviousSetPerformance } from '@/lib/workout-utils';
 
 interface SetLoggerProps {
   setNumber: number;
-  setData: SetData; 
+  setData: SetData;
   loggedSetData?: LoggedSetData;
   effectiveTargetWeight?: string;
   onLogSet: (logData: { reps: string; isCompleted: boolean; }) => void;
   exerciseUnit?: 'reps' | 's' | 'min';
-  isSimpleLog?: boolean; 
-  isEditingInitially?: boolean; 
+  isSimpleLog?: boolean;
+  isEditingInitially?: boolean;
   activePlan?: NamedWorkoutPlan;
 }
 
@@ -45,7 +45,7 @@ export default function SetLogger({
   const unitLabel = setData.unit || exerciseUnit || 'reps';
   const currentDate = getCurrentDateString();
 
-  const { data: allLogs, isLoading: isLoadingLogs } = useQuery({
+  const { data: allLogs } = useQuery({
     queryKey: ['allUserLogs', user?.uid],
     queryFn: () => getAllUserLogs(user!.uid),
     enabled: !!user,
@@ -64,7 +64,6 @@ export default function SetLogger({
 
   const getInitialReps = () => {
     if (loggedSetData?.reps !== undefined && loggedSetData.reps !== null && String(loggedSetData.reps).trim() !== '') return String(loggedSetData.reps);
-    // Pre-fill with last session's reps if available
     if (lastSessionSetPerformance?.reps !== undefined) return String(lastSessionSetPerformance.reps);
     return '';
   };
@@ -81,9 +80,8 @@ export default function SetLogger({
 
 
   const handleLog = () => {
-    // If the input is empty, default to the placeholder (which is last session's reps or target reps)
-    const repsToLog = String(currentReps).trim() !== '' 
-      ? currentReps 
+    const repsToLog = String(currentReps).trim() !== ''
+      ? currentReps
       : (lastSessionSetPerformance?.reps !== undefined ? String(lastSessionSetPerformance.reps) : String(setData.targetReps));
 
     onLogSet({
@@ -99,15 +97,14 @@ export default function SetLogger({
   }
 
   const handleMarkAsDone = () => {
-     onLogSet({
-        reps: String(setData.targetReps), 
-        isCompleted: true
+    onLogSet({
+      reps: String(setData.targetReps),
+      isCompleted: true
     });
-     setIsEditing(false);
+    setIsEditing(false);
   }
 
   const handleMarkAsNotDone = () => {
-    // When un-completing, we keep the reps data but mark as incomplete.
     onLogSet({ reps: String(loggedSetData?.reps || ''), isCompleted: false });
     setIsEditing(true);
     setCurrentReps(loggedSetData?.reps !== undefined ? String(loggedSetData.reps) : '');
@@ -124,35 +121,33 @@ export default function SetLogger({
 
   const getPlaceholderReps = () => {
     if (lastSessionSetPerformance?.reps !== undefined) {
-        const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
-        if (!isNaN(lastRepsNum) && unitLabel === 'reps') {
-            // Suggest an increase if possible for reps-based exercises
-            return String(lastRepsNum + 1);
-        }
-        return String(lastSessionSetPerformance.reps);
+      const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
+      if (!isNaN(lastRepsNum) && unitLabel === 'reps') {
+        return String(lastRepsNum + 1);
+      }
+      return String(lastSessionSetPerformance.reps);
     }
     return String(setData.targetReps);
   };
-  
+
   const performanceBeatLast = useMemo(() => {
     if (!loggedSetData?.isCompleted || !lastSessionSetPerformance?.isCompleted) return null;
 
     const currentRepsNum = parseInt(String(loggedSetData.reps), 10);
     const lastRepsNum = parseInt(String(lastSessionSetPerformance.reps), 10);
-    
+
     if (isNaN(currentRepsNum) || isNaN(lastRepsNum)) return null;
-    
-    // For now, any increase is a PR. More complex logic could be added for weight+reps.
+
     if (currentRepsNum > lastRepsNum) {
-        return { type: 'reps', diff: currentRepsNum - lastRepsNum, message: `+${currentRepsNum - lastRepsNum} Reps! Great Progress!` };
+      return { type: 'reps', diff: currentRepsNum - lastRepsNum, message: `BEAT LAST LOG (+${currentRepsNum - lastRepsNum})` };
     }
     if (currentRepsNum === lastRepsNum) {
-        return { type: 'maintained', message: `Maintained, stay consistent.` };
+      return { type: 'maintained', message: `EQUALED PREVIOUS` };
     }
     if (currentRepsNum < lastRepsNum) {
-        return { type: 'decreased', message: `Slight drop, aim higher next time.` };
+      return { type: 'decreased', message: `BELOW PREVIOUS` };
     }
-    
+
     return null;
   }, [loggedSetData, lastSessionSetPerformance]);
 
@@ -160,19 +155,22 @@ export default function SetLogger({
   if (isSimpleLog) {
     const isCompleted = loggedSetData?.isCompleted ?? false;
     return (
-      <div className="flex items-center justify-between p-3 border-t border-border/50">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm w-12 shrink-0">Set {setNumber}:</span>
-          <span className="text-sm text-muted-foreground">{setData.targetReps} {setData.unit ? `(${setData.unit})` : ''}</span>
+      <div className="flex items-center justify-between py-6 px-1 border-b border-white/5">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center font-bold text-xs opacity-40">
+            {setNumber}
+          </div>
+          <span className="text-sm font-semibold tracking-tight">{setData.targetReps} {unitLabel} Protocol</span>
         </div>
-        <Button 
-          variant={isCompleted ? "secondary" : "default"} 
-          size="sm" 
+        <Button
+          variant={isCompleted ? "secondary" : "default"}
           onClick={isCompleted ? handleMarkAsNotDone : handleMarkAsDone}
-          className="w-28"
+          className={cn(
+            "h-12 px-6 rounded-xl font-bold uppercase tracking-widest text-[10px] interactive-scale",
+            isCompleted ? "bg-primary/20 text-primary border-primary/20" : "bg-primary text-background shadow-lg shadow-primary/20"
+          )}
         >
-          {isCompleted && <Check className="mr-1 h-4 w-4 text-primary" />}
-          {isCompleted ? "Completed" : "Mark Done"}
+          {isCompleted ? "Protocol Secured" : "Log Victory"}
         </Button>
       </div>
     );
@@ -180,89 +178,118 @@ export default function SetLogger({
 
   if (!isEditing && loggedSetData?.isCompleted) {
     const isPR = performanceBeatLast?.type === 'reps';
-    
+
     return (
       <div className={cn(
-        "p-3 border-t border-border/50",
-        isPR ? "bg-primary/10 border-l-4 border-l-primary" : "bg-secondary/30"
+        "py-6 px-6 rounded-[1.5rem] transition-all duration-500 border-none group relative overflow-hidden my-2",
+        isPR ? "bg-primary shadow-xl shadow-primary/30" : "bg-white/5"
       )}>
-        <div className="flex justify-between items-center">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-x-4 gap-y-1 text-sm">
-              <span className="font-medium w-12">Set {setNumber}:</span>
-              <span className={cn(
-                "font-semibold flex items-center",
-                isPR ? "text-primary" : "text-foreground"
-              )}>
-                Logged: {loggedSetData.reps ?? 'N/A'} {unitLabel}
-              </span>
-              {lastSessionSetPerformance && (
-                <span className="text-xs text-muted-foreground/80 flex items-center">
-                  <History className="h-3 w-3 mr-1 opacity-70" />
-                  Last time: {lastSessionSetPerformance.reps} {unitLabel}
-                </span>
+        <div className="flex justify-between items-center relative z-10">
+          <div className="flex items-center gap-6">
+            <div className={cn(
+              "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm",
+              isPR ? "bg-background text-primary" : "bg-white/10 text-foreground/50"
+            )}>
+              {setNumber}
+            </div>
+            <div>
+              <div className="flex items-center gap-3">
+                <p className={cn(
+                  "text-xl font-black tracking-tighter uppercase",
+                  isPR ? "text-background" : "text-foreground"
+                )}>
+                  {loggedSetData.reps ?? '0'} {unitLabel}
+                </p>
+                {isPR && (
+                  <div className="flex items-center gap-1 bg-background/20 px-2 py-0.5 rounded-full backdrop-blur-md">
+                    <Sparkles className="h-3 w-3 text-background" />
+                    <span className="text-[9px] font-black text-background">NEW PR</span>
+                  </div>
+                )}
+              </div>
+              {performanceBeatLast && (
+                <p className={cn(
+                  "text-[10px] font-bold uppercase tracking-[0.2em] mt-0.5",
+                  isPR ? "text-background/60" : "text-muted-foreground/60"
+                )}>
+                  {performanceBeatLast.message}
+                </p>
               )}
             </div>
-             <Button variant="ghost" size="icon" onClick={handleEdit} className="h-8 w-8">
-              <Edit3 className="h-4 w-4" />
-            </Button>
+          </div>
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={handleEdit}
+            className={cn(
+              "h-10 w-10 rounded-xl interactive-scale",
+              isPR ? "bg-background/20 hover:bg-background/30 text-background border-none" : "bg-white/5"
+            )}
+          >
+            <Edit3 className="h-4 w-4" />
+          </Button>
         </div>
-        {performanceBeatLast && (
-           <div className={cn(
-               "text-xs mt-1 pl-[calc(3rem)] flex items-center",
-                isPR ? "text-green-500 font-semibold" : "text-muted-foreground",
-                performanceBeatLast?.type === 'decreased' && "text-amber-500"
-            )}>
-              {isPR && <Sparkles className="h-3 w-3 mr-1" />}
-              {performanceBeatLast.message}
-            </div>
+
+        {isPR && (
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/20 rounded-full -mr-16 -mt-16 blur-2xl opacity-50" />
         )}
       </div>
     );
   }
 
   return (
-    <div className="p-3 border-t border-border/50">
-      <div className="flex items-end gap-2 sm:gap-3 mb-1.5">
-        <Label htmlFor={`set-${setNumber}-reps`} className="w-12 pt-1 text-sm font-medium shrink-0">
-          Set {setNumber}
-        </Label>
-        <div className="flex-1">
-          <Label htmlFor={`set-${setNumber}-reps`} className="text-xs text-muted-foreground">
-            {unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1)} (Plan: {setData.targetReps})
-          </Label>
-          <div className="flex items-center gap-1 mt-1">
-             <Button onClick={decrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Decrement reps">
-              <Minus className="h-4 w-4" />
+    <div className="py-8 px-1 border-b border-white/5">
+      <div className="flex items-center gap-6">
+        <div className="hidden sm:flex w-14 h-14 rounded-2xl bg-white/5 border border-white/10 items-center justify-center font-black text-sm text-foreground/30">
+          {setNumber}
+        </div>
+
+        <div className="flex-1 space-y-4">
+          <div className="flex justify-between items-end">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-widest text-primary">Target:</span>
+              <span className="text-xl font-black tracking-tight">{setData.targetReps} {unitLabel}</span>
+            </div>
+            {lastSessionSetPerformance && (
+              <div className="flex items-center gap-1.5 opacity-40">
+                <History className="h-3 w-3" />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Last: {lastSessionSetPerformance.reps}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-[1fr,auto,1fr] items-center gap-4 max-w-[280px]">
+            <Button onClick={decrementReps} variant="outline" className="h-14 rounded-2xl border-white/10 hover:bg-white/5 interactive-scale">
+              <Minus className="h-6 w-6" />
             </Button>
-            <Input
-              id={`set-${setNumber}-reps`}
-              type="number"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              placeholder={getPlaceholderReps()}
-              value={currentReps}
-              onChange={(e) => setCurrentReps(e.target.value.replace(/[^0-9]/g, ''))}
-              className="h-9 text-lg font-semibold text-center appearance-none w-16 flex-shrink-0"
-              style={{ MozAppearance: 'textfield' }} 
-              aria-label={`Reps for set ${setNumber}`}
-            />
-             <Button onClick={incrementReps} size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Increment reps">
-              <Plus className="h-4 w-4" />
+
+            <div className="text-center group">
+              <Input
+                type="number"
+                inputMode="numeric"
+                placeholder={getPlaceholderReps()}
+                value={currentReps}
+                onChange={(e) => setCurrentReps(e.target.value.replace(/[^0-9]/g, ''))}
+                className="h-14 border-none bg-transparent text-3xl font-black text-center w-20 p-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
+              <div className="h-[2px] w-full bg-primary/20 group-focus-within:bg-primary transition-colors" />
+              <p className="text-[9px] font-bold uppercase tracking-widest mt-1 opacity-30">{unitLabel}</p>
+            </div>
+
+            <Button onClick={incrementReps} variant="outline" className="h-14 rounded-2xl border-primary/20 text-primary hover:bg-primary/5 interactive-scale">
+              <Plus className="h-6 w-6" />
             </Button>
           </div>
         </div>
-        <Button onClick={handleLog} size="sm" className="h-9 shrink-0 self-end">
-          <Check className="h-4 w-4" />
-          <span className="sr-only sm:not-sr-only sm:ml-1">Log</span>
+
+        <Button
+          onClick={handleLog}
+          className="h-14 w-14 sm:w-28 rounded-2xl bg-primary text-background shadow-xl shadow-primary/20 interactive-scale shrink-0"
+        >
+          <Check className="h-6 w-6 sm:h-5 sm:w-5" />
+          <span className="hidden sm:inline-block ml-2 font-black uppercase text-[10px] tracking-widest">Log</span>
         </Button>
       </div>
-      {lastSessionSetPerformance && (
-        <div className="pl-[calc(3rem+0.5rem)] text-xs text-muted-foreground/70 flex items-center">
-            <History className="h-3 w-3 mr-1 opacity-60" />
-            Last time: {lastSessionSetPerformance.reps} {unitLabel}
-            {lastSessionSetPerformance.weight && ` @ ${lastSessionSetPerformance.weight}`}
-        </div>
-      )}
     </div>
   );
 }
