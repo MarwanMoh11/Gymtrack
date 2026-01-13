@@ -277,7 +277,7 @@ export default function ExerciseDetailPage({ params: paramsFromProps }: Exercise
   const canShowAISuggestionButton = dayIdFromQuery && !isSpecialActivity && displayExercise.category !== 'core' && !isSkipped;
 
   return (
-    <div className="w-full max-w-3xl mx-auto space-y-8 pb-20 animate-in fade-in duration-700 md:px-0">
+    <div className="w-full space-y-8 pb-20 animate-in fade-in duration-700">
       {/* Navigation & Status Header */}
       <div className="flex items-center justify-between">
         <Button
