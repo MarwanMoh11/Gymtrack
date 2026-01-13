@@ -100,7 +100,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content Area */}
       <div className="flex flex-col bg-transparent overflow-x-hidden w-full h-full">
         {/* Mobile/Tablet Header */}
-        <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between px-4 sm:px-6 md:px-8 glass-panel border-b border-glass-border shrink-0">
+        <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between px-4 sm:px-6 md:px-8 bg-black shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
             <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 shrink-0">
               <Dumbbell className="h-6 w-6 text-primary" />
