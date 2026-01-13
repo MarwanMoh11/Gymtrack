@@ -4,26 +4,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { CalendarCheck, Dumbbell, PanelLeft, TrendingUp, LayoutGrid, LogOut, Settings } from 'lucide-react';
-import {
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarFooter,
-  SidebarInset,
-  SidebarTrigger,
-  useSidebar,
-} from '@/components/ui/sidebar';
+import { CalendarCheck, Dumbbell, TrendingUp, LayoutGrid, LogOut, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Logo } from '@/components/icons/logo';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-context';
 import { useUser } from '@/context/user-context';
 import { cn } from '@/lib/utils';
+
+// ... (navigationItems and AuthLoadingSkeleton remain unchanged, skipping for brevity) ...
 
 const navigationItems = [
   {
@@ -48,7 +36,6 @@ const navigationItems = [
   }
 ];
 
-// Loading skeleton for when auth state is being determined
 function AuthLoadingSkeleton() {
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background">
@@ -74,7 +61,7 @@ function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 h-16 glass-panel border-t border-glass-border md:hidden">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 h-16 glass-panel border-t border-glass-border">
       <div className="grid h-full grid-cols-4">
         {navigationItems.map((item) => {
           const isActive = pathname === item.href;
@@ -100,15 +87,8 @@ function BottomNav() {
 // Full app layout for authenticated users
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { isMobile, setOpenMobile } = useSidebar();
   const { user, logout } = useAuth();
   const router = useRouter();
-
-  const handleLinkClick = () => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-  };
 
   const handleLogout = async () => {
     await logout();
@@ -116,57 +96,9 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden premium-gradient-bg">
-      {/* Desktop Sidebar */}
-      <Sidebar variant="sidebar" collapsible="icon" className="hidden md:flex">
-        <SidebarHeader className="p-6">
-          <div className="flex items-center gap-3">
-            <Logo />
-            <h1 className="text-xl font-bold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
-              GymTrack
-            </h1>
-          </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarMenu className="px-4 py-2 gap-2">
-            {navigationItems.map((item) => (
-              <SidebarMenuItem key={item.href}>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname === item.href}
-                  variant="default"
-                  size="lg"
-                  className="rounded-xl"
-                  tooltip={item.label}
-                >
-                  <Link href={item.href} onClick={handleLinkClick}>
-                    <item.icon className="h-5 w-5" />
-                    <span className="font-medium">{item.label}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarContent>
-        <SidebarFooter className="p-6 mt-auto">
-          <SidebarMenuButton
-            variant="default"
-            size="default"
-            className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10"
-            tooltip="Logout"
-            onClick={handleLogout}
-          >
-            <LogOut className="h-5 w-5" />
-            <span className="font-medium">Logout</span>
-          </SidebarMenuButton>
-          <p className="text-[10px] text-muted-foreground mt-4 px-2 truncate group-data-[collapsible=icon]:hidden opacity-50 uppercase tracking-widest">
-            {user?.email}
-          </p>
-        </SidebarFooter>
-      </Sidebar>
-
+    <div className="flex h-screen overflow-hidden premium-gradient-bg flex-col">
       {/* Main Content Area */}
-      <SidebarInset className="flex flex-col bg-transparent overflow-x-hidden w-full">
+      <div className="flex flex-col bg-transparent overflow-x-hidden w-full h-full">
         {/* Mobile/Tablet Header */}
         <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between px-4 sm:px-6 md:px-8 glass-panel border-b border-glass-border shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
@@ -197,12 +129,12 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 pb-24 md:pb-8 pt-6 sm:pt-8 overflow-y-auto overflow-x-hidden w-full">
+        <main className="flex-1 pb-24 pt-6 sm:pt-8 overflow-y-auto overflow-x-hidden w-full">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 md:px-12 w-full">
             {children}
           </div>
         </main>
-      </SidebarInset>
+      </div>
 
       {/* Mobile Navigation Bar */}
       <BottomNav />

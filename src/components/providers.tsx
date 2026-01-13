@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
 import { AuthProvider } from '@/context/auth-context';
 import { UserProvider } from '@/context/user-context';
-import { SidebarProvider } from '@/components/ui/sidebar';
 import AppLayout from '@/components/app-layout';
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -23,11 +22,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <UserProvider>
-            <SidebarProvider defaultOpen={true}>
-              <AppLayout>
-                {children}
-              </AppLayout>
-            </SidebarProvider>
+            <AppLayout>
+              {children}
+            </AppLayout>
           </UserProvider>
         </AuthProvider>
       </QueryClientProvider>
