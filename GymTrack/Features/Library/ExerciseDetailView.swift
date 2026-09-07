@@ -77,8 +77,14 @@ struct ExerciseDetailView: View {
             }
 
             FlowRow(spacing: 6) {
-                ForEach(exercise.muscles, id: \.self) { muscle in
-                    Pill(text: muscle.name, color: Theme.accent)
+                if exercise.muscles.isEmpty {
+                    ForEach(exercise.muscleGroups, id: \.self) { label in
+                        Pill(text: label, color: Theme.accent)
+                    }
+                } else {
+                    ForEach(exercise.muscles, id: \.self) { muscle in
+                        Pill(text: muscle.name, color: Theme.accent)
+                    }
                 }
                 Pill(text: exercise.tracking.label)
                 if let difficulty = exercise.difficulty {

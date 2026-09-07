@@ -53,6 +53,8 @@ struct ActiveWorkoutView: View {
                         .foregroundStyle(Theme.accent)
                 }
             }
+            .toolbarBackground(Theme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .onReceive(ticker) { _ in elapsed = workout.session.duration }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: workout.restTimer.isRunning)
             .sheet(isPresented: $showingAddExercise) {

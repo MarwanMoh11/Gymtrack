@@ -42,6 +42,14 @@ struct CatalogExercise: Identifiable, Hashable, Codable, Sendable {
         return muscleGroups.compactMap(Muscle.match).filter { seen.insert($0).inserted }
     }
 
+    /// Short "what it works" line. Falls back to the library's own wording for
+    /// the handful of full-body and cardio entries that map to no single group.
+    var muscleSummary: String {
+        let canonical = muscles.prefix(3).map(\.name)
+        if !canonical.isEmpty { return canonical.joined(separator: " · ") }
+        return muscleGroups.prefix(2).joined(separator: " · ")
+    }
+
     var equipmentLabel: String {
         equipment.isEmpty || equipment == ["None"] ? "Bodyweight" : equipment.joined(separator: " · ")
     }

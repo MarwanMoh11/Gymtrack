@@ -135,7 +135,7 @@ struct ExerciseRow: View {
                     .font(Theme.rounded(15, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
-                Text("\(exercise.muscles.map(\.name).prefix(3).joined(separator: " · "))")
+                Text(exercise.muscleSummary)
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)

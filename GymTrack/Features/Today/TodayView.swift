@@ -41,6 +41,8 @@ struct TodayView: View {
             .gtScreenBackground()
             .navigationTitle("Today")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Theme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingSettings = true } label: {

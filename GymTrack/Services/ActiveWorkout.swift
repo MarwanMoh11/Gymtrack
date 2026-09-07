@@ -20,10 +20,27 @@ final class ActiveWorkout {
     private let context: ModelContext
     private var history: [WorkoutSession]
 
+    /// The plan prescriptions behind this session, keyed by exercise. Resolved
+    /// once — the logging view asks for these on every card render.
+    private var prescriptions: [String: PlanItem] = [:]
+
+    /// Last session's sets per exercise, likewise resolved once.
+    private var lastPerformances: [String: [SetLog]] = [:]
+
     init(session: WorkoutSession, context: ModelContext, history: [WorkoutSession]) {
         self.session = session
         self.context = context
         self.history = history.filter { $0.id != session.id }
+
+        if let dayID = session.planDayID,
+           let day = (try? context.fetch(FetchDescriptor<PlanDay>()))?.first(where: { $0.id == dayID }) {
+            prescriptions = Dictionary(day.items.map { ($0.catalogID, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        for catalogID in Set(session.sets.map(\.catalogID)) {
+            lastPerformances[catalogID] = TrainingStats.lastPerformance(
+                of: catalogID, in: self.history, excluding: session.id
+            )
+        }
     }
 
     // MARK: - Creating a session
@@ -84,15 +101,10 @@ final class ActiveWorkout {
 
     /// What the same exercise looked like last time, for the "last: …" hints.
     func lastPerformance(for catalogID: String) -> [SetLog] {
-        TrainingStats.lastPerformance(of: catalogID, in: history, excluding: session.id)
+        lastPerformances[catalogID] ?? []
     }
 
-    func planItem(for catalogID: String) -> PlanItem? {
-        guard let dayID = session.planDayID else { return nil }
-        let descriptor = FetchDescriptor<PlanDay>()
-        let days = (try? context.fetch(descriptor)) ?? []
-        return days.first { $0.id == dayID }?.items.first { $0.catalogID == catalogID }
-    }
+    func planItem(for catalogID: String) -> PlanItem? { prescriptions[catalogID] }
 
     // MARK: - Logging
 
@@ -168,6 +180,11 @@ final class ActiveWorkout {
 
     func addExercise(_ exercise: CatalogExercise, sets: Int = 3) {
         let order = (session.sets.map(\.exerciseOrder).max() ?? -1) + 1
+        if lastPerformances[exercise.id] == nil {
+            lastPerformances[exercise.id] = TrainingStats.lastPerformance(
+                of: exercise.id, in: history, excluding: session.id
+            )
+        }
         let last = lastPerformance(for: exercise.id)
         for index in 0..<sets {
             let previous = index < last.count ? last[index] : last.last

@@ -250,7 +250,17 @@ enum TrainingStats {
             )
         }
 
+        // Unloaded bodyweight work has no weight to add — the progression is
+        // reps, then eventually a belt or a vest.
+        let isUnloadedBodyweight = item.tracking == .bodyweightReps && workingWeight == 0
+
         if allHitTop {
+            if isUnloadedBodyweight {
+                return OverloadSuggestion(
+                    action: .addReps, weightKg: 0, reps: item.targetRepsHigh + 1,
+                    message: "You cleared \(item.targetRepsHigh) reps on every set. Push past it, or start adding weight."
+                )
+            }
             return OverloadSuggestion(
                 action: .increaseWeight,
                 weightKg: workingWeight + increment,
@@ -259,7 +269,7 @@ enum TrainingStats {
             )
         }
 
-        if minReps < item.targetRepsLow - 2 && workingWeight > increment {
+        if minReps < item.targetRepsLow - 2 && workingWeight > increment && !isUnloadedBodyweight {
             return OverloadSuggestion(
                 action: .deload,
                 weightKg: max(0, workingWeight - increment),
@@ -268,11 +278,14 @@ enum TrainingStats {
             )
         }
 
+        let goal = min(item.targetRepsHigh, minReps + 1)
         return OverloadSuggestion(
             action: .addReps,
             weightKg: workingWeight,
-            reps: min(item.targetRepsHigh, minReps + 1),
-            message: "Stay at \(AppSettings.shared.weight(workingWeight)) and chase \(min(item.targetRepsHigh, minReps + 1)) reps on every set."
+            reps: goal,
+            message: isUnloadedBodyweight
+                ? "Chase \(goal) reps on every set."
+                : "Stay at \(AppSettings.shared.weight(workingWeight)) and chase \(goal) reps on every set."
         )
     }
 
