@@ -84,7 +84,10 @@ final class PlanDay {
                 counts[muscle, default: 0] += item.targetSets
             }
         }
-        return counts.sorted { $0.value > $1.value }.map(\.key)
+        // Break ties by name so the pill order doesn't shuffle between renders.
+        return counts
+            .sorted { $0.value == $1.value ? $0.key.name < $1.key.name : $0.value > $1.value }
+            .map(\.key)
     }
 }
 
