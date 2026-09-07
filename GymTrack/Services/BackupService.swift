@@ -226,14 +226,22 @@ enum BackupService {
     }
 
     /// Deletes every record. Used by restore and by "erase all data".
+    ///
+    /// Deletes instances rather than using `context.delete(model:)`: that issues
+    /// a batch delete, which can't satisfy `PlanItem`'s mandatory inverse to
+    /// `PlanDay` and fails with a constraint trigger violation. Removing the
+    /// roots lets the cascade rules do the work.
     static func wipe(context: ModelContext) throws {
-        try context.delete(model: SetLog.self)
-        try context.delete(model: WorkoutSession.self)
-        try context.delete(model: PlanItem.self)
-        try context.delete(model: PlanDay.self)
-        try context.delete(model: Plan.self)
-        try context.delete(model: CustomExerciseRecord.self)
-        try context.delete(model: BodyMetric.self)
+        for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
+        for session in try context.fetch(FetchDescriptor<WorkoutSession>()) { context.delete(session) }
+        for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
+        for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
+
+        // Sweep anything the cascade missed (orphans from an interrupted write).
+        for item in try context.fetch(FetchDescriptor<PlanItem>()) { context.delete(item) }
+        for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
+        for set in try context.fetch(FetchDescriptor<SetLog>()) { context.delete(set) }
+
         try context.save()
     }
 }

@@ -170,7 +170,9 @@ struct SettingsView: View {
                 Haptics.success()
                 alert = AlertPayload(title: "Restored", message: "Your routines and history are back.")
             } catch {
-                alert = AlertPayload(title: "Restore failed", message: "That file couldn't be read as a GymTrack backup.")
+                // Report what actually went wrong — "couldn't be read" hid a
+                // decode error behind a message about the file being invalid.
+                alert = AlertPayload(title: "Restore failed", message: error.localizedDescription)
             }
         case .failure(let error):
             alert = AlertPayload(title: "Restore failed", message: error.localizedDescription)

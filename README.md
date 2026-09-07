@@ -58,6 +58,8 @@ on target for the week and which are falling behind, a 16-week consistency grid,
 and your PR board.
 
 **Backups** — export everything as a single JSON file, restore it on any device.
+The app's folder is visible in Files (On My iPhone → GymTrack), so a backup can
+be dropped in and restored without leaving the phone.
 
 ## Project layout
 
