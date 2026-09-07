@@ -73,61 +73,7 @@ struct PlanTemplate: Identifiable {
 
     // MARK: - Built-in templates
 
-    static let all: [PlanTemplate] = [pplUpperLower, pushPullLegs, upperLower, fullBody, minimalist]
-
-    /// Push / Pull / Legs / Upper / Lower — the five-day hybrid. Each muscle
-    /// gets a heavy dedicated day early in the week and a second, lighter
-    /// exposure on the upper/lower days.
-    static let pplUpperLower = PlanTemplate(
-        id: "ppl-upper-lower",
-        name: "PPL + Upper / Lower",
-        summary: "Five days: Push, Pull and Legs early in the week, then an Upper and a Lower day. Everything trained roughly twice.",
-        daysPerWeek: 5,
-        level: "Intermediate",
-        symbol: "square.stack.3d.up.fill",
-        days: [
-            Day(name: "Push", weekday: 2, items: [
-                Item("barbell-bench-press", 4, 5, 8, rest: 150),
-                Item("overhead-press", 3, 6, 10, rest: 120),
-                Item("incline-dumbbell-press", 3, 8, 12),
-                Item("dumbbell-lateral-raise", 3, 12, 20, rest: 60),
-                Item("tricep-pushdown-rope", 3, 10, 15, rest: 60),
-                Item("overhead-tricep-extension-dumbbell", 2, 12, 15, rest: 60),
-            ]),
-            Day(name: "Pull", weekday: 3, items: [
-                Item("deadlift", 3, 3, 5, rest: 180),
-                Item("pull-up", 3, 5, 10, rest: 120),
-                Item("barbell-row", 3, 8, 12, rest: 120),
-                Item("face-pull", 3, 15, 20, rest: 60),
-                Item("barbell-curl", 3, 8, 12, rest: 60),
-                Item("hammer-curl", 2, 10, 15, rest: 60),
-            ]),
-            Day(name: "Legs", weekday: 4, items: [
-                Item("barbell-back-squat", 4, 5, 8, rest: 180),
-                Item("romanian-deadlift-barbell", 3, 8, 12, rest: 120),
-                Item("leg-press", 3, 10, 15, rest: 120),
-                Item("lying-leg-curl-machine", 3, 10, 15, rest: 60),
-                Item("standing-calf-raise-machine", 4, 12, 20, rest: 60),
-                Item("hanging-leg-raise", 3, 10, 15, rest: 60),
-            ]),
-            Day(name: "Upper", weekday: 6, items: [
-                Item("incline-barbell-press", 4, 6, 10, rest: 150),
-                Item("lat-pulldown-wide", 4, 8, 12, rest: 120),
-                Item("dumbbell-shoulder-press", 3, 8, 12),
-                Item("seated-cable-row", 3, 10, 12),
-                Item("incline-dumbbell-curl", 3, 10, 15, rest: 60),
-                Item("skullcrusher-ez", 3, 8, 12, rest: 60),
-            ]),
-            Day(name: "Lower", weekday: 7, items: [
-                Item("barbell-front-squat", 4, 6, 10, rest: 150),
-                Item("hip-thrust-barbell", 3, 8, 12, rest: 120),
-                Item("bulgarian-split-squat-dumbbell", 3, 8, 12, rest: 90),
-                Item("seated-leg-curl-machine", 3, 12, 15, rest: 60),
-                Item("seated-calf-raise-machine", 4, 15, 20, rest: 45),
-                Item("cable-crunch", 3, 12, 20, rest: 60),
-            ]),
-        ]
-    )
+    static let all: [PlanTemplate] = [pushPullLegs, upperLower, fullBody, minimalist]
 
     static let pushPullLegs = PlanTemplate(
         id: "ppl",
