@@ -298,3 +298,161 @@ enum TrainingStats {
         return 2.5   // barbell: 1.25 kg plates a side
     }
 }
+
+// MARK: - Progress screen metrics
+
+extension TrainingStats {
+
+    /// What the volume chart is plotting. Volume is the headline number, but a
+    /// week of heavy triples and a week of high-rep hypertrophy look nothing
+    /// alike, so sets and reps are one tap away.
+    enum Metric: String, CaseIterable, Identifiable {
+        case volume = "Volume"
+        case sets = "Sets"
+        case reps = "Reps"
+
+        var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .volume: "scalemass.fill"
+            case .sets: "square.stack.3d.up.fill"
+            case .reps: "arrow.trianglehead.2.clockwise"
+            }
+        }
+
+        /// Unit shown next to the axis and the headline.
+        var unit: String {
+            switch self {
+            case .volume: AppSettings.shared.weightUnit.short
+            case .sets: "sets"
+            case .reps: "reps"
+            }
+        }
+
+        func value(of session: WorkoutSession) -> Double {
+            switch self {
+            case .volume: AppSettings.shared.weightUnit.fromKg(session.totalVolumeKg)
+            case .sets: Double(session.completedSets.count)
+            case .reps: Double(session.totalReps)
+            }
+        }
+
+        func format(_ value: Double) -> String {
+            switch self {
+            case .volume: value.compactVolume
+            case .sets, .reps: String(format: "%.0f", value)
+            }
+        }
+    }
+
+    struct DayPoint: Identifiable, Equatable {
+        let date: Date
+        let value: Double
+        var id: Date { date }
+    }
+
+    /// One point per calendar day, oldest first, including the empty days —
+    /// gaps are the most useful thing on a consistency chart.
+    static func daily(_ metric: Metric,
+                      sessions: [WorkoutSession],
+                      days: Int,
+                      calendar: Calendar = .current) -> [DayPoint] {
+        let today = calendar.startOfDay(for: .now)
+        var buckets: [Date: Double] = [:]
+        for session in sessions where !session.isActive {
+            buckets[calendar.startOfDay(for: session.startedAt), default: 0] += metric.value(of: session)
+        }
+        return (0..<days).reversed().compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            return DayPoint(date: date, value: buckets[date] ?? 0)
+        }
+    }
+
+    /// Trailing mean, which is what turns a spiky bar chart into a trend.
+    static func rollingAverage(_ points: [DayPoint], window: Int) -> [DayPoint] {
+        points.enumerated().map { index, point in
+            let start = max(0, index - window + 1)
+            let slice = points[start...index]
+            return DayPoint(date: point.date,
+                            value: slice.reduce(0) { $0 + $1.value } / Double(slice.count))
+        }
+    }
+
+    /// The window immediately before the current one, for like-for-like deltas.
+    static func previousWindow(_ sessions: [WorkoutSession],
+                               days: Int,
+                               calendar: Calendar = .current) -> [WorkoutSession] {
+        let today = calendar.startOfDay(for: .now)
+        guard let start = calendar.date(byAdding: .day, value: -days * 2, to: today),
+              let end = calendar.date(byAdding: .day, value: -days, to: today)
+        else { return [] }
+        return sessions.filter { !$0.isActive && $0.startedAt >= start && $0.startedAt < end }
+    }
+
+    /// Percentage change, or nil when there is no baseline to compare against.
+    static func change(from previous: Double, to current: Double) -> Double? {
+        guard previous > 0 else { return nil }
+        return (current - previous) / previous
+    }
+
+    static func total(_ metric: Metric, _ sessions: [WorkoutSession]) -> Double {
+        sessions.reduce(0) { $0 + metric.value(of: $1) }
+    }
+
+    // MARK: Muscles
+
+    /// Sets ÷ weekly target for every muscle — the number the heat map shades.
+    static func muscleRatios(_ sessions: [WorkoutSession]) -> [Muscle: Double] {
+        let sets = setsPerMuscle(sessions)
+        return Dictionary(uniqueKeysWithValues: Muscle.allCases.map {
+            ($0, (sets[$0] ?? 0) / Double($0.weeklySetTarget))
+        })
+    }
+
+    /// Share of the weekly plan actually covered, counting no credit for
+    /// exceeding a target — hammering chest doesn't cover your legs.
+    static func coverage(_ ratios: [Muscle: Double]) -> Double {
+        let capped = Muscle.allCases.map { min(ratios[$0] ?? 0, 1) }
+        return capped.reduce(0, +) / Double(capped.count)
+    }
+
+    /// Average completion for a region, again capped per muscle.
+    static func coverage(of region: Muscle.Region, ratios: [Muscle: Double]) -> Double {
+        let muscles = Muscle.allCases.filter { $0.region == region }
+        guard !muscles.isEmpty else { return 0 }
+        return muscles.reduce(0.0) { $0 + min(ratios[$1] ?? 0, 1) } / Double(muscles.count)
+    }
+
+    static func lastTrained(_ muscle: Muscle, in sessions: [WorkoutSession]) -> Date? {
+        sessions
+            .filter { session in
+                session.completedSets.contains { set in
+                    guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { return false }
+                    return !set.isWarmup && exercise.muscles.prefix(2).contains(muscle)
+                }
+            }
+            .map(\.startedAt)
+            .max()
+    }
+
+    /// Which movements are actually feeding a muscle, heaviest contributor
+    /// first — the answer to "why is this still cold?".
+    static func topExercises(for muscle: Muscle,
+                             in sessions: [WorkoutSession],
+                             limit: Int = 3) -> [(name: String, sets: Double)] {
+        var tally: [String: Double] = [:]
+        for session in sessions {
+            for set in session.completedSets where !set.isWarmup {
+                guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { continue }
+                for (index, candidate) in exercise.muscles.prefix(2).enumerated() where candidate == muscle {
+                    tally[set.exerciseName, default: 0] += index == 0 ? 1.0 : 0.5
+                }
+            }
+        }
+        return tally
+            .sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+            .prefix(limit)
+            .map { (name: $0.key, sets: $0.value) }
+    }
+}

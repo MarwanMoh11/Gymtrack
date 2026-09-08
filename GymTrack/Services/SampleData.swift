@@ -28,7 +28,11 @@ enum SampleData {
                 // Skip the odd session so streaks and gaps look real.
                 if Int.random(in: 0..<10) < 2 { continue }
 
-                let daysBack = weekOffset * 7 - index
+                // Spread the week's sessions backwards from its end. Anchoring
+                // them forwards left the current week with a single day, which
+                // made every "last 7 days" view look like a deload.
+                let spacing = max(1, 7 / trainingDays.count)
+                let daysBack = weekOffset * 7 + (trainingDays.count - 1 - index) * spacing
                 guard daysBack >= 0,
                       let date = calendar.date(byAdding: .day, value: -daysBack, to: today),
                       date <= today
