@@ -6,6 +6,34 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10000000000000000004A /* GymTrackWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A100000000000000000031 /* GymTrackWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A100000000000000000049 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A100000000000000000060 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A100000000000000000047;
+			remoteInfo = GymTrackWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A100000000000000000046 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000004A /* GymTrackWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A100000000000000000001 /* GymTrack */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -13,6 +41,19 @@
 				A1000000000000000000A0 /* Exceptions for "GymTrack" folder in "GymTrack" target */,
 			);
 			path = GymTrack;
+			sourceTree = "<group>";
+		};
+		A100000000000000000002 /* GymTrackShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = GymTrackShared;
+			sourceTree = "<group>";
+		};
+		A100000000000000000003 /* GymTrackWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1000000000000000000A1 /* Exceptions for "GymTrackWidgets" folder in "GymTrackWidgets" target */,
+			);
+			path = GymTrackWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -25,10 +66,24 @@
 			);
 			target = A100000000000000000040 /* GymTrack */;
 		};
+		A1000000000000000000A1 /* Exceptions for "GymTrackWidgets" folder in "GymTrackWidgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A100000000000000000047 /* GymTrackWidgets */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A100000000000000000010 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A100000000000000000044 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -42,6 +97,8 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000001 /* GymTrack */,
+				A100000000000000000002 /* GymTrackShared */,
+				A100000000000000000003 /* GymTrackWidgets */,
 				A100000000000000000021 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -50,6 +107,7 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000030 /* GymTrack.app */,
+				A100000000000000000031 /* GymTrackWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -64,18 +122,42 @@
 				A100000000000000000041 /* Sources */,
 				A100000000000000000010 /* Frameworks */,
 				A100000000000000000042 /* Resources */,
+				A100000000000000000046 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A100000000000000000048 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A100000000000000000001 /* GymTrack */,
+				A100000000000000000002 /* GymTrackShared */,
+			);
+			name = GymTrack;
+			productName = GymTrack;
+			productReference = A100000000000000000030 /* GymTrack.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A100000000000000000047 /* GymTrackWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A100000000000000000051 /* Build configuration list for PBXNativeTarget "GymTrackWidgets" */;
+			buildPhases = (
+				A100000000000000000043 /* Sources */,
+				A100000000000000000044 /* Frameworks */,
+				A100000000000000000045 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				A100000000000000000001 /* GymTrack */,
+				A100000000000000000002 /* GymTrackShared */,
+				A100000000000000000003 /* GymTrackWidgets */,
 			);
-			name = GymTrack;
-			productName = GymTrack;
-			productReference = A100000000000000000030 /* GymTrack.app */;
-			productType = "com.apple.product-type.application";
+			name = GymTrackWidgets;
+			productName = GymTrackWidgets;
+			productReference = A100000000000000000031 /* GymTrackWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -88,6 +170,9 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					A100000000000000000040 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					A100000000000000000047 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -107,12 +192,20 @@
 			projectRoot = "";
 			targets = (
 				A100000000000000000040 /* GymTrack */,
+				A100000000000000000047 /* GymTrackWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A100000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A100000000000000000045 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -129,10 +222,26 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A100000000000000000043 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A100000000000000000048 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A100000000000000000047 /* GymTrackWidgets */;
+			targetProxy = A100000000000000000049 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXFileReference section */
 		A100000000000000000030 /* GymTrack.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GymTrack.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A100000000000000000031 /* GymTrackWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GymTrackWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin XCBuildConfiguration section */
@@ -239,6 +348,56 @@
 			};
 			name = Release;
 		};
+		A100000000000000000092 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GymTrackWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = GymTrack;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marwanmohamed.gymtrack.Widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A100000000000000000093 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GymTrackWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = GymTrack;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marwanmohamed.gymtrack.Widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -256,6 +415,15 @@
 			buildConfigurations = (
 				A100000000000000000090 /* Debug */,
 				A100000000000000000091 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A100000000000000000051 /* Build configuration list for PBXNativeTarget "GymTrackWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100000000000000000092 /* Debug */,
+				A100000000000000000093 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -3,8 +3,14 @@ import SwiftData
 
 /// The logging screen. Optimised for use mid-set: the next set is always
 /// expanded with large steppers, everything else collapses to a summary row.
+///
+/// Presented as a sheet the user owns — pull the grab handle down (or tap
+/// *Minimise*) and the session keeps running behind the app, in the dock bar
+/// and on the Lock Screen. Discarding is a separate, deliberate act at the
+/// bottom of the screen; it is no longer the price of getting out of here.
 struct ActiveWorkoutView: View {
     @Bindable var workout: ActiveWorkout
+    let onMinimise: () -> Void
     let onClose: (WorkoutSession?) -> Void
 
     @Environment(\.modelContext) private var context
@@ -12,77 +18,159 @@ struct ActiveWorkoutView: View {
     @State private var showingAddExercise = false
     @State private var showingFinishConfirm = false
     @State private var showingDiscardConfirm = false
+    @State private var dragOffset: CGFloat = 0
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                header
                 content
-                if workout.restTimer.isRunning {
-                    RestTimerBar(timer: workout.restTimer)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
             }
-            .gtScreenBackground()
-            .navigationTitle(workout.session.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showingDiscardConfirm = true } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 0) {
-                        Text(workout.session.title)
-                            .font(Theme.rounded(15, weight: .bold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text(elapsed.clockString)
-                            .font(Theme.number(12, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Finish") { showingFinishConfirm = true }
-                        .font(Theme.rounded(15, weight: .bold))
-                        .foregroundStyle(Theme.accent)
-                }
-            }
-            .toolbarBackground(Theme.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .onReceive(ticker) { _ in elapsed = workout.session.duration }
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: workout.restTimer.isRunning)
-            .sheet(isPresented: $showingAddExercise) {
-                ExercisePickerView { exercise in
-                    workout.addExercise(exercise)
-                    showingAddExercise = false
-                }
-            }
-            .confirmationDialog("Finish this workout?",
-                                isPresented: $showingFinishConfirm,
-                                titleVisibility: .visible) {
-                Button("Finish workout") { finish() }
-                Button("Keep going", role: .cancel) {}
-            } message: {
-                Text(finishMessage)
-            }
-            .confirmationDialog("Discard this workout?",
-                                isPresented: $showingDiscardConfirm,
-                                titleVisibility: .visible) {
-                Button("Discard", role: .destructive) {
-                    workout.discard()
-                    onClose(nil)
-                }
-                Button("Minimise", role: .cancel) { onClose(nil) }
-            } message: {
-                Text("Discarding deletes every set you've logged in this session. Minimising keeps it running in the background.")
+
+            if workout.restTimer.isRunning {
+                RestTimerBar(timer: workout.restTimer)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: dragOffset > 0 ? 38 : 0, style: .continuous)
+                .fill(Theme.background)
+                .ignoresSafeArea()
+        )
+        .offset(y: dragOffset)
+        .onAppear { elapsed = workout.session.duration }
+        .onReceive(ticker) { _ in elapsed = workout.session.duration }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: workout.restTimer.isRunning)
+        .sheet(isPresented: $showingAddExercise) {
+            ExercisePickerView { exercise in
+                workout.addExercise(exercise)
+                showingAddExercise = false
+            }
+        }
+        .alert("Finish this workout?", isPresented: $showingFinishConfirm) {
+            Button("Keep going", role: .cancel) {}
+            Button("Finish workout") { finish() }
+        } message: {
+            Text(finishMessage)
+        }
+        .alert("Discard this workout?", isPresented: $showingDiscardConfirm) {
+            Button("Keep the workout", role: .cancel) {}
+            Button(discardActionTitle, role: .destructive) {
+                workout.discard()
+                onClose(nil)
+            }
+        } message: {
+            Text("This can't be undone. To step away without losing anything, minimise it instead.")
+        }
+    }
+
+    // MARK: - Header
+
+    /// Grab handle, the session clock, and the two ways out — leaving (which
+    /// keeps everything) on the left, finishing on the right.
+    private var header: some View {
+        VStack(spacing: 9) {
+            grabHandle
+
+            HStack(spacing: 8) {
+                Button(action: minimise) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .black))
+                        Text("Minimise")
+                            .font(Theme.rounded(12, weight: .bold))
+                    }
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(Theme.surfaceRaised, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Minimise workout")
+                .accessibilityHint("Keeps the session running in the background")
+
+                Spacer(minLength: 4)
+
+                Text(elapsed.clockString)
+                    .font(Theme.number(20))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityLabel("Elapsed \(elapsed.durationString)")
+
+                Spacer(minLength: 4)
+
+                Button { showingFinishConfirm = true } label: {
+                    Text("Finish")
+                        .font(Theme.rounded(13, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Theme.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Text("\(workout.session.title) · \(workout.completedCount) of \(workout.totalCount) sets")
+                .font(Theme.rounded(12, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+
+            headerProgressLine
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 6)
+        .background(Theme.background)
+        .contentShape(Rectangle())
+        .gesture(minimiseDrag)
+    }
+
+    private var grabHandle: some View {
+        Capsule()
+            .fill(Theme.textTertiary.opacity(dragOffset > 0 ? 0.8 : 0.45))
+            .frame(width: 40, height: 5)
+            .padding(.vertical, 4)
+    }
+
+    private var headerProgressLine: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.08))
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: max(0, geo.size.width * workout.progress))
+                    .animation(.spring(response: 0.45, dampingFraction: 0.9), value: workout.progress)
+            }
+        }
+        .frame(height: 3)
+        .padding(.bottom, 8)
+    }
+
+    /// Pull the header down to put the session away — the same gesture people
+    /// already use on every other sheet in iOS.
+    private var minimiseDrag: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                dragOffset = max(0, value.translation.height * (value.translation.height > 0 ? 1 : 0.2))
+            }
+            .onEnded { value in
+                let shouldMinimise = value.translation.height > 110
+                    || value.predictedEndTranslation.height > 300
+                if shouldMinimise {
+                    minimise()
+                } else {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { dragOffset = 0 }
+                }
+            }
+    }
+
+    private var discardActionTitle: String {
+        let logged = workout.completedCount
+        guard logged > 0 else { return "Discard" }
+        return "Delete \(logged) logged set\(logged == 1 ? "" : "s")"
     }
 
     private var finishMessage: String {
@@ -110,8 +198,11 @@ struct ActiveWorkoutView: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .padding(.top, 4)
+
+                discardFooter
             }
             .padding(.horizontal, 12)
+            .padding(.top, 12)
             .padding(.bottom, workout.restTimer.isRunning ? 100 : 30)
             .frame(maxWidth: .infinity)
         }
@@ -136,6 +227,36 @@ struct ActiveWorkoutView: View {
             Spacer()
         }
         .gtCard(padding: 14)
+    }
+
+    /// Deliberately at the very bottom, past everything else. Leaving the
+    /// screen shouldn't cost you the session — only this should.
+    private var discardFooter: some View {
+        VStack(spacing: 6) {
+            Button(role: .destructive) {
+                showingDiscardConfirm = true
+            } label: {
+                Label("Discard this workout", systemImage: "trash")
+                    .font(Theme.rounded(13, weight: .semibold))
+                    .foregroundStyle(Theme.negative)
+            }
+            .buttonStyle(.plain)
+
+            Text("Minimising keeps everything and lets the session run in the background. Discarding deletes it.")
+                .font(Theme.rounded(11, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 20)
+        }
+        .padding(.top, 22)
+    }
+
+    // MARK: - Actions
+
+    private func minimise() {
+        Haptics.tick()
+        onMinimise()
     }
 
     private func finish() {

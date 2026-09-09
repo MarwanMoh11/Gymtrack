@@ -41,6 +41,13 @@ final class ActiveWorkout {
                 of: catalogID, in: self.history, excluding: session.id
             )
         }
+
+        // A rest starting, being extended or running out changes what the Lock
+        // Screen should say, and none of those go through `save()`.
+        restTimer.onChange = { [weak self] in
+            Task { @MainActor in self?.pushLiveActivity() }
+        }
+        pushLiveActivity()
     }
 
     // MARK: - Creating a session
@@ -98,6 +105,43 @@ final class ActiveWorkout {
     }
 
     var volumeKg: Double { session.totalVolumeKg }
+
+    /// The exercise holding the next unlogged set — what the session is "on".
+    var currentGroup: SessionExerciseGroup? {
+        groups.first { !$0.isComplete } ?? groups.last
+    }
+
+    /// The set the logger has expanded, i.e. the one about to be performed.
+    var nextSet: SetLog? {
+        currentGroup?.sets.first { !$0.isCompleted }
+    }
+
+    /// 1-based position of `nextSet` within its exercise.
+    var nextSetNumber: Int {
+        guard let group = currentGroup, let next = nextSet,
+              let index = group.sets.firstIndex(where: { $0.id == next.id })
+        else { return currentGroup?.sets.count ?? 0 }
+        return index + 1
+    }
+
+    /// "60 kg × 8–12" — the prescription for the set that's up.
+    var nextTargetLabel: String {
+        guard let set = nextSet else { return "" }
+        if set.tracking == .duration { return "\(set.seconds)s" }
+        let reps = set.targetRepsHigh > 0
+            ? (set.targetRepsLow == set.targetRepsHigh
+               ? "\(set.targetRepsLow)"
+               : "\(set.targetRepsLow)–\(set.targetRepsHigh)")
+            : "\(set.reps)"
+        if set.weightKg == 0 { return "\(reps) reps" }
+        return "\(AppSettings.shared.weight(set.weightKg)) × \(reps)"
+    }
+
+    /// The exercise queued behind the current one.
+    var upNextName: String {
+        guard let current = currentGroup else { return "" }
+        return groups.first { $0.order > current.order && !$0.isComplete }?.name ?? ""
+    }
 
     /// What the same exercise looked like last time, for the "last: …" hints.
     func lastPerformance(for catalogID: String) -> [SetLog] {
@@ -219,20 +263,65 @@ final class ActiveWorkout {
             context.delete(set)
         }
         session.endedAt = .now
+        restTimer.onChange = nil
         restTimer.stop()
-        save()
+        writeThrough()
+        WorkoutLiveActivity.shared.end(with: activityState)
         Haptics.success()
     }
 
     func discard() {
+        restTimer.onChange = nil
         restTimer.stop()
         context.delete(session)
-        save()
+        writeThrough()
+        WorkoutLiveActivity.shared.end(with: nil)
     }
 
     private func save() {
+        writeThrough()
+        pushLiveActivity()
+    }
+
+    private func writeThrough() {
         do { try context.save() } catch {
             assertionFailure("Failed to save workout: \(error)")
         }
+    }
+
+    // MARK: - Live Activity
+
+    /// The whole of what the Lock Screen and Dynamic Island draw. Unit-bearing
+    /// values are formatted here because the widget can't read the user's
+    /// kg/lb preference.
+    var activityState: WorkoutActivity.ContentState {
+        let unit = AppSettings.shared.weightUnit
+        return WorkoutActivity.ContentState(
+            startedAt: session.startedAt,
+            completedSets: completedCount,
+            totalSets: totalCount,
+            currentExercise: currentGroup?.name ?? "Freestyle",
+            currentSetNumber: nextSetNumber,
+            currentSetTotal: currentGroup?.sets.count ?? 0,
+            currentTarget: nextTargetLabel,
+            upNext: upNextName,
+            restEndsAt: restTimer.endsAt,
+            restStartedAt: restTimer.startedAt,
+            volumeLabel: "\(unit.fromKg(volumeKg).compactVolume) \(unit.short)",
+            elapsedLabel: session.duration.durationString
+        )
+    }
+
+    /// Called after every change, and again whenever the app comes back to the
+    /// foreground — `WorkoutLiveActivity` treats it as "make the Lock Screen
+    /// match this", which also covers a card that failed to start at launch.
+    func pushLiveActivity() {
+        guard session.isActive else { return }
+        WorkoutLiveActivity.shared.sync(
+            sessionID: session.id,
+            title: session.title,
+            planName: session.planName,
+            state: activityState
+        )
     }
 }

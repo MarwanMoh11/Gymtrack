@@ -23,7 +23,9 @@ a basement gym with no signal, and your training history is yours.
 With a free Apple ID the app stays installed for **7 days** before it needs
 re-running from Xcode. A paid Apple Developer account raises that to a year.
 
-Minimum deployment target is **iOS 17**.
+Minimum deployment target is **iOS 17**. The Live Activity appears on the Lock
+Screen on any supported iPhone; the Dynamic Island presentation needs a device
+that has one.
 
 ## What it does
 
@@ -36,6 +38,19 @@ stepping. The weight you use carries to the remaining sets automatically, and
 last session's numbers sit next to each set so you know what to beat. A rest
 timer starts on its own when you log a set, keeps time correctly if you lock the
 phone, and notifies you when it's up.
+
+**Putting a session down** — pull the logger down by its handle, or tap
+*Minimise*, and it shrinks into a bar above the tab bar that keeps the clock,
+the set count and the rest countdown in view. Tap it to go back. The session
+survives leaving the app, switching tabs and force-quitting; discarding it is a
+separate, deliberate button at the bottom of the logger, never the price of
+getting out of the screen.
+
+**Live Activity** — while a session is open it's on the Lock Screen and in the
+Dynamic Island: which exercise and set is up, the weight and rep target, the
+rest countdown ticking down on its own, sets logged and volume moved. When the
+rest runs out the card says so without the app having to wake up. Tapping it
+lands straight back on the set you were about to do.
 
 **Progressive overload** — double progression, built in. Clear the top of the
 rep range on every set and the app tells you to add weight and reset to the
@@ -64,13 +79,18 @@ be dropped in and restored without leaving the phone.
 ## Project layout
 
 ```
-GymTrack/
-├── App/            App entry point, tab shell, session resume
+GymTrack/            The app
+├── App/            App entry point, tab shell, session presentation
 ├── Models/         SwiftData entities, exercise catalog, muscle taxonomy
-├── Services/       Stats, progressive overload, rest timer, backup, templates
-├── DesignSystem/   Theme tokens, shared components, haptics
+├── Services/       Stats, overload, rest timer, backup, templates, Live Activity
+├── DesignSystem/   Shared components, haptics
 ├── Features/       One folder per screen area
 └── Resources/      exercises.json — the bundled exercise library
+
+GymTrackShared/      Compiled into both targets: theme tokens, and the
+                     Live Activity's attributes and content state
+GymTrackWidgets/     Widget extension — the Lock Screen and Dynamic Island
+                     presentations of a running session
 ```
 
 Built with SwiftUI, SwiftData and Swift Charts. No third-party dependencies.
@@ -80,7 +100,12 @@ Built with SwiftUI, SwiftData and Swift Charts. No third-party dependencies.
 - Weights are stored in kilograms and converted for display, so switching
   between kg and lb never rewrites your history.
 - An unfinished session survives a force-quit — the app picks it back up on
-  launch, and closes out anything older than 12 hours.
+  launch (minimised or open, whichever you left it), re-adopts its Live Activity
+  rather than starting a second one, and closes out anything older than 12 hours.
+- `Text(timerInterval:)` is the only clock a Live Activity keeps running on its
+  own, so the rest countdown uses it; how finely it ticks is the system's call.
+  Everything else on the card — including the session length — is a label the
+  app restamps on every change, which is also why it never shows blank digits.
 - `SampleData.swift` fills the app with a couple of months of plausible history
   for design work. It's `#if DEBUG` only; launch with `-GTSeedSampleData`.
 

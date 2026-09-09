@@ -8,8 +8,15 @@ import AudioToolbox
 @Observable
 final class RestTimer {
     private(set) var endsAt: Date?
+    /// When the current rest began. The Live Activity needs both ends of the
+    /// interval to draw a countdown that runs without the app.
+    private(set) var startedAt: Date?
     private(set) var totalSeconds: Int = 0
     private(set) var remaining: TimeInterval = 0
+
+    /// Fired whenever the rest state changes in a way the Lock Screen cares
+    /// about — started, extended, cancelled, or run out.
+    var onChange: (() -> Void)?
 
     private var ticker: Timer?
     private let notificationID = "gymtrack.rest"
@@ -25,10 +32,12 @@ final class RestTimer {
         guard seconds > 0 else { return }
         Self.requestNotificationPermissionIfNeeded()
         totalSeconds = seconds
+        startedAt = .now
         endsAt = Date().addingTimeInterval(TimeInterval(seconds))
         remaining = TimeInterval(seconds)
         scheduleTicker()
         scheduleNotification(in: seconds)
+        onChange?()
     }
 
     func add(seconds: Int) {
@@ -40,16 +49,20 @@ final class RestTimer {
         refresh()
         cancelNotification()
         scheduleNotification(in: Int(remaining))
+        onChange?()
         Haptics.tick()
     }
 
     func stop() {
         ticker?.invalidate()
         ticker = nil
+        let wasRunning = endsAt != nil
         endsAt = nil
+        startedAt = nil
         remaining = 0
         totalSeconds = 0
         cancelNotification()
+        if wasRunning { onChange?() }
     }
 
     private func scheduleTicker() {

@@ -4,6 +4,7 @@ import SwiftData
 struct TodayView: View {
     @Environment(\.modelContext) private var context
     @Binding var activeWorkout: ActiveWorkout?
+    @Binding var isSessionExpanded: Bool
 
     @Query(sort: \Plan.createdAt) private var plans: [Plan]
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
@@ -102,7 +103,9 @@ struct TodayView: View {
 
     @ViewBuilder
     private var heroCard: some View {
-        if let day = scheduledDay {
+        if let workout = activeWorkout {
+            inProgressCard(workout)
+        } else if let day = scheduledDay {
             scheduledCard(day)
         } else if activePlan != nil {
             restDayCard
@@ -116,6 +119,81 @@ struct TodayView: View {
             )
             .gtCard()
         }
+    }
+
+    /// Today's hero while a session is open. The card people land on first has
+    /// to say "you're mid-workout" before it says anything else — otherwise a
+    /// minimised session looks like no session at all.
+    private func inProgressCard(_ workout: ActiveWorkout) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Theme.accent).frame(width: 7, height: 7)
+                        Text("SESSION IN PROGRESS")
+                            .font(Theme.eyebrow)
+                            .tracking(1.4)
+                            .foregroundStyle(Theme.accent)
+                    }
+                    Text(workout.session.title)
+                        .font(Theme.rounded(26, weight: .heavy))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(workout.restTimer.isRunning
+                         ? "Resting · then \(workout.currentGroup?.name ?? "your next set")"
+                         : sessionStatus(workout))
+                        .font(Theme.rounded(13, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    VStack(spacing: 2) {
+                        Text(workout.session.duration.clockString)
+                            .font(Theme.number(22))
+                            .foregroundStyle(Theme.accent)
+                        Text("elapsed")
+                            .font(Theme.rounded(10, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+            }
+
+            HStack(spacing: 14) {
+                ProgressRing(progress: workout.progress, lineWidth: 6,
+                             label: "\(Int(workout.progress * 100))")
+                    .frame(width: 46, height: 46)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(workout.completedCount) of \(workout.totalCount) sets logged")
+                        .font(Theme.rounded(14, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("\(AppSettings.shared.weight(workout.volumeKg)) moved so far")
+                        .font(Theme.rounded(12, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Button("Back to workout") { isSessionExpanded = true }
+                .buttonStyle(PrimaryButtonStyle())
+
+            Label("Also on your Lock Screen while the app is closed",
+                  systemImage: "lock.iphone")
+                .font(Theme.rounded(11, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+                .frame(maxWidth: .infinity)
+        }
+        .gtCard(padding: 18, background: Theme.surface)
+    }
+
+    private func sessionStatus(_ workout: ActiveWorkout) -> String {
+        if workout.totalCount > 0, workout.completedCount >= workout.totalCount {
+            return "Every set logged — ready to finish"
+        }
+        guard let group = workout.currentGroup else { return "Tap to log your first set" }
+        return "\(group.name) · set \(workout.nextSetNumber) of \(group.sets.count)"
     }
 
     private func scheduledCard(_ day: PlanDay) -> some View {
@@ -297,11 +375,13 @@ struct TodayView: View {
 
     private func start(day: PlanDay) {
         activeWorkout = ActiveWorkout.start(day: day, plan: activePlan, context: context, history: finishedSessions)
+        isSessionExpanded = true
         Haptics.log()
     }
 
     private func startFreestyle() {
         activeWorkout = ActiveWorkout.startFreestyle(context: context, history: finishedSessions)
+        isSessionExpanded = true
         Haptics.log()
     }
 }

@@ -12,6 +12,8 @@ enum SettingsKey {
     static let hasOnboarded = "settings.hasOnboarded"
     static let userName = "settings.userName"
     static let activeSessionID = "settings.activeSessionID"
+    /// Whether the user tucked the running session away rather than closing it.
+    static let sessionMinimised = "settings.sessionMinimised"
 }
 
 enum WeightUnit: String, CaseIterable, Identifiable {
