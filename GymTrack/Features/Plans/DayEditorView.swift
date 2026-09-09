@@ -105,7 +105,10 @@ struct DayEditorView: View {
         let core = item.tracking == .duration
             ? "\(item.targetSets) × \(item.targetSeconds)s"
             : "\(item.targetSets) × \(item.repRangeLabel)"
-        return "\(core) · \(item.restSeconds)s rest"
+        let rest = item.restSeconds == nil
+            ? "\(item.resolvedRestSeconds)s rest (default)"
+            : "\(item.resolvedRestSeconds)s rest"
+        return "\(core) · \(rest)"
     }
 
     // MARK: - Mutations
@@ -121,8 +124,7 @@ struct DayEditorView: View {
             order: day.items.count,
             targetSets: 3,
             targetRepsLow: exercise.tracking == .duration ? 0 : 8,
-            targetRepsHigh: exercise.tracking == .duration ? 0 : 12,
-            restSeconds: AppSettings.shared.defaultRestSeconds
+            targetRepsHigh: exercise.tracking == .duration ? 0 : 12
         )
         item.day = day
         context.insert(item)
@@ -193,15 +195,21 @@ struct PlanItemEditor: View {
                     .listRowBackground(Theme.surface)
                 }
 
-                Section("Rest between sets") {
+                Section {
                     Picker("Rest", selection: $item.restSeconds) {
+                        Text("Default (\(AppSettings.shared.defaultRestSeconds)s)")
+                            .tag(Int?.none)
                         ForEach([45, 60, 75, 90, 120, 150, 180, 210, 240], id: \.self) { seconds in
                             Text(seconds >= 60 ? "\(seconds / 60)m \(seconds % 60 == 0 ? "" : "\(seconds % 60)s")" : "\(seconds)s")
-                                .tag(seconds)
+                                .tag(Int?.some(seconds))
                         }
                     }
                     .pickerStyle(.wheel)
                     .frame(height: 110)
+                } header: {
+                    Text("Rest between sets")
+                } footer: {
+                    Text("Leave this on Default and the exercise follows the rest length in Settings.")
                 }
                 .listRowBackground(Theme.surface)
 

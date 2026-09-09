@@ -14,6 +14,9 @@ enum SettingsKey {
     static let activeSessionID = "settings.activeSessionID"
     /// Whether the user tucked the running session away rather than closing it.
     static let sessionMinimised = "settings.sessionMinimised"
+    /// One-shot marker for the migration that turned per-exercise rest into a
+    /// real override rather than a copy of the default.
+    static let didClearBakedRest = "settings.didClearBakedRest"
 }
 
 enum WeightUnit: String, CaseIterable, Identifiable {

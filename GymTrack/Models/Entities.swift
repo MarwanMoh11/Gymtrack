@@ -107,7 +107,9 @@ final class PlanItem {
     var targetWeightKg: Double = 0
     /// Target hold/work time for duration-tracked exercises.
     var targetSeconds: Int = 45
-    var restSeconds: Int = 90
+    /// Per-exercise rest override. `nil` means "follow the app-wide default",
+    /// so changing that setting reaches every exercise that hasn't been tuned.
+    var restSeconds: Int?
     var notes: String = ""
 
     var day: PlanDay?
@@ -120,7 +122,7 @@ final class PlanItem {
          targetRepsHigh: Int = 12,
          targetWeightKg: Double = 0,
          targetSeconds: Int = 45,
-         restSeconds: Int = 90) {
+         restSeconds: Int? = nil) {
         self.id = UUID()
         self.catalogID = catalogID
         self.name = name
@@ -135,6 +137,10 @@ final class PlanItem {
 
     var catalog: CatalogExercise? { ExerciseCatalog.shared.exercise(id: catalogID) }
     var tracking: TrackingMode { catalog?.tracking ?? .weightReps }
+
+    /// The rest actually used for this exercise — its own override, or the
+    /// app-wide default when it has none.
+    var resolvedRestSeconds: Int { restSeconds ?? AppSettings.shared.defaultRestSeconds }
 
     var repRangeLabel: String {
         targetRepsLow == targetRepsHigh ? "\(targetRepsLow)" : "\(targetRepsLow)–\(targetRepsHigh)"

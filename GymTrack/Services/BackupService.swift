@@ -50,7 +50,8 @@ enum BackupService {
         var targetRepsHigh: Int
         var targetWeightKg: Double
         var targetSeconds: Int
-        var restSeconds: Int
+        /// Absent/null means the exercise follows the app-wide default rest.
+        var restSeconds: Int?
         var notes: String
     }
 
