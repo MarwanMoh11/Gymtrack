@@ -14,6 +14,8 @@ struct ActiveWorkoutView: View {
     let onClose: (WorkoutSession?) -> Void
 
     @Environment(\.modelContext) private var context
+    /// The watch's live numbers, when one is recording alongside the phone.
+    @State private var watch = WatchBridge.shared
     @State private var elapsed: TimeInterval = 0
     @State private var showingAddExercise = false
     @State private var showingFinishConfirm = false
@@ -114,10 +116,16 @@ struct ActiveWorkoutView: View {
                 .buttonStyle(.plain)
             }
 
-            Text("\(workout.session.title) · \(workout.completedCount) of \(workout.totalCount) sets")
-                .font(Theme.rounded(12, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                Text("\(workout.session.title) · \(workout.completedCount) of \(workout.totalCount) sets")
+                    .font(Theme.rounded(12, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+
+                if let heartRate = watch.liveMetrics?.currentHeartRate {
+                    LiveHeartRatePill(bpm: heartRate)
+                }
+            }
 
             headerProgressLine
         }
@@ -624,5 +632,33 @@ struct RestTimerBar: View {
         .padding(.vertical, 10)
         .background(Theme.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Theme.accent.opacity(0.3), radius: 16, y: 6)
+    }
+}
+
+// MARK: - Live heart rate
+
+/// The watch's current reading, shown in the logger while it's recording. It
+/// beats rather than animating a number, so it reads at a glance from arm's
+/// length without pulling focus from the set.
+struct LiveHeartRatePill: View {
+    let bpm: Double
+    @State private var isBeating = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Theme.negative)
+                .scaleEffect(isBeating ? 1.18 : 1)
+                .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: isBeating)
+            Text("\(Int(bpm.rounded()))")
+                .font(Theme.number(11, weight: .bold))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Theme.surfaceRaised, in: Capsule())
+        .onAppear { isBeating = true }
+        .accessibilityLabel("Heart rate \(Int(bpm.rounded())) beats per minute")
     }
 }

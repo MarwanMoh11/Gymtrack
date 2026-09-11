@@ -159,6 +159,23 @@ final class WorkoutSession {
     var notes: String = ""
     var planDayID: UUID?
     var planName: String = ""
+    /// An exercise being worked out of turn — chosen from the watch, or by
+    /// jumping around the logger. `nil` means "whatever comes next".
+    var preferredExerciseID: String?
+
+    // MARK: Health
+
+    /// The `HKWorkout` this session was saved as — by the phone when it
+    /// finished, or by the watch if it drove the session. Its presence is also
+    /// what stops a second copy being written.
+    var healthWorkoutID: UUID?
+    /// Beats per minute over the session, from the watch. `nil` when nothing
+    /// was recorded — a zero would read as a measurement.
+    var averageHeartRate: Double?
+    var maxHeartRate: Double?
+    var activeEnergyKcal: Double?
+    /// True when an Apple Watch was logging alongside the phone.
+    var wasWatchDriven: Bool = false
 
     @Relationship(deleteRule: .cascade, inverse: \SetLog.session)
     var sets: [SetLog] = []
@@ -199,6 +216,13 @@ final class WorkoutSession {
 
     var day: String {
         startedAt.formatted(.dateTime.weekday(.wide))
+    }
+
+    /// Whether there's anything from Health worth showing on the summary. A
+    /// zero energy reading is nothing recorded, not a workout that cost
+    /// nothing, so it doesn't count.
+    var hasHealthMetrics: Bool {
+        averageHeartRate != nil || maxHeartRate != nil || (activeEnergyKcal ?? 0) >= 1
     }
 }
 
@@ -333,10 +357,19 @@ final class BodyMetric {
     var id: UUID = UUID()
     var date: Date = Date()
     var weightKg: Double = 0
+    /// Where the number came from, so an import from Health can tell itself
+    /// apart from something the user typed.
+    var source: String = Source.manual.rawValue
 
     init(date: Date = .now, weightKg: Double) {
         self.id = UUID()
         self.date = date
         self.weightKg = weightKg
     }
+
+    enum Source: String {
+        case manual, health
+    }
+
+    var isFromHealth: Bool { source == Source.health.rawValue }
 }

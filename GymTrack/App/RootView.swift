@@ -10,6 +10,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query private var customExercises: [CustomExerciseRecord]
     @Query private var sessions: [WorkoutSession]
+    @Query(sort: \Plan.createdAt) private var plans: [Plan]
 
     @AppStorage(SettingsKey.hasOnboarded) private var hasOnboarded = false
     /// Remembers that the user chose to put the session away, so relaunching
@@ -36,11 +37,17 @@ struct RootView: View {
             syncCustomExercises()
             resumeUnfinishedSession()
             seedSampleDataIfRequested()
+            connectWatch()
+            syncBodyWeightFromHealth()
         }
         .onChange(of: hasOnboarded) { _, done in
             if done { seedSampleDataIfRequested() }
         }
         .onChange(of: customExercises.count) { _, _ in syncCustomExercises() }
+        // The watch's idle screen is built from the plan and the history, so
+        // it has to be restamped whenever either moves.
+        .onChange(of: sessions.count) { _, _ in pushWatchIdle() }
+        .onChange(of: plans.count) { _, _ in pushWatchIdle() }
         // Derived rather than set at each call site — the session can be put
         // away or brought back from the logger, the dock, the Today card and a
         // Live Activity tap, and every one of them has to agree.
@@ -50,8 +57,12 @@ struct RootView: View {
         // Restamp the card on the way out — that's the moment it becomes the
         // thing the user is looking at — and on the way back in, since the rest
         // timer can't tick while the app is suspended.
-        .onChange(of: scenePhase) { _, _ in
+        .onChange(of: scenePhase) { _, phase in
             activeWorkout?.pushLiveActivity()
+            if phase == .active {
+                activeWorkout?.pushToWatch()
+                pushWatchIdle()
+            }
         }
         .onOpenURL { url in
             if url.host == "session" { expandSession() }
@@ -161,11 +172,124 @@ struct RootView: View {
         workout.finish()
         closeSession()
         showingSummary = session
+        pushWatchIdle()
     }
 
     private func discardSession() {
         activeWorkout?.discard()
         closeSession()
+        pushWatchIdle()
+    }
+
+    // MARK: - Apple Watch
+
+    /// Claims what the watch sends for as long as this view is alive. The link
+    /// itself came up at launch — see `WatchCommandCenter` — and goes back to
+    /// applying commands headlessly if the app is never brought on screen.
+    private func connectWatch() {
+        WatchCommandCenter.shared.uiHandler = { command in
+            handleWatchCommand(command)
+        }
+        pushWatchIdle()
+        activeWorkout?.pushToWatch()
+    }
+
+    private func pushWatchIdle() {
+        WatchBridge.shared.update(idle: WatchMirrorBuilder.idle(plans: plans, sessions: sessions))
+    }
+
+    /// Anything the running session knows how to do, it does. What's left is
+    /// session lifecycle, which lives here.
+    ///
+    /// Returns false for anything this view is in no position to serve — a set
+    /// logged against a session it isn't holding — so `WatchCommandCenter`
+    /// applies it to the store instead of dropping it.
+    private func handleWatchCommand(_ command: WatchCommand) -> Bool {
+        if let workout = activeWorkout, workout.apply(command) { return true }
+
+        switch command {
+        case .startToday:
+            let plan = plans.first(where: \.isActive) ?? plans.first
+            if let day = plan?.day(for: .now) {
+                startFromWatch(ActiveWorkout.start(day: day, plan: plan, context: context,
+                                                   history: sessions.filter { !$0.isActive }))
+            } else {
+                startFromWatch(ActiveWorkout.startFreestyle(context: context,
+                                                            history: sessions.filter { !$0.isActive }))
+            }
+            return true
+
+        case .startFreestyle:
+            startFromWatch(ActiveWorkout.startFreestyle(context: context,
+                                                        history: sessions.filter { !$0.isActive }))
+            return true
+
+        case .finish(let metrics):
+            if activeWorkout != nil {
+                finishSession()
+                return true
+            }
+            // The watch ended a session the phone had already closed out.
+            if let metrics { return applyLateMetrics(metrics) }
+            return false
+
+        case .metrics(let metrics):
+            // Only reaches here with no session running: the watch saving its
+            // workout to Health after the phone finished.
+            return applyLateMetrics(metrics)
+
+        case .discard:
+            guard activeWorkout != nil else { return false }
+            discardSession()
+            return true
+
+        case .requestMirror:
+            pushWatchIdle()
+            activeWorkout?.pushToWatch()
+            return true
+
+        default:
+            // A set logged against a session this view isn't holding.
+            return false
+        }
+    }
+
+    /// A session started from the wrist opens minimised: the phone is usually
+    /// in a bag when this happens, and springing the logger open would mean
+    /// finding it in that state later.
+    private func startFromWatch(_ workout: ActiveWorkout) {
+        guard activeWorkout == nil else { return }
+        workout.session.wasWatchDriven = true
+        activeWorkout = workout
+        isSessionExpanded = false
+        pushWatchIdle()
+    }
+
+    /// Heart rate, energy and the Health workout the watch saved can land
+    /// after the phone has already filed the session — the watch takes a few
+    /// seconds to close a workout out. Match them back up by session ID.
+    @discardableResult
+    private func applyLateMetrics(_ metrics: WatchWorkoutMetrics) -> Bool {
+        guard let id = metrics.sessionID,
+              let session = sessions.first(where: { $0.id == id })
+        else { return false }
+
+        session.wasWatchDriven = true
+        if let average = metrics.averageHeartRate { session.averageHeartRate = average }
+        if let max = metrics.maxHeartRate { session.maxHeartRate = max }
+        if let energy = metrics.activeEnergyKcal, energy > 0 { session.activeEnergyKcal = energy }
+        if let workoutID = metrics.healthWorkoutID { session.healthWorkoutID = workoutID }
+        try? context.save()
+        return true
+    }
+
+    // MARK: - Health
+
+    /// Pulls weigh-ins recorded elsewhere — a connected scale, the Health app —
+    /// into the app's own history.
+    private func syncBodyWeightFromHealth() {
+        guard AppSettings.shared.healthBodyWeight else { return }
+        Task { await HealthKitService.shared.importBodyMass(into: context) }
     }
 
     private func seedSampleDataIfRequested() {

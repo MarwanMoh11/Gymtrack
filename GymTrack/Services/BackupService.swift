@@ -13,6 +13,9 @@ enum BackupService {
         var settings: Settings
         var plans: [PlanDTO]
         var sessions: [SessionDTO]
+        /// Optional for the same reason — weigh-ins arrived later than the
+        /// first backup format.
+        var bodyMetrics: [BodyMetricDTO]?
         var customExercises: [CustomExerciseDTO]
     }
 
@@ -62,6 +65,11 @@ enum BackupService {
         var endedAt: Date?
         var notes: String
         var planName: String
+        // Optional so backups written before Health support still restore.
+        var averageHeartRate: Double?
+        var maxHeartRate: Double?
+        var activeEnergyKcal: Double?
+        var wasWatchDriven: Bool?
         var sets: [SetDTO]
     }
 
@@ -80,6 +88,13 @@ enum BackupService {
         var targetRepsHigh: Int
     }
 
+    struct BodyMetricDTO: Codable {
+        var id: UUID
+        var date: Date
+        var weightKg: Double
+        var source: String
+    }
+
     struct CustomExerciseDTO: Codable {
         var id: String
         var name: String
@@ -95,6 +110,7 @@ enum BackupService {
         let plans = try context.fetch(FetchDescriptor<Plan>())
         let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
         let custom = try context.fetch(FetchDescriptor<CustomExerciseRecord>())
+        let bodyMetrics = try context.fetch(FetchDescriptor<BodyMetric>())
 
         let archive = Archive(
             settings: Settings(
@@ -120,6 +136,10 @@ enum BackupService {
             sessions: sessions.filter { !$0.isActive }.map { session in
                 SessionDTO(id: session.id, title: session.title, startedAt: session.startedAt,
                            endedAt: session.endedAt, notes: session.notes, planName: session.planName,
+                           averageHeartRate: session.averageHeartRate,
+                           maxHeartRate: session.maxHeartRate,
+                           activeEnergyKcal: session.activeEnergyKcal,
+                           wasWatchDriven: session.wasWatchDriven,
                            sets: session.sets.map { set in
                                SetDTO(catalogID: set.catalogID, exerciseName: set.exerciseName,
                                       exerciseOrder: set.exerciseOrder, setIndex: set.setIndex,
@@ -128,6 +148,9 @@ enum BackupService {
                                       completedAt: set.completedAt,
                                       targetRepsLow: set.targetRepsLow, targetRepsHigh: set.targetRepsHigh)
                            })
+            },
+            bodyMetrics: bodyMetrics.map {
+                BodyMetricDTO(id: $0.id, date: $0.date, weightKg: $0.weightKg, source: $0.source)
             },
             customExercises: custom.map {
                 CustomExerciseDTO(id: $0.id, name: $0.name, category: $0.category,
@@ -204,6 +227,10 @@ enum BackupService {
             session.id = dto.id
             session.endedAt = dto.endedAt
             session.notes = dto.notes
+            session.averageHeartRate = dto.averageHeartRate
+            session.maxHeartRate = dto.maxHeartRate
+            session.activeEnergyKcal = dto.activeEnergyKcal
+            session.wasWatchDriven = dto.wasWatchDriven ?? false
             context.insert(session)
 
             for setDTO in dto.sets {
@@ -217,6 +244,13 @@ enum BackupService {
                 set.session = session
                 context.insert(set)
             }
+        }
+
+        for dto in archive.bodyMetrics ?? [] {
+            let metric = BodyMetric(date: dto.date, weightKg: dto.weightKg)
+            metric.id = dto.id
+            metric.source = dto.source
+            context.insert(metric)
         }
 
         AppSettings.shared.weightUnit = WeightUnit(rawValue: archive.settings.weightUnit) ?? .kg
@@ -235,6 +269,7 @@ enum BackupService {
     static func wipe(context: ModelContext) throws {
         for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
         for session in try context.fetch(FetchDescriptor<WorkoutSession>()) { context.delete(session) }
+        for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
         for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
 

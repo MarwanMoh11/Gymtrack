@@ -27,6 +27,11 @@ struct GymTrackApp: App {
 
         Self.clearBakedRestOverrides(in: container)
 
+        // Before anything else can arrive: iOS wakes a terminated app in the
+        // background to hand it a watch message, and the link has to be up and
+        // able to apply it without a view hierarchy.
+        WatchCommandCenter.shared.configure(container: container)
+
         UIApplication.shared.isIdleTimerDisabled = AppSettings.shared.keepScreenAwake
     }
 

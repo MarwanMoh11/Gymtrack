@@ -1,3 +1,4 @@
+#if os(iOS)
 import ActivityKit
 import Foundation
 
@@ -81,3 +82,4 @@ extension WorkoutActivity {
     /// Deep link the Live Activity opens — lands straight back in the logger.
     static let deepLink = URL(string: "gymtrack://session")!
 }
+#endif

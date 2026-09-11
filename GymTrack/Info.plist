@@ -33,6 +33,13 @@
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 
+	<!-- Health. Reading covers heart rate and energy for a session, plus body
+	     weight; writing puts finished sessions in Health as strength workouts. -->
+	<key>NSHealthShareUsageDescription</key>
+	<string>GymTrack reads the heart rate and energy recorded during a workout so your sessions show what they cost you, and your body weight so you don't have to type it twice.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>GymTrack saves finished sessions to Health as strength training workouts — with your sets, reps and volume — and can record a weigh-in you enter here.</string>
+
 	<!-- Tapping that Live Activity lands straight back in the logger. -->
 	<key>CFBundleURLTypes</key>
 	<array>

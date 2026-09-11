@@ -2,6 +2,45 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+/// Builds the sets a planned session starts with: every prescription in the
+/// day, loaded with what the double-progression suggestion says to lift today.
+///
+/// Separate from `ActiveWorkout` because a session can also be started from the
+/// watch while the app isn't running, and that path has no logger to drive.
+enum SessionFactory {
+
+    @MainActor
+    @discardableResult
+    static func build(day: PlanDay, plan: Plan?, context: ModelContext, history: [WorkoutSession]) -> WorkoutSession {
+        let session = WorkoutSession(title: day.name, planDayID: day.id, planName: plan?.name ?? "")
+        context.insert(session)
+
+        for (exerciseIndex, item) in day.orderedItems.enumerated() {
+            let last = TrainingStats.lastPerformance(of: item.catalogID, in: history)
+            let suggestion = TrainingStats.suggestion(for: item, lastSets: last)
+            let startingWeight = last.isEmpty ? item.targetWeightKg : suggestion.weightKg
+
+            for setIndex in 0..<max(1, item.targetSets) {
+                let previous = setIndex < last.count ? last[setIndex] : last.last
+                let set = SetLog(
+                    catalogID: item.catalogID,
+                    exerciseName: item.name,
+                    exerciseOrder: exerciseIndex,
+                    setIndex: setIndex,
+                    weightKg: startingWeight,
+                    reps: previous?.reps ?? item.targetRepsLow,
+                    seconds: item.targetSeconds,
+                    targetRepsLow: item.targetRepsLow,
+                    targetRepsHigh: item.targetRepsHigh
+                )
+                set.session = session
+                context.insert(set)
+            }
+        }
+        return session
+    }
+}
+
 /// Drives an in-progress session. The session and its sets are SwiftData
 /// objects written as you go, so force-quitting mid-workout loses nothing —
 /// the app finds the unfinished session on next launch and offers to resume.
@@ -11,8 +50,6 @@ final class ActiveWorkout {
     private(set) var session: WorkoutSession
     let restTimer = RestTimer()
 
-    /// Index of the exercise the logger is focused on.
-    var focusedExerciseIndex: Int = 0
 
     /// Set IDs that just earned a PR, so the UI can celebrate once.
     private(set) var recentPRs: Set<UUID> = []
@@ -45,9 +82,14 @@ final class ActiveWorkout {
         // A rest starting, being extended or running out changes what the Lock
         // Screen should say, and none of those go through `save()`.
         restTimer.onChange = { [weak self] in
-            Task { @MainActor in self?.pushLiveActivity() }
+            Task { @MainActor in
+                self?.pushLiveActivity()
+                self?.pushToWatch()
+            }
         }
         pushLiveActivity()
+        pushToWatch()
+        launchWatchAppIfWanted()
     }
 
     // MARK: - Creating a session
@@ -55,32 +97,7 @@ final class ActiveWorkout {
     /// Starts a session from a plan day, pre-building every prescribed set with
     /// the load carried over from last time.
     static func start(day: PlanDay, plan: Plan?, context: ModelContext, history: [WorkoutSession]) -> ActiveWorkout {
-        let session = WorkoutSession(title: day.name, planDayID: day.id, planName: plan?.name ?? "")
-        context.insert(session)
-
-        for (exerciseIndex, item) in day.orderedItems.enumerated() {
-            let last = TrainingStats.lastPerformance(of: item.catalogID, in: history)
-            let suggestion = TrainingStats.suggestion(for: item, lastSets: last)
-            let startingWeight = last.isEmpty ? item.targetWeightKg : suggestion.weightKg
-
-            for setIndex in 0..<max(1, item.targetSets) {
-                let previous = setIndex < last.count ? last[setIndex] : last.last
-                let set = SetLog(
-                    catalogID: item.catalogID,
-                    exerciseName: item.name,
-                    exerciseOrder: exerciseIndex,
-                    setIndex: setIndex,
-                    weightKg: startingWeight,
-                    reps: previous?.reps ?? item.targetRepsLow,
-                    seconds: item.targetSeconds,
-                    targetRepsLow: item.targetRepsLow,
-                    targetRepsHigh: item.targetRepsHigh
-                )
-                set.session = session
-                context.insert(set)
-            }
-        }
-
+        let session = SessionFactory.build(day: day, plan: plan, context: context, history: history)
         try? context.save()
         return ActiveWorkout(session: session, context: context, history: history)
     }
@@ -107,8 +124,21 @@ final class ActiveWorkout {
     var volumeKg: Double { session.totalVolumeKg }
 
     /// The exercise holding the next unlogged set — what the session is "on".
+    /// Normally the first one that isn't finished, unless the lifter has picked
+    /// a different one to work on.
     var currentGroup: SessionExerciseGroup? {
-        groups.first { !$0.isComplete } ?? groups.last
+        if let preferred = session.preferredExerciseID,
+           let group = groups.first(where: { $0.catalogID == preferred && !$0.isComplete }) {
+            return group
+        }
+        return groups.first { !$0.isComplete } ?? groups.last
+    }
+
+    /// Moves the session onto a different exercise — a superset, or a machine
+    /// that was taken when its turn came round.
+    func focus(on catalogID: String) {
+        session.preferredExerciseID = groups.contains { $0.catalogID == catalogID } ? catalogID : nil
+        save()
     }
 
     /// The set the logger has expanded, i.e. the one about to be performed.
@@ -263,10 +293,14 @@ final class ActiveWorkout {
             context.delete(set)
         }
         session.endedAt = .now
+        adoptWatchMetrics()
         restTimer.onChange = nil
         restTimer.stop()
         writeThrough()
         WorkoutLiveActivity.shared.end(with: activityState)
+        WatchBridge.shared.update(session: nil)
+        WatchBridge.shared.clearMetrics()
+        recordToHealth()
         Haptics.success()
     }
 
@@ -276,16 +310,154 @@ final class ActiveWorkout {
         context.delete(session)
         writeThrough()
         WorkoutLiveActivity.shared.end(with: nil)
+        WatchBridge.shared.update(session: nil)
+        WatchBridge.shared.clearMetrics()
+    }
+
+    // MARK: - Health
+
+    /// Takes whatever the watch measured while the session ran. The watch is
+    /// the only thing here that can read a heart rate, so its numbers win.
+    private func adoptWatchMetrics() {
+        guard let metrics = WatchBridge.shared.liveMetrics else { return }
+        session.wasWatchDriven = true
+        if let average = metrics.averageHeartRate { session.averageHeartRate = average }
+        if let max = metrics.maxHeartRate { session.maxHeartRate = max }
+        if let energy = metrics.activeEnergyKcal, energy > 0 { session.activeEnergyKcal = energy }
+        // The watch saves its own workout — with the full beat-by-beat record —
+        // so the phone must not write a second copy of the same session.
+        if let workoutID = metrics.healthWorkoutID { session.healthWorkoutID = workoutID }
+    }
+
+    /// Writes the session to Health and picks up the heart rate and energy an
+    /// Apple Watch recorded during it, whether or not our watch app was running.
+    /// Deliberately detached: a slow or refused Health call must never hold up
+    /// the summary screen.
+    private func recordToHealth() {
+        let session = session
+        let context = context
+        let watchIsRecording = session.wasWatchDriven || WatchBridge.shared.liveMetrics != nil
+        Task { @MainActor in
+            // When the watch drove the session it saves the workout itself —
+            // with the beat-by-beat heart rate the phone can't reproduce — and
+            // tells us the ID a moment later. Give it that moment rather than
+            // racing it to a duplicate workout in Health.
+            if watchIsRecording {
+                for _ in 0..<12 where session.healthWorkoutID == nil {
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
+            await HealthKitService.shared.saveWorkout(for: session)
+            await HealthKitService.shared.backfillVitals(for: session)
+            try? context.save()
+        }
     }
 
     private func save() {
         writeThrough()
         pushLiveActivity()
+        pushToWatch()
     }
 
     private func writeThrough() {
         do { try context.save() } catch {
             assertionFailure("Failed to save workout: \(error)")
+        }
+    }
+
+    // MARK: - Apple Watch
+
+    /// The session as the watch draws it. Built from the same objects the
+    /// logger shows, so the wrist and the phone can't disagree.
+    var watchSnapshot: WatchSessionSnapshot {
+        WatchSnapshotFactory.snapshot(
+            for: session,
+            currentSetID: nextSet?.id,
+            rest: (restTimer.endsAt, restTimer.startedAt, restTimer.totalSeconds),
+            restSeconds: { [self] catalogID in
+                planItem(for: catalogID)?.resolvedRestSeconds ?? AppSettings.shared.defaultRestSeconds
+            },
+            lastTimeLabel: { [self] catalogID in lastTimeLabel(for: catalogID) }
+        )
+    }
+
+    private func lastTimeLabel(for catalogID: String) -> String? {
+        WatchSnapshotFactory.label(for: lastPerformance(for: catalogID))
+    }
+
+    func pushToWatch() {
+        WatchBridge.shared.update(session: session.isActive ? watchSnapshot : nil)
+    }
+
+    /// Wakes the watch app when a session starts on the phone, so heart rate is
+    /// being recorded from the first set rather than from whenever the user
+    /// remembers to raise their wrist.
+    private func launchWatchAppIfWanted() {
+        guard AppSettings.shared.watchAutoLaunch, session.isActive else { return }
+        // Only for a session that has just started. Resuming one the app picked
+        // back up at launch shouldn't pull the watch app onto the wrist again.
+        guard session.startedAt.timeIntervalSinceNow > -120 else { return }
+        HealthKitService.shared.startWatchApp()
+    }
+
+    // MARK: Commands from the wrist
+
+    /// Applies something the user did on the watch. Everything routes through
+    /// the same methods the phone's own UI calls, so a set logged on the wrist
+    /// gets the identical PR check, load carry-forward and rest timer.
+    ///
+    /// Returns false for the commands that belong to whoever owns session
+    /// lifecycle — starting, finishing and discarding — so `RootView` can take
+    /// them without this object having to know about navigation.
+    @discardableResult
+    func apply(_ command: WatchCommand) -> Bool {
+        switch command {
+        case .logSet(let id, let weightKg, let reps, let seconds):
+            guard let set = session.sets.first(where: { $0.id == id }) else { return true }
+            set.weightKg = weightKg
+            set.reps = reps
+            if set.tracking == .duration { set.seconds = seconds }
+            complete(set, restSeconds: planItem(for: set.catalogID)?.resolvedRestSeconds)
+            return true
+
+        case .undoSet(let id):
+            guard let set = session.sets.first(where: { $0.id == id }) else { return true }
+            uncomplete(set)
+            return true
+
+        case .focusExercise(let catalogID):
+            focus(on: catalogID)
+            return true
+
+        case .addSet(let catalogID):
+            if let group = groups.first(where: { $0.catalogID == catalogID }) {
+                addSet(to: group)
+            }
+            return true
+
+        case .startRest(let seconds):
+            restTimer.start(seconds: seconds)
+            return true
+
+        case .stopRest:
+            restTimer.stop()
+            return true
+
+        case .extendRest(let seconds):
+            restTimer.add(seconds: seconds)
+            return true
+
+        case .metrics:
+            // Already folded into `WatchBridge.liveMetrics`; the logger reads it
+            // from there. Nothing to write until the session ends.
+            return true
+
+        case .requestMirror:
+            WatchBridge.shared.resend()
+            return true
+
+        case .startToday, .startFreestyle, .finish, .discard:
+            return false
         }
     }
 

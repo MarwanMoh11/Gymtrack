@@ -101,7 +101,8 @@ struct ProgressDashboardView: View {
                         heatMapCard.riseIn(4)
                         balanceCard.riseIn(5)
                         consistencyCard.riseIn(6)
-                        recordsCard.riseIn(7)
+                        BodyWeightCard().riseIn(7)
+                        recordsCard.riseIn(8)
                     }
                     .padding(16)
                     .padding(.bottom, 8)

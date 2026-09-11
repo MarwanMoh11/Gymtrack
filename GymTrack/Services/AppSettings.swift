@@ -17,19 +17,17 @@ enum SettingsKey {
     /// One-shot marker for the migration that turned per-exercise rest into a
     /// real override rather than a copy of the default.
     static let didClearBakedRest = "settings.didClearBakedRest"
-}
 
-enum WeightUnit: String, CaseIterable, Identifiable {
-    case kg, lb
-    var id: String { rawValue }
-    var label: String { self == .kg ? "Kilograms" : "Pounds" }
-    var short: String { rawValue }
+    // Health
+    /// Whether the Health permission sheet has been through at least once.
+    static let healthRequested = "settings.healthRequested"
+    static let healthWriteWorkouts = "settings.healthWriteWorkouts"
+    static let healthReadVitals = "settings.healthReadVitals"
+    static let healthBodyWeight = "settings.healthBodyWeight"
 
-    /// Smallest sensible increment when stepping a weight in this unit.
-    var step: Double { self == .kg ? 2.5 : 5 }
-
-    func fromKg(_ kg: Double) -> Double { self == .kg ? kg : kg * 2.20462262 }
-    func toKg(_ value: Double) -> Double { self == .kg ? value : value / 2.20462262 }
+    // Watch
+    /// Wake the watch app when a session starts on the phone.
+    static let watchAutoLaunch = "settings.watchAutoLaunch"
 }
 
 /// App-wide preferences. Backed by `UserDefaults` so views can read them with
@@ -62,6 +60,28 @@ final class AppSettings {
         didSet { defaults.set(userName, forKey: SettingsKey.userName) }
     }
 
+    // MARK: Health & watch
+
+    /// Save finished sessions to Health as strength-training workouts.
+    var healthWriteWorkouts: Bool {
+        didSet { defaults.set(healthWriteWorkouts, forKey: SettingsKey.healthWriteWorkouts) }
+    }
+    /// Read heart rate and active energy back for each session.
+    var healthReadVitals: Bool {
+        didSet { defaults.set(healthReadVitals, forKey: SettingsKey.healthReadVitals) }
+    }
+    /// Two-way body weight sync.
+    var healthBodyWeight: Bool {
+        didSet { defaults.set(healthBodyWeight, forKey: SettingsKey.healthBodyWeight) }
+    }
+    /// Start the watch app when a workout starts on the phone.
+    var watchAutoLaunch: Bool {
+        didSet { defaults.set(watchAutoLaunch, forKey: SettingsKey.watchAutoLaunch) }
+    }
+
+    /// True once any part of the Health integration is switched on.
+    var healthEnabled: Bool { healthWriteWorkouts || healthReadVitals || healthBodyWeight }
+
     private init() {
         defaults.register(defaults: [
             SettingsKey.weightUnit: WeightUnit.kg.rawValue,
@@ -69,6 +89,10 @@ final class AppSettings {
             SettingsKey.restTimerAutoStart: true,
             SettingsKey.defaultRestSeconds: 90,
             SettingsKey.keepScreenAwake: true,
+            SettingsKey.healthWriteWorkouts: true,
+            SettingsKey.healthReadVitals: true,
+            SettingsKey.healthBodyWeight: false,
+            SettingsKey.watchAutoLaunch: true,
         ])
         weightUnit = WeightUnit(rawValue: defaults.string(forKey: SettingsKey.weightUnit) ?? "kg") ?? .kg
         hapticsEnabled = defaults.bool(forKey: SettingsKey.haptics)
@@ -76,47 +100,21 @@ final class AppSettings {
         defaultRestSeconds = defaults.integer(forKey: SettingsKey.defaultRestSeconds)
         keepScreenAwake = defaults.bool(forKey: SettingsKey.keepScreenAwake)
         userName = defaults.string(forKey: SettingsKey.userName) ?? ""
+        healthWriteWorkouts = defaults.bool(forKey: SettingsKey.healthWriteWorkouts)
+        healthReadVitals = defaults.bool(forKey: SettingsKey.healthReadVitals)
+        healthBodyWeight = defaults.bool(forKey: SettingsKey.healthBodyWeight)
+        watchAutoLaunch = defaults.bool(forKey: SettingsKey.watchAutoLaunch)
     }
 
     // MARK: - Formatting helpers
 
     /// Formats a stored kilogram value in the user's chosen unit.
     func weight(_ kg: Double, showUnit: Bool = true, decimals: Int? = nil) -> String {
-        let value = weightUnit.fromKg(kg)
-        let places = decimals ?? (value.truncatingRemainder(dividingBy: 1) == 0 ? 0 : 1)
-        let number = String(format: "%.\(places)f", value)
-        return showUnit ? "\(number) \(weightUnit.short)" : number
+        weightUnit.format(kg, showUnit: showUnit, decimals: decimals)
     }
 
     /// Rounds a display-unit value to a clean increment.
     func snap(_ displayValue: Double) -> Double {
-        let step = weightUnit == .kg ? 0.5 : 1.0
-        return (displayValue / step).rounded() * step
-    }
-}
-
-extension Double {
-    /// Compact volume label — 12,400 kg becomes "12.4k".
-    var compactVolume: String {
-        if self >= 1000 { return String(format: "%.1fk", self / 1000) }
-        return String(format: "%.0f", self)
-    }
-}
-
-extension TimeInterval {
-    /// mm:ss, or h:mm:ss past an hour.
-    var clockString: String {
-        let total = Int(self.rounded())
-        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
-    }
-
-    /// "1h 12m" / "48m" — for summaries rather than live counters.
-    var durationString: String {
-        let total = Int(self.rounded())
-        let h = total / 3600, m = (total % 3600) / 60
-        if h > 0 { return "\(h)h \(m)m" }
-        if m > 0 { return "\(m)m" }
-        return "\(total)s"
+        weightUnit.snap(displayValue)
     }
 }

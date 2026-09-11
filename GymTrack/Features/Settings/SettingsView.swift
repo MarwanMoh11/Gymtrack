@@ -83,6 +83,23 @@ struct SettingsView: View {
                 .listRowBackground(Theme.surface)
 
                 Section {
+                    NavigationLink {
+                        HealthWatchSettingsView()
+                    } label: {
+                        HStack {
+                            Label("Health & Watch", systemImage: "heart.text.square.fill")
+                            Spacer()
+                            Text(connectionSummary)
+                                .font(Theme.rounded(13, weight: .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                } footer: {
+                    Text("Sessions in Health, heart rate back from your watch, and logging from your wrist.")
+                }
+                .listRowBackground(Theme.surface)
+
+                Section {
                     Button {
                         exportBackup()
                     } label: {
@@ -143,6 +160,19 @@ struct SettingsView: View {
             }
         }
         .presentationBackground(Theme.background)
+    }
+
+    /// A one-word read on the integration, so the row says something without
+    /// being opened.
+    private var connectionSummary: String {
+        let watchReady = WatchBridge.shared.isLinked
+        let healthOn = settings.healthEnabled && HealthKitService.shared.hasRequestedAuthorization
+        switch (healthOn, watchReady) {
+        case (true, true): return "Health · Watch"
+        case (true, false): return "Health"
+        case (false, true): return "Watch"
+        case (false, false): return "Off"
+        }
     }
 
     private var appVersion: String {

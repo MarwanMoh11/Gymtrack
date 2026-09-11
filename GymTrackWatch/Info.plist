@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>GymTrack</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+
+	<!-- A watchOS 7+ app: its own bundle, pointed back at the phone app it
+	     belongs to. -->
+	<key>WKApplication</key>
+	<true/>
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>com.marwanmohamed.gymtrack</string>
+	<key>WKRunsIndependentlyOfCompanionApp</key>
+	<true/>
+
+	<!-- The workout session keeps running while the wrist is down; without
+	     this the app is suspended between sets. -->
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>workout-processing</string>
+	</array>
+	<!-- Always-on display shows the set that's up without raising the wrist. -->
+	<key>WKSupportsAlwaysOnDisplay</key>
+	<true/>
+
+	<key>NSHealthShareUsageDescription</key>
+	<string>GymTrack reads your heart rate and the energy you burn while you train, so a session shows what it actually cost you.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>GymTrack saves your session to Health as a strength training workout, so it counts towards your rings.</string>
+</dict>
+</plist>

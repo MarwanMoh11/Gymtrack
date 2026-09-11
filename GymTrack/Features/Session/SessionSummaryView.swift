@@ -5,6 +5,7 @@ import SwiftData
 struct SessionSummaryView: View {
     let session: WorkoutSession
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var allSessions: [WorkoutSession]
 
     /// One row per exercise — a session where you worked up to a top set would
@@ -23,6 +24,7 @@ struct SessionSummaryView: View {
                 VStack(spacing: 16) {
                     headline
                     statGrid
+                    HealthMetricsCard(session: session)
                     if !prs.isEmpty { prSection }
                     breakdown
                 }
@@ -30,6 +32,13 @@ struct SessionSummaryView: View {
             }
             .scrollIndicators(.hidden)
             .gtScreenBackground()
+            // Health can take a moment to receive the watch's samples, so the
+            // numbers are asked for again when the summary opens rather than
+            // only at the instant the session ended.
+            .task {
+                await HealthKitService.shared.backfillVitals(for: session)
+                try? context.save()
+            }
             .navigationTitle("Session complete")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -122,6 +131,53 @@ struct SessionSummaryView: View {
     }
 }
 
+// MARK: - What the watch and Health recorded
+
+/// Heart rate, energy and where the session ended up. Draws nothing at all
+/// when there's none of it — an empty card would just be a reminder that the
+/// watch wasn't worn.
+struct HealthMetricsCard: View {
+    let session: WorkoutSession
+
+    var body: some View {
+        if session.hasHealthMetrics || session.healthWorkoutID != nil {
+            VStack(spacing: 8) {
+                SectionHeader(session.wasWatchDriven ? "From your watch" : "From Health")
+
+                if session.hasHealthMetrics {
+                    HStack(spacing: 10) {
+                        if let average = session.averageHeartRate {
+                            StatTile(value: "\(Int(average.rounded()))", label: "Avg BPM",
+                                     caption: "heart rate", tint: Theme.negative)
+                        }
+                        if let max = session.maxHeartRate {
+                            StatTile(value: "\(Int(max.rounded()))", label: "Peak BPM",
+                                     caption: "heart rate", tint: Theme.warning)
+                        }
+                        if let energy = session.activeEnergyKcal, energy >= 1 {
+                            StatTile(value: "\(Int(energy.rounded()))", label: "Active kcal",
+                                     caption: "energy", tint: Theme.accent)
+                        }
+                    }
+                }
+
+                if session.healthWorkoutID != nil {
+                    HStack(spacing: 8) {
+                        Image(systemName: "heart.text.square.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.negative)
+                        Text("Saved to Health as a strength workout")
+                            .font(Theme.rounded(12, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                    }
+                    .gtCard(padding: 12)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Session detail (read-only history)
 
 struct SessionDetailView: View {
@@ -139,6 +195,8 @@ struct SessionDetailView: View {
                     StatTile(value: AppSettings.shared.weight(session.totalVolumeKg, showUnit: false),
                              label: "Volume \(AppSettings.shared.weightUnit.short)")
                 }
+
+                HealthMetricsCard(session: session)
 
                 ForEach(session.exerciseGroups) { group in
                     VStack(alignment: .leading, spacing: 8) {
@@ -178,6 +236,11 @@ struct SessionDetailView: View {
         }
         .confirmationDialog("Delete this session?", isPresented: $showingDeleteConfirm, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
+                // Health keeps its own copy; removing the session here should
+                // remove that too rather than leaving an orphan in Fitness.
+                if let workoutID = session.healthWorkoutID {
+                    Task { await HealthKitService.shared.deleteWorkout(id: workoutID) }
+                }
                 context.delete(session)
                 try? context.save()
                 dismiss()
