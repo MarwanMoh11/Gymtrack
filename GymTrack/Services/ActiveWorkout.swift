@@ -484,7 +484,8 @@ final class ActiveWorkout {
             restEndsAt: restTimer.endsAt,
             restStartedAt: restTimer.startedAt,
             volumeLabel: "\(unit.fromKg(volumeKg).compactVolume) \(unit.short)",
-            elapsedLabel: session.duration.durationString
+            elapsedLabel: session.duration.durationString,
+            elapsedShort: session.duration.shortDurationString
         )
     }
 

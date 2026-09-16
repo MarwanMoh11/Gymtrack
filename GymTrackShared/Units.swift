@@ -48,6 +48,14 @@ extension TimeInterval {
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
+    /// "1:12" / "48m" — the same length trimmed to four characters, for the
+    /// Dynamic Island's compact pill, which grows with every glyph it draws.
+    var shortDurationString: String {
+        let total = Int(self.rounded())
+        let h = total / 3600, m = (total % 3600) / 60
+        return h > 0 ? String(format: "%d:%02d", h, m) : "\(m)m"
+    }
+
     /// "1h 12m" / "48m" — for summaries rather than live counters.
     var durationString: String {
         let total = Int(self.rounded())

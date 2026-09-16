@@ -42,6 +42,10 @@ enum Theme {
 
     /// Small all-caps label used for section eyebrows.
     static let eyebrow = Font.system(size: 11, weight: .bold, design: .rounded)
+
+    /// The eyebrow shrunk for the Dynamic Island, where a caption has to sit
+    /// under a number without widening the region it lives in.
+    static let microCaps = Font.system(size: 8, weight: .bold, design: .rounded)
 }
 
 extension View {

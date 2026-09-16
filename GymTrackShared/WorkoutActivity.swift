@@ -45,6 +45,11 @@ struct WorkoutActivity: ActivityAttributes {
         /// the one that matters.
         var elapsedLabel: String
 
+        /// The same length at four characters — "48m", "1:12". The compact
+        /// Dynamic Island widens with every glyph, so it draws this one and
+        /// the Lock Screen keeps the readable form.
+        var elapsedShort: String
+
         // MARK: Derived
 
         var isResting: Bool { restEndsAt != nil }

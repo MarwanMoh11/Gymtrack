@@ -19,43 +19,41 @@ struct WorkoutLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    IslandRing(context: context)
-                        .padding(.leading, 2)
+                    SetBadge(context: context)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text(context.isResting ? "REST" : "ELAPSED")
-                            .font(Theme.eyebrow)
-                            .tracking(1.0)
-                            .foregroundStyle(Theme.textTertiary)
-                        HeadlineClock(context: context, size: 20)
-                    }
-                    .padding(.trailing, 4)
+                    ClockBadge(context: context)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(headline(context))
-                                .font(Theme.rounded(16, weight: .bold))
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(headline(context))
+                            .font(Theme.rounded(15, weight: .bold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(statusLine(context))
                                 .font(Theme.rounded(12, weight: .medium))
                                 .foregroundStyle(Theme.textSecondary)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            Spacer(minLength: 4)
+                            Text(context.state.volumeLabel)
+                                .font(Theme.number(12, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
                         SetProgressBar(state: context.state)
+                            .padding(.top, 2)
                     }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 4)
+                    .padding(.top, 7)
                 }
             } compactLeading: {
                 CompactRing(context: context)
             } compactTrailing: {
-                HeadlineClock(context: context, size: 13)
+                CompactClock(context: context)
             } minimal: {
                 CompactRing(context: context)
             }
@@ -284,31 +282,72 @@ private struct CompactRing: View {
     }
 }
 
-private struct IslandRing: View {
+/// Expanded leading: session progress as an arc, with the same count spelled
+/// out beside it. Deliberately narrow — the leading region sits against the
+/// camera, and anything wider than the ring plus a fraction gets squeezed.
+private struct SetBadge: View {
     let context: ActivityViewContext<WorkoutActivity>
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             ZStack {
                 Circle()
-                    .stroke(Color.white.opacity(0.15), lineWidth: 4)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 3)
                 Circle()
                     .trim(from: 0, to: max(0.02, context.state.progress))
-                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
-            .frame(width: 30, height: 30)
+            .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("\(context.state.completedSets)/\(context.state.totalSets)")
-                    .font(Theme.number(14, weight: .bold))
+                    .font(Theme.number(13, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
                 Text("SETS")
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .tracking(0.8)
+                    .font(Theme.microCaps)
+                    .tracking(0.6)
                     .foregroundStyle(Theme.textTertiary)
             }
+            .lineLimit(1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Expanded trailing: whichever clock matters right now, labelled so that
+/// "1:12" can't be read as the other one.
+private struct ClockBadge: View {
+    let context: ActivityViewContext<WorkoutActivity>
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(label)
+                .font(Theme.microCaps)
+                .tracking(0.6)
+                .foregroundStyle(Theme.textTertiary)
+            HeadlineClock(context: context, size: 17)
+        }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var label: String {
+        if context.isRestOver { return "GO TIME" }
+        return context.isResting ? "REST" : "ELAPSED"
+    }
+}
+
+/// Compact trailing. The width is fixed on purpose: left to size itself, the
+/// pill grew and shrank every time the clock rolled onto a longer string, and
+/// a live `Text(timerInterval:)` reserves room for the widest reading it might
+/// ever show.
+private struct CompactClock: View {
+    let context: ActivityViewContext<WorkoutActivity>
+
+    var body: some View {
+        HeadlineClock(context: context, size: 13, short: true)
+            .frame(width: 34, alignment: .trailing)
     }
 }
 
@@ -322,6 +361,9 @@ private struct IslandRing: View {
 private struct HeadlineClock: View {
     let context: ActivityViewContext<WorkoutActivity>
     let size: CGFloat
+    /// Draw the session length as "1:12" rather than "1h 12m", for the compact
+    /// pill where those two extra glyphs are the difference.
+    var short = false
 
     var body: some View {
         Group {
@@ -332,11 +374,13 @@ private struct HeadlineClock: View {
                 RestClock(state: context.state)
                     .font(Theme.number(size, weight: .bold))
             } else {
-                Text(context.state.elapsedLabel)
+                Text(short ? context.state.elapsedShort : context.state.elapsedLabel)
                     .font(Theme.number(size, weight: .bold))
             }
         }
         .foregroundStyle(Theme.accent)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
     }
 }
 
