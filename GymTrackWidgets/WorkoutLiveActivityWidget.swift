@@ -15,7 +15,7 @@ struct WorkoutLiveActivityWidget: Widget {
                 // the Dynamic Island below doesn't carry over.
                 .widgetURL(WorkoutActivity.deepLink)
                 .activityBackgroundTint(Theme.background)
-                .activitySystemActionForegroundColor(Theme.accent)
+                .activitySystemActionForegroundColor(context.phase.tint)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -25,30 +25,7 @@ struct WorkoutLiveActivityWidget: Widget {
                     ClockBadge(context: context)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(headline(context))
-                            .font(Theme.rounded(15, weight: .bold))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(statusLine(context))
-                                .font(Theme.rounded(12, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                            Spacer(minLength: 4)
-                            Text(context.state.volumeLabel)
-                                .font(Theme.number(12, weight: .semibold))
-                                .foregroundStyle(Theme.textTertiary)
-                                .lineLimit(1)
-                        }
-
-                        SetProgressBar(state: context.state)
-                            .padding(.top, 2)
-                    }
-                    .padding(.top, 7)
+                    IslandFooter(context: context)
                 }
             } compactLeading: {
                 CompactRing(context: context)
@@ -58,23 +35,92 @@ struct WorkoutLiveActivityWidget: Widget {
                 CompactRing(context: context)
             }
             .widgetURL(WorkoutActivity.deepLink)
-            .keylineTint(Theme.accent)
+            .keylineTint(context.phase.tint)
         }
-    }
-
-    private func headline(_ context: ActivityViewContext<WorkoutActivity>) -> String {
-        if context.isRestOver { return "Rest done" }
-        if context.isResting { return "Resting" }
-        return context.state.currentExercise
-    }
-
-    private func statusLine(_ context: ActivityViewContext<WorkoutActivity>) -> String {
-        if context.isRestOver {
-            return "\(context.state.currentExercise) · set \(context.state.currentSetNumber) is up"
-        }
-        return context.state.statusLine
     }
 }
+
+// MARK: - Phase
+
+/// The four things a running session can be doing, and the colour each one
+/// owns.
+///
+/// Every tinted surface on the card — glyph tile, ring, bar, keyline, the bloom
+/// behind the whole thing — pulls from here, so the presentation reads as one
+/// object rather than a stack of separately coloured parts, and the state is
+/// legible from across the room before any of the words are.
+enum SessionPhase {
+    /// Between sets, counting down.
+    case resting
+    /// The rest ran out while the card was asleep.
+    case restOver
+    /// Under the bar, with sets still to log.
+    case working
+    /// Every set is in; all that's left is to end the session.
+    case done
+
+    /// The near end of every gradient, and the colour of anything drawn solid.
+    var tint: Color {
+        switch self {
+        case .resting: return Theme.warning
+        case .restOver, .working: return Theme.accent
+        case .done: return Theme.positive
+        }
+    }
+
+    /// The far end. Near enough in hue to read as shading rather than as a
+    /// second colour, far enough that a flat fill picks up some depth.
+    var trail: Color {
+        switch self {
+        case .resting: return Color(red: 1.0, green: 0.45, blue: 0.22)
+        case .restOver, .working: return Color(red: 0.33, green: 0.93, blue: 0.44)
+        case .done: return Color(red: 0.20, green: 0.80, blue: 0.87)
+        }
+    }
+
+    var glyph: String {
+        switch self {
+        case .resting: return "hourglass"
+        case .restOver: return "bolt.fill"
+        case .working: return "dumbbell.fill"
+        case .done: return "checkmark"
+        }
+    }
+
+    var eyebrow: String {
+        switch self {
+        case .resting: return "RESTING"
+        case .restOver: return "REST DONE"
+        case .working: return "ON DECK"
+        case .done: return "ALL SETS LOGGED"
+        }
+    }
+
+    /// Diagonal — for fills with area: the glyph tile, the call-to-action pill,
+    /// a number big enough to carry a gradient without muddying.
+    var gradient: LinearGradient {
+        LinearGradient(colors: [tint, trail], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    /// Left to right, for the one thing on the card that reads as travel.
+    var bar: LinearGradient {
+        LinearGradient(colors: [trail, tint], startPoint: .leading, endPoint: .trailing)
+    }
+
+    /// Sweeps with the ring from twelve o'clock, so the leading edge of the arc
+    /// is also its brightest point.
+    var arc: AngularGradient {
+        AngularGradient(colors: [trail, tint, tint], center: .center, angle: .degrees(-90))
+    }
+
+    /// How hard a filled shape burns into the ground behind it.
+    var glow: Color { tint.opacity(0.45) }
+}
+
+/// White with a little fall-off. A headline drawn in it has some weight to it
+/// instead of sitting flat on the card.
+private let ink = LinearGradient(colors: [.white, Color.white.opacity(0.72)],
+                                 startPoint: .top, endPoint: .bottom)
 
 // MARK: - Lock Screen
 
@@ -82,36 +128,39 @@ private struct LockScreenCard: View {
     let context: ActivityViewContext<WorkoutActivity>
 
     private var state: WorkoutActivity.ContentState { context.state }
+    private var phase: SessionPhase { context.phase }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 9) {
             header
             hero
             footer
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 11)
+        .containerBackground(for: .widget) {
+            CardBackground(phase: phase)
+        }
     }
 
     /// Session name on the left, the session clock on the right — the two
     /// things that stay true no matter what part of the workout you're in.
     private var header: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(Theme.accent)
-                .frame(width: 7, height: 7)
+        HStack(spacing: 8) {
+            StatusDot(phase: phase)
             Text(context.attributes.sessionTitle.uppercased())
                 .font(Theme.eyebrow)
-                .tracking(1.2)
+                .tracking(1.3)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Image(systemName: "stopwatch")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Theme.textTertiary)
-            Text(state.elapsedLabel)
-                .font(Theme.number(13, weight: .semibold))
-                .foregroundStyle(Theme.textSecondary)
+            Chip {
+                Image(systemName: "stopwatch")
+                    .font(.system(size: 9, weight: .bold))
+                Text(state.elapsedLabel)
+                    .font(Theme.number(12, weight: .semibold))
+            }
         }
     }
 
@@ -119,135 +168,306 @@ private struct LockScreenCard: View {
     /// between sets, the exercise you're on while you're under the bar.
     @ViewBuilder
     private var hero: some View {
-        if context.isRestOver {
-            heroBlock(eyebrow: "REST DONE", eyebrowTint: Theme.accent) {
-                Text(state.currentExercise)
-                    .font(Theme.rounded(22, weight: .heavy))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+        switch phase {
+        case .restOver:
+            // The prescription sits under the name rather than beside it: gym
+            // names run long ("Incline Dumbbell Press"), and a second column
+            // was squeezing them into an ellipsis.
+            HeroRow(phase: phase, alignment: .top) {
+                ExerciseHeadline(state: state, phase: phase)
             } trailing: {
-                Text("Set \(state.currentSetNumber)")
-                    .font(Theme.rounded(13, weight: .bold))
-                    .foregroundStyle(Theme.accent)
+                // The one moment the card is asking for something back, so the
+                // ask is the brightest thing on it.
+                Text("SET \(state.currentSetNumber)")
+                    .font(Theme.rounded(12, weight: .heavy))
+                    .tracking(0.3)
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(phase.gradient))
+                    .shadow(color: phase.glow, radius: 8, y: 1)
             }
-        } else if state.isResting {
-            heroBlock(eyebrow: "RESTING", eyebrowTint: Theme.accent) {
+        case .resting:
+            HeroRow(phase: phase) {
                 RestClock(state: state)
-                    .font(Theme.number(34, weight: .bold))
-                    .foregroundStyle(Theme.accent)
+                    .font(Theme.number(31, weight: .bold))
+                    .foregroundStyle(phase.tint)
+                    .shadow(color: phase.glow, radius: 9)
             } trailing: {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("NEXT UP")
-                        .font(Theme.eyebrow)
-                        .tracking(1.0)
-                        .foregroundStyle(Theme.textTertiary)
-                    Text(state.currentExercise)
-                        .font(Theme.rounded(14, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Text("Set \(state.currentSetNumber) · \(state.currentTarget)")
-                        .font(Theme.rounded(11, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(1)
-                }
+                UpNext(state: state)
             }
-        } else if state.setsRemaining == 0 {
-            heroBlock(eyebrow: "ALL SETS LOGGED", eyebrowTint: Theme.accent) {
+        case .done:
+            // Nothing on the right: the sets and the volume are both in the
+            // footer already, and repeating either one here just crowds the
+            // one card that has earned some air.
+            HeroRow(phase: phase) {
                 Text("Finish up")
                     .font(Theme.rounded(22, weight: .heavy))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(ink)
             } trailing: {
-                Text(state.volumeLabel)
-                    .font(Theme.number(15, weight: .bold))
-                    .foregroundStyle(Theme.accent)
+                EmptyView()
             }
-        } else {
-            heroBlock(eyebrow: "ON DECK", eyebrowTint: Theme.textTertiary) {
-                Text(state.currentExercise)
-                    .font(Theme.rounded(22, weight: .heavy))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+        case .working:
+            HeroRow(phase: phase, alignment: .top) {
+                ExerciseHeadline(state: state, phase: phase)
             } trailing: {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("SET \(state.currentSetNumber)/\(state.currentSetTotal)")
-                        .font(Theme.eyebrow)
-                        .tracking(1.0)
-                        .foregroundStyle(Theme.textTertiary)
-                    Text(state.currentTarget)
-                        .font(Theme.number(15, weight: .bold))
-                        .foregroundStyle(Theme.accent)
-                        .lineLimit(1)
-                }
-            }
-        }
-    }
-
-    private func heroBlock<Leading: View, Trailing: View>(
-        eyebrow: String,
-        eyebrowTint: Color,
-        @ViewBuilder leading: () -> Leading,
-        @ViewBuilder trailing: () -> Trailing
-    ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(eyebrow)
+                Text("SET \(state.currentSetNumber)/\(state.currentSetTotal)")
                     .font(Theme.eyebrow)
-                    .tracking(1.2)
-                    .foregroundStyle(eyebrowTint)
-                leading()
+                    .tracking(0.9)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
             }
-            Spacer(minLength: 8)
-            trailing()
         }
     }
 
     private var footer: some View {
-        VStack(spacing: 6) {
-            SetProgressBar(state: state)
+        VStack(spacing: 7) {
+            SetProgressBar(state: state, phase: phase)
             HStack(spacing: 6) {
-                Text("\(state.completedSets)/\(state.totalSets) sets")
-                    .font(Theme.number(11, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                Text("·")
-                    .foregroundStyle(Theme.textTertiary)
-                Text(state.volumeLabel)
-                    .font(Theme.number(11, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
+                Chip {
+                    Text("\(state.completedSets)/\(state.totalSets) sets")
+                        .font(Theme.number(11, weight: .semibold))
+                }
+                Chip {
+                    Text(state.volumeLabel)
+                        .font(Theme.number(11, weight: .semibold))
+                }
                 Spacer(minLength: 4)
-                Text("Tap to log")
-                    .font(Theme.rounded(11, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
+                HStack(spacing: 3) {
+                    Text(phase == .done ? "Tap to finish" : "Tap to log")
+                        .font(Theme.rounded(11, weight: .bold))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .black))
+                }
+                .foregroundStyle(phase.gradient)
             }
+            .lineLimit(1)
         }
+    }
+}
+
+/// The card's ground: near-black, with the phase colour bleeding in behind the
+/// glyph tile and cooling out through the opposite corner. A Live Activity is
+/// laid over whatever wallpaper the phone has, so the card has to carry its own
+/// depth rather than borrow any.
+private struct CardBackground: View {
+    let phase: SessionPhase
+
+    var body: some View {
+        ZStack {
+            Theme.background
+            RadialGradient(colors: [phase.tint.opacity(0.20), .clear],
+                           center: UnitPoint(x: 0.02, y: -0.10),
+                           startRadius: 0, endRadius: 210)
+            RadialGradient(colors: [phase.trail.opacity(0.13), .clear],
+                           center: UnitPoint(x: 1.05, y: 1.15),
+                           startRadius: 0, endRadius: 185)
+            LinearGradient(colors: [Color.white.opacity(0.06), .clear],
+                           startPoint: .top, endPoint: .center)
+        }
+    }
+}
+
+/// Eyebrow and headline under a tinted glyph, with whatever the phase wants to
+/// say on the right.
+private struct HeroRow<Leading: View, Trailing: View>: View {
+    let phase: SessionPhase
+    /// `.top` when the left column runs to three lines, so the trailing label
+    /// stays level with the eyebrow instead of drifting to the middle of it.
+    var alignment: VerticalAlignment = .center
+    @ViewBuilder var leading: Leading
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(alignment: alignment, spacing: 11) {
+            GlyphTile(phase: phase)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(phase.eyebrow)
+                    .font(Theme.eyebrow)
+                    .tracking(1.2)
+                    .foregroundStyle(phase.tint.opacity(0.9))
+                    .lineLimit(1)
+                leading
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+    }
+}
+
+/// The exercise you're on, with what's prescribed for the set underneath it.
+private struct ExerciseHeadline: View {
+    let state: WorkoutActivity.ContentState
+    let phase: SessionPhase
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(state.currentExercise)
+                .font(Theme.rounded(21, weight: .heavy))
+                .foregroundStyle(ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(state.currentTarget)
+                .font(Theme.number(12, weight: .semibold))
+                .foregroundStyle(phase.gradient)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+}
+
+/// The square of colour that answers "which of the four is this?" before the
+/// eyebrow beside it has been read.
+private struct GlyphTile: View {
+    let phase: SessionPhase
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(LinearGradient(colors: [phase.tint.opacity(0.28), phase.trail.opacity(0.08)],
+                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(LinearGradient(colors: [phase.tint.opacity(0.55),
+                                                          phase.tint.opacity(0.08)],
+                                                 startPoint: .topLeading,
+                                                 endPoint: .bottomTrailing),
+                                  lineWidth: 1)
+            )
+            .overlay(
+                Image(systemName: phase.glyph)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(phase.gradient)
+            )
+            .frame(width: 34, height: 34)
+            .shadow(color: phase.tint.opacity(0.22), radius: 7, y: 2)
+    }
+}
+
+/// Where the rest countdown is pointing.
+private struct UpNext: View {
+    let state: WorkoutActivity.ContentState
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text("NEXT UP")
+                .font(Theme.eyebrow)
+                .tracking(1.0)
+                .foregroundStyle(Theme.textTertiary)
+            Text(state.currentExercise)
+                .font(Theme.rounded(14, weight: .bold))
+                .foregroundStyle(ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text("Set \(state.currentSetNumber) · \(state.currentTarget)")
+                .font(Theme.rounded(11, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+}
+
+/// Translucent capsule for the small readouts, so the numbers have an edge to
+/// sit against instead of floating on whatever is behind the card.
+private struct Chip<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 4) { content }
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.07))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.5))
+            )
+    }
+}
+
+/// The live dot beside the session name. Haloed rather than plain, which is
+/// the difference between "a session is running" and "there is a dot here".
+private struct StatusDot: View {
+    let phase: SessionPhase
+
+    var body: some View {
+        Circle()
+            .fill(phase.gradient)
+            .frame(width: 7, height: 7)
+            // Sized past its own bounds on purpose: the halo draws outside the
+            // dot without taking any width off the title next to it.
+            .overlay(
+                Circle()
+                    .strokeBorder(phase.tint.opacity(0.22), lineWidth: 3)
+                    .frame(width: 13, height: 13)
+            )
+            .shadow(color: phase.glow, radius: 5)
     }
 }
 
 // MARK: - Pieces
 
 /// Sets completed across the whole session.
+///
+/// Drawn as one tick per set while the count is small enough to read — a set is
+/// a discrete thing, and a discrete bar shows you the one you're standing in.
+/// Longer sessions fall back to a continuous bar rather than a picket fence.
 private struct SetProgressBar: View {
     let state: WorkoutActivity.ContentState
+    let phase: SessionPhase
+    var height: CGFloat = 6
+    var segmented = true
 
     var body: some View {
+        Group {
+            if segmented, state.totalSets > 1, state.totalSets <= 20 {
+                segments
+            } else {
+                continuous
+            }
+        }
+        .frame(height: height)
+    }
+
+    /// One gradient run across the whole row, masked to the ticks that are
+    /// filled, so the colour travels with the session instead of restarting in
+    /// every segment.
+    private var segments: some View {
+        ZStack {
+            ticks { _ in true }
+                .foregroundStyle(Color.white.opacity(0.12))
+            phase.bar
+                .mask(ticks { $0 < state.completedSets })
+                .shadow(color: phase.glow, radius: 4, y: 1)
+        }
+    }
+
+    private func ticks(_ isFilled: @escaping (Int) -> Bool) -> some View {
+        HStack(spacing: 3) {
+            ForEach(0..<max(1, state.totalSets), id: \.self) { index in
+                Capsule().opacity(isFilled(index) ? 1 : 0)
+            }
+        }
+    }
+
+    private var continuous: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.white.opacity(0.12))
                 Capsule()
-                    .fill(Theme.accent)
+                    .fill(phase.bar)
                     .frame(width: filledWidth(in: geo.size.width))
+                    .shadow(color: phase.glow, radius: 4, y: 1)
             }
         }
-        .frame(height: 4)
     }
 
     private func filledWidth(in total: CGFloat) -> CGFloat {
         guard total.isFinite, total > 0 else { return 0 }
         let fraction = state.progress.isFinite ? min(1, max(0, state.progress)) : 0
         guard fraction > 0 else { return 0 }
-        return min(total, max(4, total * fraction))
+        return min(total, max(height, total * fraction))
     }
 }
 
@@ -258,27 +478,27 @@ private struct CompactRing: View {
     let context: ActivityViewContext<WorkoutActivity>
 
     var body: some View {
+        let phase = context.phase
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.18), lineWidth: 2.5)
+                .fill(RadialGradient(colors: [phase.tint.opacity(0.20), .clear],
+                                     center: .center, startRadius: 0, endRadius: 12))
+            Circle()
+                .stroke(Color.white.opacity(0.16), lineWidth: 2.5)
             Circle()
                 .trim(from: 0, to: max(0.02, trim))
-                .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .stroke(phase.arc, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Image(systemName: glyph)
+                .shadow(color: phase.glow, radius: 2.5)
+            Image(systemName: phase.glyph)
                 .font(.system(size: 8, weight: .black))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(phase.tint)
         }
         .frame(width: 18, height: 18)
     }
 
     private var trim: Double {
         context.isResting ? 1 - context.state.restProgress : context.state.progress
-    }
-
-    private var glyph: String {
-        if context.isRestOver { return "bolt.fill" }
-        return context.isResting ? "hourglass" : "dumbbell.fill"
     }
 }
 
@@ -289,21 +509,23 @@ private struct SetBadge: View {
     let context: ActivityViewContext<WorkoutActivity>
 
     var body: some View {
+        let phase = context.phase
         HStack(spacing: 7) {
             ZStack {
                 Circle()
-                    .stroke(Color.white.opacity(0.15), lineWidth: 3)
+                    .stroke(Color.white.opacity(0.14), lineWidth: 3)
                 Circle()
                     .trim(from: 0, to: max(0.02, context.state.progress))
-                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .stroke(phase.arc, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(-90))
+                    .shadow(color: phase.glow, radius: 3)
             }
             .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("\(context.state.completedSets)/\(context.state.totalSets)")
                     .font(Theme.number(13, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(ink)
                 Text("SETS")
                     .font(Theme.microCaps)
                     .tracking(0.6)
@@ -338,6 +560,55 @@ private struct ClockBadge: View {
     }
 }
 
+/// Expanded bottom: the sentence version of the two badges above it, over the
+/// same set bar the Lock Screen card carries.
+private struct IslandFooter: View {
+    let context: ActivityViewContext<WorkoutActivity>
+
+    var body: some View {
+        let phase = context.phase
+        VStack(alignment: .leading, spacing: 5) {
+            Text(headline)
+                .font(Theme.rounded(15, weight: .bold))
+                .foregroundStyle(phase == .restOver ? AnyShapeStyle(phase.gradient) : AnyShapeStyle(ink))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(statusLine)
+                    .font(Theme.rounded(12, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 4)
+                Text(context.state.volumeLabel)
+                    .font(Theme.number(12, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+            }
+
+            // Continuous here: the island is half the Lock Screen's width, and
+            // eighteen ticks across it would be lint rather than a bar.
+            SetProgressBar(state: context.state, phase: phase, height: 5, segmented: false)
+                .padding(.top, 2)
+        }
+        .padding(.top, 7)
+    }
+
+    private var headline: String {
+        if context.isRestOver { return "Rest done" }
+        if context.isResting { return "Resting" }
+        return context.state.currentExercise
+    }
+
+    private var statusLine: String {
+        if context.isRestOver {
+            return "\(context.state.currentExercise) · set \(context.state.currentSetNumber) is up"
+        }
+        return context.state.statusLine
+    }
+}
+
 /// Compact trailing. The width is fixed on purpose: left to size itself, the
 /// pill grew and shrank every time the clock rolled onto a longer string, and
 /// a live `Text(timerInterval:)` reserves room for the widest reading it might
@@ -358,6 +629,10 @@ private struct CompactClock: View {
 /// its seconds rendered as "--" in a Live Activity, and a session clock is
 /// worth reading to the minute anyway — the app restamps `elapsedLabel` on
 /// every set, rest and foreground.
+///
+/// Drawn in flat tint rather than the phase gradient: the system substitutes
+/// its own glyphs into a running timer, and a solid colour is the one fill it
+/// can't get halfway through. The glow does the lifting instead.
 private struct HeadlineClock: View {
     let context: ActivityViewContext<WorkoutActivity>
     let size: CGFloat
@@ -366,6 +641,7 @@ private struct HeadlineClock: View {
     var short = false
 
     var body: some View {
+        let phase = context.phase
         Group {
             if context.isRestOver {
                 Text("GO")
@@ -378,7 +654,8 @@ private struct HeadlineClock: View {
                     .font(Theme.number(size, weight: .bold))
             }
         }
-        .foregroundStyle(Theme.accent)
+        .foregroundStyle(phase.tint)
+        .shadow(color: phase.tint.opacity(0.35), radius: 3.5)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
     }
@@ -416,4 +693,13 @@ extension ActivityViewContext where Attributes == WorkoutActivity {
     /// flips `isStale` for us, which is how the card announces the rest is over
     /// without the app waking up to push anything.
     var isRestOver: Bool { state.isResting && isStale }
+
+    /// Which of the four the card is drawing. Rest wins over a finished set
+    /// count: you are still resting even if that was the last set.
+    var phase: SessionPhase {
+        if isRestOver { return .restOver }
+        if state.isResting { return .resting }
+        if state.totalSets > 0, state.setsRemaining == 0 { return .done }
+        return .working
+    }
 }
