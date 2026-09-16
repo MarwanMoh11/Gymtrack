@@ -93,7 +93,8 @@ struct LibraryView: View {
                             .font(Theme.rounded(12, weight: .semibold))
                             .foregroundStyle(Theme.textTertiary)
                             .padding(.horizontal, 11).padding(.vertical, 8)
-                            .background(Theme.surface, in: Capsule())
+                            .background(Theme.panel, in: Capsule())
+                            .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
                     }
                     .buttonStyle(.plain)
                 }
@@ -111,9 +112,15 @@ struct LibraryView: View {
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .bold))
         }
-        .foregroundStyle(active ? .black : Theme.textSecondary)
+        .foregroundStyle(active ? AnyShapeStyle(Color.black) : AnyShapeStyle(Theme.textSecondary))
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(active ? Theme.accent : Theme.surface, in: Capsule())
+        .background {
+            Capsule().fill(active ? AnyShapeStyle(SessionPhase.working.gradient) : AnyShapeStyle(Theme.panel))
+                .shadow(color: active ? SessionPhase.working.glow : .clear, radius: 7, y: 2)
+        }
+        .overlay {
+            Capsule().strokeBorder(active ? AnyShapeStyle(Color.clear) : AnyShapeStyle(Theme.edge), lineWidth: 1)
+        }
     }
 }
 
@@ -124,16 +131,12 @@ struct ExerciseRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: exercise.symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 36, height: 36)
-                .background(Theme.accentDim, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            GlyphTile(symbol: exercise.symbol, size: 36)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(exercise.name)
                     .font(Theme.rounded(15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Text(exercise.muscleSummary)
                     .font(Theme.rounded(12, weight: .medium))

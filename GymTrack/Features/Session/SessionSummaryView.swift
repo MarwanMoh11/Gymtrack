@@ -52,21 +52,35 @@ struct SessionSummaryView: View {
         .presentationBackground(Theme.background)
     }
 
+    /// The one moment in the app worth a flourish: the session's own colour
+    /// blooming out behind a filled medallion, the way the Live Activity closes
+    /// out.
     private var headline: some View {
         VStack(spacing: 10) {
             Image(systemName: "checkmark")
                 .font(.system(size: 30, weight: .black))
                 .foregroundStyle(.black)
                 .frame(width: 70, height: 70)
-                .background(Theme.accent, in: Circle())
+                .background {
+                    Circle().fill(SessionPhase.done.gradient)
+                    Circle().fill(LinearGradient(colors: [Color.white.opacity(0.28), .clear],
+                                                 startPoint: .top, endPoint: .center))
+                }
+                .shadow(color: SessionPhase.done.glow, radius: 22, y: 8)
+                .padding(.bottom, 2)
             Text(session.title)
                 .font(Theme.rounded(24, weight: .heavy))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.ink)
             Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
                 .font(Theme.rounded(13, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .background {
+            SessionPhase.done.bloom(strength: 1.1)
+                .mask(RadialGradient(colors: [.white, .clear], center: .center, startRadius: 0, endRadius: 200))
+        }
     }
 
     private var statGrid: some View {
@@ -83,15 +97,11 @@ struct SessionSummaryView: View {
             SectionHeader("Personal records")
             ForEach(prs) { set in
                 HStack(spacing: 10) {
-                    Image(systemName: "trophy.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.black)
-                        .frame(width: 30, height: 30)
-                        .background(Theme.accent, in: Circle())
+                    GlyphTile(symbol: "trophy.fill", tint: Theme.accent, size: 30, solid: true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(set.exerciseName)
                             .font(Theme.rounded(14, weight: .bold))
-                            .foregroundStyle(Theme.textPrimary)
+                            .foregroundStyle(Theme.ink)
                         Text(set.tracking == .duration
                              ? "\(set.seconds)s"
                              : "\(set.weightLabel) × \(set.reps)")
@@ -100,7 +110,7 @@ struct SessionSummaryView: View {
                     }
                     Spacer()
                 }
-                .gtCard(padding: 12, background: Theme.accentDim.opacity(0.6))
+                .gtCard(padding: 12, phase: .working)
             }
         }
     }
@@ -112,7 +122,7 @@ struct SessionSummaryView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(group.name)
                         .font(Theme.rounded(14, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(Theme.ink)
                     FlowRow(spacing: 6) {
                         ForEach(group.sets.filter(\.isCompleted)) { set in
                             Text(set.tracking == .duration
@@ -121,7 +131,8 @@ struct SessionSummaryView: View {
                                 .font(Theme.number(12, weight: .semibold))
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(Theme.surfaceRaised, in: Capsule())
+                                .background(Theme.panel, in: Capsule())
+                                .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
                         }
                     }
                 }
@@ -165,7 +176,7 @@ struct HealthMetricsCard: View {
                     HStack(spacing: 8) {
                         Image(systemName: "heart.text.square.fill")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.negative)
+                            .foregroundStyle(Theme.negative.wash)
                         Text("Saved to Health as a strength workout")
                             .font(Theme.rounded(12, weight: .medium))
                             .foregroundStyle(Theme.textSecondary)
@@ -202,7 +213,7 @@ struct SessionDetailView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(group.name)
                             .font(Theme.rounded(15, weight: .bold))
-                            .foregroundStyle(Theme.textPrimary)
+                            .foregroundStyle(Theme.ink)
                         ForEach(Array(group.sets.filter(\.isCompleted).enumerated()), id: \.element.id) { index, set in
                             HStack {
                                 Text("Set \(index + 1)")

@@ -37,8 +37,11 @@ struct OnboardingView: View {
         HStack(spacing: 6) {
             ForEach(0..<3, id: \.self) { index in
                 Capsule()
-                    .fill(index == step ? Theme.accent : Color.white.opacity(0.15))
+                    .fill(index == step
+                          ? AnyShapeStyle(SessionPhase.working.bar)
+                          : AnyShapeStyle(Color.white.opacity(0.15)))
                     .frame(width: index == step ? 22 : 7, height: 7)
+                    .shadow(color: index == step ? SessionPhase.working.glow : .clear, radius: 5)
                     .animation(.spring(response: 0.3, dampingFraction: 0.8), value: step)
             }
         }
@@ -49,16 +52,12 @@ struct OnboardingView: View {
     private var welcomeStep: some View {
         VStack(spacing: 22) {
             Spacer()
-            Image(systemName: "dumbbell.fill")
-                .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(.black)
-                .frame(width: 96, height: 96)
-                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            GlyphTile(symbol: "dumbbell.fill", size: 96, solid: true)
 
             VStack(spacing: 8) {
                 Text("GymTrack")
                     .font(Theme.rounded(34, weight: .heavy))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                 Text("Log every set. Watch the numbers move.")
                     .font(Theme.rounded(16, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
@@ -74,8 +73,8 @@ struct OnboardingView: View {
                     .font(Theme.rounded(19, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .padding(14)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.edge, lineWidth: 1))
                     .submitLabel(.next)
                     .autocorrectionDisabled()
             }
@@ -113,7 +112,7 @@ struct OnboardingView: View {
                                 .font(.system(size: 22))
                                 .foregroundStyle(unit == option ? Theme.accent : Theme.textTertiary)
                         }
-                        .gtCard(padding: 18, background: unit == option ? Theme.surfaceRaised : Theme.surface)
+                        .gtCard(padding: 18, selected: unit == option)
                     }
                     .buttonStyle(.plain)
                 }
@@ -152,17 +151,12 @@ struct OnboardingView: View {
     private func templateRow(_ template: PlanTemplate) -> some View {
         let isSelected = selectedTemplate == template.id
         return HStack(spacing: 14) {
-            Image(systemName: template.symbol)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(isSelected ? .black : Theme.accent)
-                .frame(width: 44, height: 44)
-                .background(isSelected ? Theme.accent : Theme.accentDim,
-                            in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            GlyphTile(symbol: template.symbol, size: 44, solid: isSelected)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(template.name)
                     .font(Theme.rounded(16, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                 Text(template.summary)
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
@@ -175,23 +169,15 @@ struct OnboardingView: View {
             }
             Spacer(minLength: 0)
         }
-        .gtCard(padding: 14, background: isSelected ? Theme.surfaceRaised : Theme.surface)
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                .strokeBorder(isSelected ? Theme.accent : .clear, lineWidth: 1.5)
-        )
+        .gtCard(padding: 14, phase: isSelected ? .working : nil, selected: isSelected)
     }
 
     private func stepHeader(icon: String, title: String, subtitle: String) -> some View {
         VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 62, height: 62)
-                .background(Theme.accentDim, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            GlyphTile(symbol: icon, size: 62)
             Text(title)
                 .font(Theme.rounded(26, weight: .heavy))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.ink)
                 .multilineTextAlignment(.center)
             Text(subtitle)
                 .font(Theme.rounded(14, weight: .medium))

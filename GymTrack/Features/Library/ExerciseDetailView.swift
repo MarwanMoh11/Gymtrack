@@ -64,15 +64,11 @@ struct ExerciseDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Image(systemName: exercise.symbol)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.black)
-                    .frame(width: 50, height: 50)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                GlyphTile(symbol: exercise.symbol, size: 50, solid: true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(exercise.name)
                         .font(Theme.rounded(19, weight: .heavy))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(exercise.equipmentLabel)
                         .font(Theme.rounded(12, weight: .medium))
@@ -244,7 +240,8 @@ struct ExerciseDetailView: View {
                                 .font(Theme.number(12, weight: .semibold))
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(Theme.surfaceRaised, in: Capsule())
+                                .background(Theme.panel, in: Capsule())
+                                .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
                         }
                     }
                 }

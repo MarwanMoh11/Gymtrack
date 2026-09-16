@@ -82,15 +82,11 @@ struct DayEditorView: View {
 
     private func itemRow(_ item: PlanItem) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: item.catalog?.symbol ?? "dumbbell.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 32, height: 32)
-                .background(Theme.accentDim, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            GlyphTile(symbol: item.catalog?.symbol ?? "dumbbell.fill", size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
                     .font(Theme.rounded(15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Text(prescription(item))
                     .font(Theme.rounded(12, weight: .medium))

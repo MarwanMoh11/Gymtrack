@@ -24,14 +24,6 @@ extension WatchSessionSnapshot {
     }
 }
 
-extension Color {
-    /// A two-stop wash of one colour, for the tiles that carry a tint of their
-    /// own — heart red, energy amber — rather than the session's.
-    var wash: LinearGradient {
-        LinearGradient(colors: [self, opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-}
-
 // MARK: - Surfaces
 
 extension View {

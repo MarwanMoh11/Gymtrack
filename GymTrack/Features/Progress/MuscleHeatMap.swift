@@ -292,7 +292,7 @@ struct BodySideSwitch: View {
         }
         .padding(2)
         .background(Capsule().fill(Color.white.opacity(0.06)))
-        .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
+        .overlay(Capsule().strokeBorder(Theme.edge, lineWidth: 1))
     }
 }
 

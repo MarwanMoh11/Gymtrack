@@ -392,11 +392,15 @@ struct ProgressDashboardView: View {
                 let scale = LoadScaleBook.shared.scale(for: record.catalogID)
                 HStack(spacing: 10) {
                     ZStack {
-                        Circle().fill(index < 3 ? Theme.accentDim : Color.white.opacity(0.05))
+                        Circle().fill(index < 3
+                                      ? AnyShapeStyle(LinearGradient(colors: [Theme.accent.opacity(0.26), Theme.accent.opacity(0.07)],
+                                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                                      : AnyShapeStyle(Color.white.opacity(0.05)))
+                            .overlay { Circle().strokeBorder(index < 3 ? Theme.accent.opacity(0.32) : .clear, lineWidth: 1) }
                         if index < 3 {
                             Image(systemName: "trophy.fill")
                                 .font(.system(size: 11))
-                                .foregroundStyle(Theme.accent)
+                                .foregroundStyle(Theme.accent.wash)
                         } else {
                             Text("\(index + 1)")
                                 .font(Theme.number(11, weight: .bold))
@@ -726,9 +730,17 @@ struct MuscleDetailPanel: View {
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background {
+            ZStack {
+                Theme.panel
+                LinearGradient(colors: [MuscleHeat.tint(ratio).opacity(0.13), .clear],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(MuscleHeat.tint(ratio).opacity(0.25), lineWidth: 1))
+            .strokeBorder(LinearGradient(colors: [MuscleHeat.tint(ratio).opacity(0.4), Color.white.opacity(0.04)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
     }
 
     /// Counted in calendar days, so a session logged this evening still reads

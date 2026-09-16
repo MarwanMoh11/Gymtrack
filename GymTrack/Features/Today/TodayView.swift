@@ -74,19 +74,25 @@ struct TodayView: View {
                     .foregroundStyle(Theme.accent)
                 Text(greetingText)
                     .font(Theme.rounded(28, weight: .heavy))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
             }
             Spacer()
             if streak.current > 0 {
                 HStack(spacing: 4) {
                     Image(systemName: "flame.fill")
+                        .foregroundStyle(Theme.accent.wash)
                     Text("\(streak.current)")
                         .font(Theme.number(15))
+                        .foregroundStyle(Theme.accent)
                 }
-                .foregroundStyle(Theme.accent)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)
-                .background(Theme.accentDim, in: Capsule())
+                .background {
+                    Capsule().fill(LinearGradient(colors: [Theme.accent.opacity(0.22), Theme.accent.opacity(0.06)],
+                                                  startPoint: .top, endPoint: .bottom))
+                }
+                .overlay { Capsule().strokeBorder(Theme.accent.opacity(0.3), lineWidth: 1) }
+                .shadow(color: Theme.accent.opacity(0.22), radius: 8, y: 2)
             }
         }
         .padding(.top, 4)
@@ -125,19 +131,23 @@ struct TodayView: View {
     /// to say "you're mid-workout" before it says anything else — otherwise a
     /// minimised session looks like no session at all.
     private func inProgressCard(_ workout: ActiveWorkout) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let phase = workout.phase
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Circle().fill(Theme.accent).frame(width: 7, height: 7)
-                        Text("SESSION IN PROGRESS")
+                        Circle()
+                            .fill(phase.tint)
+                            .frame(width: 7, height: 7)
+                            .shadow(color: phase.glow, radius: 4)
+                        Text(phase == .resting ? "RESTING" : "SESSION IN PROGRESS")
                             .font(Theme.eyebrow)
                             .tracking(1.4)
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(phase.tint)
                     }
                     Text(workout.session.title)
                         .font(Theme.rounded(26, weight: .heavy))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(Theme.ink)
                     Text(workout.restTimer.isRunning
                          ? "Resting · then \(workout.currentGroup?.name ?? "your next set")"
                          : sessionStatus(workout))
@@ -150,7 +160,8 @@ struct TodayView: View {
                     VStack(spacing: 2) {
                         Text(workout.session.duration.clockString)
                             .font(Theme.number(22))
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(phase.tint)
+                            .shadow(color: phase.glow, radius: 8)
                         Text("elapsed")
                             .font(Theme.rounded(10, weight: .semibold))
                             .foregroundStyle(Theme.textTertiary)
@@ -158,26 +169,32 @@ struct TodayView: View {
                 }
             }
 
-            HStack(spacing: 14) {
-                ProgressRing(progress: workout.progress, lineWidth: 6,
-                             label: "\(Int(workout.progress * 100))")
-                    .frame(width: 46, height: 46)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(workout.completedCount) of \(workout.totalCount) sets logged")
-                        .font(Theme.rounded(14, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("\(AppSettings.shared.weight(workout.volumeKg)) moved so far")
-                        .font(Theme.rounded(12, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
+            VStack(spacing: 9) {
+                HStack(spacing: 14) {
+                    ProgressRing(progress: workout.progress, lineWidth: 6, phase: phase,
+                                 label: "\(Int(workout.progress * 100))")
+                        .frame(width: 46, height: 46)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(workout.completedCount) of \(workout.totalCount) sets logged")
+                            .font(Theme.rounded(14, weight: .bold))
+                            .foregroundStyle(Theme.ink)
+                        Text("\(AppSettings.shared.weight(workout.volumeKg)) moved so far")
+                            .font(Theme.rounded(12, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer()
                 }
-                Spacer()
+                PhaseProgressBar(completed: workout.completedCount,
+                                 total: workout.totalCount,
+                                 phase: phase, height: 5, maxTicks: 24)
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .gtWell()
 
-            Button("Back to workout") { isSessionExpanded = true }
-                .buttonStyle(PrimaryButtonStyle())
+            // Amber is the session's state, not an action — a rest isn't
+            // something you press. The button stays the colour of the thing it
+            // actually does, exactly as the watch's log button does mid-rest.
+            Button(phase == .done ? "Back to finish up" : "Back to workout") { isSessionExpanded = true }
+                .buttonStyle(PrimaryButtonStyle(phase: phase == .done ? .done : .working))
 
             Label("Also on your Lock Screen while the app is closed",
                   systemImage: "lock.iphone")
@@ -185,7 +202,7 @@ struct TodayView: View {
                 .foregroundStyle(Theme.textTertiary)
                 .frame(maxWidth: .infinity)
         }
-        .gtCard(padding: 18, background: Theme.surface)
+        .gtCard(padding: 18, phase: phase)
     }
 
     private func sessionStatus(_ workout: ActiveWorkout) -> String {
@@ -206,7 +223,7 @@ struct TodayView: View {
                         .foregroundStyle(Theme.textTertiary)
                     Text(day.name)
                         .font(Theme.rounded(26, weight: .heavy))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(Theme.ink)
                     if let plan = activePlan {
                         Text(plan.name)
                             .font(Theme.rounded(13, weight: .medium))
@@ -217,7 +234,7 @@ struct TodayView: View {
                 VStack(spacing: 2) {
                     Text("\(day.items.count)")
                         .font(Theme.number(26))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.accent.wash)
                     Text("moves")
                         .font(Theme.rounded(10, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
@@ -237,7 +254,7 @@ struct TodayView: View {
                     HStack(spacing: 10) {
                         Image(systemName: item.catalog?.symbol ?? "dumbbell.fill")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.textTertiary)
+                            .foregroundStyle(Theme.accent.opacity(0.75))
                             .frame(width: 20)
                         Text(item.name)
                             .font(Theme.rounded(14, weight: .semibold))
@@ -256,9 +273,7 @@ struct TodayView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .gtWell()
 
             Button("Start workout") { start(day: day) }
                 .buttonStyle(PrimaryButtonStyle())
@@ -268,19 +283,15 @@ struct TodayView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: .infinity)
         }
-        .gtCard(padding: 18, background: Theme.surface)
+        .gtCard(padding: 18)
     }
 
     private var restDayCard: some View {
         VStack(spacing: 14) {
-            Image(systemName: "moon.zzz.fill")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 62, height: 62)
-                .background(Theme.accentDim, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            GlyphTile(symbol: "moon.zzz.fill", tint: SessionPhase.done.tint, size: 62)
             Text("Rest day")
                 .font(Theme.rounded(22, weight: .heavy))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.ink)
             Text("Nothing scheduled. Recovery is part of the plan — but the gym is still open if you want it.")
                 .font(Theme.rounded(14, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
@@ -289,7 +300,7 @@ struct TodayView: View {
 
             VStack(spacing: 8) {
                 Button("Pick a session") { showingDayPicker = true }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(PrimaryButtonStyle(phase: .done))
                 Button("Freestyle workout", action: startFreestyle)
                     .buttonStyle(SecondaryButtonStyle())
             }
@@ -319,7 +330,15 @@ struct TodayView: View {
                         .foregroundStyle(isToday ? Theme.accent : Theme.textTertiary)
                     ZStack {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(didTrain ? Theme.accent : Theme.surface)
+                            .fill(didTrain
+                                  ? AnyShapeStyle(SessionPhase.working.gradient)
+                                  : AnyShapeStyle(Theme.panel))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(didTrain ? AnyShapeStyle(Color.clear) : AnyShapeStyle(Theme.edge),
+                                                  lineWidth: 1)
+                            }
+                            .shadow(color: didTrain ? SessionPhase.working.glow : .clear, radius: 7, y: 2)
                         if !didTrain && isScheduled {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .strokeBorder(Theme.accent.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
@@ -396,18 +415,22 @@ struct SessionRow: View {
             VStack(spacing: 0) {
                 Text(session.startedAt.formatted(.dateTime.day()))
                     .font(Theme.number(17))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                 Text(session.startedAt.formatted(.dateTime.month(.abbreviated)).uppercased())
                     .font(Theme.rounded(9, weight: .bold))
                     .foregroundStyle(Theme.textTertiary)
             }
             .frame(width: 44, height: 44)
-            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Theme.edge, lineWidth: 1)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title)
                     .font(Theme.rounded(15, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Text("\(session.completedSets.count) sets · \(AppSettings.shared.weight(session.totalVolumeKg)) · \(session.duration.durationString)")
                     .font(Theme.rounded(12, weight: .medium))

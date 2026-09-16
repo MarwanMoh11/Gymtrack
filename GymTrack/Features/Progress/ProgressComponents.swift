@@ -149,7 +149,8 @@ struct SegmentedPills<Value: Hashable & Identifiable>: View {
                         .background {
                             if selection == value {
                                 Capsule()
-                                    .fill(Theme.accent)
+                                    .fill(SessionPhase.working.gradient)
+                                    .shadow(color: SessionPhase.working.glow, radius: 8, y: 2)
                                     .matchedGeometryEffect(id: namespaceID, in: namespace)
                             }
                         }
@@ -159,8 +160,8 @@ struct SegmentedPills<Value: Hashable & Identifiable>: View {
             }
         }
         .padding(3)
-        .background(Capsule().fill(Theme.surface))
-        .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
+        .background(Capsule().fill(Theme.well))
+        .overlay(Capsule().strokeBorder(Theme.edge, lineWidth: 1))
     }
 }
 
@@ -183,7 +184,8 @@ struct MetricTile: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 RollingNumber(value: shown, format: format)
                     .font(Theme.number(26))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(tint == Theme.textPrimary ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(tint.wash))
+                    .shadow(color: tint == Theme.textPrimary ? .clear : tint.opacity(0.3), radius: 8)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                 Spacer(minLength: 0)
@@ -213,10 +215,10 @@ struct MetricTile: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(13)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous))
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
+                .strokeBorder(Theme.edge, lineWidth: 1)
         )
         .onAppear {
             withAnimation(.easeOut(duration: 0.9)) { shown = value }
@@ -325,6 +327,14 @@ struct ConsistencyGrid: View {
 
         return RoundedRectangle(cornerRadius: 3.5, style: .continuous)
             .fill(fill(volume: volume, isFuture: isFuture))
+            .overlay {
+                // The hardest days get the far end of the gradient too, so the
+                // grid shades through the phase colour rather than through one
+                // hue at eight opacities.
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                    .fill(SessionPhase.working.trail)
+                    .opacity(volume > 0 && !isFuture ? 0.34 * min(volume / peak, 1) : 0)
+            }
             .frame(width: cell, height: cell)
             .overlay(
                 RoundedRectangle(cornerRadius: 3.5, style: .continuous)

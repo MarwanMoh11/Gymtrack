@@ -29,40 +29,53 @@ struct SectionHeader: View {
 
 // MARK: - Buttons
 
+/// The one thing a screen is asking for. Filled with the phase gradient, lit
+/// across the top the way a physical key is, and burning into the screen under
+/// it — at 54pt tall it's the largest object on most screens and a flat fill
+/// that size just looks like a swatch.
 struct PrimaryButtonStyle: ButtonStyle {
-    var tint: Color = Theme.accent
+    var phase: SessionPhase = .working
     var isEnabled: Bool = true
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return configuration.label
             .font(Theme.rounded(17, weight: .bold))
             .foregroundStyle(isEnabled ? Color.black : Theme.textTertiary)
             .frame(maxWidth: .infinity)
             .frame(height: 54)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isEnabled ? tint : Theme.surfaceRaised)
-            )
+            .background {
+                ZStack {
+                    if isEnabled {
+                        phase.gradient
+                        LinearGradient(colors: [Color.white.opacity(0.24), .clear],
+                                       startPoint: .top, endPoint: .center)
+                    } else {
+                        Theme.panel
+                    }
+                }
+                .clipShape(shape)
+                .overlay { if !isEnabled { shape.strokeBorder(Theme.edge, lineWidth: 1) } }
+            }
+            .shadow(color: isEnabled ? phase.glow.opacity(configuration.isPressed ? 0.3 : 0.55) : .clear,
+                    radius: 14, y: 5)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
+/// Everything offered alongside the primary. Same panel as a card so it reads
+/// as part of the surface rather than as a competing button.
 struct SecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return configuration.label
             .font(Theme.rounded(16, weight: .semibold))
-            .foregroundStyle(Theme.textPrimary)
+            .foregroundStyle(Theme.ink)
             .frame(maxWidth: .infinity)
             .frame(height: 50)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Theme.surfaceRaised)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Theme.hairline, lineWidth: 1)
-            )
+            .background(Theme.panel, in: shape)
+            .overlay { shape.strokeBorder(Theme.edge, lineWidth: 1) }
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
@@ -78,12 +91,13 @@ struct Pill: View {
     var body: some View {
         Text(text)
             .font(Theme.rounded(11, weight: .semibold))
-            .foregroundStyle(filled ? .black : color)
+            .foregroundStyle(filled ? AnyShapeStyle(Color.black) : AnyShapeStyle(color))
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(
-                Capsule().fill(filled ? color : color.opacity(0.14))
-            )
+            .background {
+                Capsule().fill(filled ? AnyShapeStyle(color.wash) : AnyShapeStyle(color.opacity(0.13)))
+            }
+            .overlay { if !filled { Capsule().strokeBorder(color.opacity(0.2), lineWidth: 1) } }
     }
 }
 
@@ -93,13 +107,18 @@ struct StatTile: View {
     let value: String
     let label: String
     var caption: String?
-    var tint: Color = Theme.textPrimary
+    /// A tile that measures something with a colour of its own — heart red,
+    /// energy amber. It carries that colour into the number and bleeds a little
+    /// of it into the tile, so a row of three is scannable by hue alone.
+    var tint: Color?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        let shape = RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)
+        return VStack(alignment: .leading, spacing: 3) {
             Text(value)
                 .font(Theme.number(24))
-                .foregroundStyle(tint)
+                .foregroundStyle(tint.map { AnyShapeStyle($0.wash) } ?? AnyShapeStyle(Theme.ink))
+                .shadow(color: tint?.opacity(0.35) ?? .clear, radius: 8)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             Text(label.uppercased())
@@ -114,36 +133,21 @@ struct StatTile: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
-        )
-    }
-}
-
-// MARK: - Progress ring
-
-struct ProgressRing: View {
-    let progress: Double          // 0...1
-    var lineWidth: CGFloat = 8
-    var tint: Color = Theme.accent
-    var label: String?
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: min(1, max(0, progress)))
-                .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.spring(response: 0.5, dampingFraction: 0.85), value: progress)
-            if let label {
-                Text(label)
-                    .font(Theme.number(15))
-                    .foregroundStyle(Theme.textPrimary)
+        .background {
+            ZStack {
+                Theme.panel
+                if let tint {
+                    LinearGradient(colors: [tint.opacity(0.14), .clear],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
             }
+            .clipShape(shape)
+        }
+        .overlay {
+            shape.strokeBorder(tint.map { AnyShapeStyle(LinearGradient(colors: [$0.opacity(0.4), Color.white.opacity(0.04)],
+                                                                       startPoint: .topLeading, endPoint: .bottomTrailing)) }
+                               ?? AnyShapeStyle(Theme.edge),
+                               lineWidth: 1)
         }
     }
 }
@@ -159,14 +163,10 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 72, height: 72)
-                .background(Theme.accentDim, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            GlyphTile(symbol: icon, size: 72)
             Text(title)
                 .font(Theme.rounded(19, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.ink)
             Text(message)
                 .font(Theme.rounded(14, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
@@ -273,7 +273,7 @@ struct StepperField: View {
                     } label: {
                         Text(format(value))
                             .font(Theme.number(26))
-                            .foregroundStyle(Theme.textPrimary)
+                            .foregroundStyle(Theme.ink)
                             .lineLimit(1)
                             .minimumScaleFactor(0.5)
                             .contentTransition(.numericText())
@@ -336,12 +336,19 @@ struct StepperField: View {
     }
 
     private func stepButton(icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        return Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(enabled ? Theme.textPrimary : Theme.textTertiary)
+                .foregroundStyle(enabled ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(Theme.textTertiary))
                 .frame(width: 42, height: 42)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                // White-translucent rather than a fixed grey: it lifts off
+                // whatever it's sitting on, including a tinted set row.
+                .background(LinearGradient(colors: [Color.white.opacity(0.13), Color.white.opacity(0.06)],
+                                           startPoint: .top, endPoint: .bottom),
+                            in: shape)
+                .overlay { shape.strokeBorder(Theme.edge, lineWidth: 1) }
+                .opacity(enabled ? 1 : 0.45)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -368,9 +375,13 @@ struct LoadScaleChip: View {
             .foregroundStyle(isCustom ? Theme.accent : Theme.textTertiary)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(
-                Capsule().fill(isCustom ? Theme.accentDim : Color.white.opacity(0.05))
-            )
+            .background {
+                Capsule().fill(isCustom
+                               ? AnyShapeStyle(LinearGradient(colors: [Theme.accent.opacity(0.24), Theme.accent.opacity(0.08)],
+                                                              startPoint: .top, endPoint: .bottom))
+                               : AnyShapeStyle(Color.white.opacity(0.05)))
+            }
+            .overlay { Capsule().strokeBorder(isCustom ? Theme.accent.opacity(0.3) : .clear, lineWidth: 1) }
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -39,6 +39,7 @@ struct ActiveWorkoutView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .gtSessionTint(workout.phase)
         .background(
             RoundedRectangle(cornerRadius: dragOffset > 0 ? 38 : 0, style: .continuous)
                 .fill(Theme.background)
@@ -90,7 +91,8 @@ struct ActiveWorkoutView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 7)
-                    .background(Theme.surfaceRaised, in: Capsule())
+                    .background(Theme.panel, in: Capsule())
+                    .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Minimise workout")
@@ -100,18 +102,22 @@ struct ActiveWorkoutView: View {
 
                 Text(elapsed.clockString)
                     .font(Theme.number(20))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(workout.phase.tint)
+                    .shadow(color: workout.phase.glow, radius: 8)
                     .accessibilityLabel("Elapsed \(elapsed.durationString)")
 
                 Spacer(minLength: 4)
 
+                // Green once everything is logged: the screen stops asking for
+                // sets and starts asking to be closed.
                 Button { showingFinishConfirm = true } label: {
                     Text("Finish")
                         .font(Theme.rounded(13, weight: .bold))
                         .foregroundStyle(.black)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
-                        .background(Theme.accent, in: Capsule())
+                        .background(finishTint.gradient, in: Capsule())
+                        .shadow(color: finishTint.glow, radius: 8, y: 2)
                 }
                 .buttonStyle(.plain)
             }
@@ -131,7 +137,6 @@ struct ActiveWorkoutView: View {
         }
         .padding(.horizontal, 14)
         .padding(.top, 6)
-        .background(Theme.background)
         .contentShape(Rectangle())
         .gesture(minimiseDrag)
     }
@@ -143,18 +148,23 @@ struct ActiveWorkoutView: View {
             .padding(.vertical, 4)
     }
 
+    /// One tick per set, the same bar the Lock Screen card draws — so the thing
+    /// you glance at on your phone and the thing you glance at on your wrist
+    /// are measuring in the same units.
     private var headerProgressLine: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.08))
-                Capsule()
-                    .fill(Theme.accent)
-                    .frame(width: max(0, geo.size.width * workout.progress))
-                    .animation(.spring(response: 0.45, dampingFraction: 0.9), value: workout.progress)
-            }
-        }
-        .frame(height: 3)
-        .padding(.bottom, 8)
+        PhaseProgressBar(completed: workout.completedCount,
+                         total: workout.totalCount,
+                         phase: workout.phase,
+                         height: 4,
+                         maxTicks: 24)
+            .animation(.spring(response: 0.45, dampingFraction: 0.9), value: workout.completedCount)
+            .padding(.bottom, 8)
+    }
+
+    /// The finish button leads with green the moment there's nothing left to
+    /// log, whether or not a rest happens to be running.
+    private var finishTint: SessionPhase {
+        workout.totalCount > 0 && workout.completedCount >= workout.totalCount ? .done : .working
     }
 
     /// Pull the header down to put the session away — the same gesture people
@@ -220,21 +230,21 @@ struct ActiveWorkoutView: View {
 
     private var progressHeader: some View {
         HStack(spacing: 14) {
-            ProgressRing(progress: workout.progress, lineWidth: 7,
+            ProgressRing(progress: workout.progress, lineWidth: 7, phase: workout.phase,
                          label: "\(Int(workout.progress * 100))")
                 .frame(width: 54, height: 54)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(workout.completedCount) of \(workout.totalCount) sets")
                     .font(Theme.rounded(16, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                 Text("\(AppSettings.shared.weight(workout.volumeKg)) moved")
                     .font(Theme.rounded(13, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
         }
-        .gtCard(padding: 14)
+        .gtCard(padding: 14, phase: workout.phase)
     }
 
     /// Deliberately at the very bottom, past everything else. Leaving the
@@ -298,7 +308,7 @@ private struct ExerciseLogCard: View {
                 HStack(alignment: .top, spacing: 7) {
                     Image(systemName: "arrow.up.forward.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.accent.wash)
                     Text(suggestion)
                         .font(Theme.rounded(12, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
@@ -307,7 +317,15 @@ private struct ExerciseLogCard: View {
                 .padding(.vertical, 8)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.accentDim.opacity(0.5), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .background {
+                    LinearGradient(colors: [Theme.accent.opacity(0.16), Theme.accent.opacity(0.04)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.22), lineWidth: 1)
+                }
             }
 
             VStack(spacing: 8) {
@@ -344,7 +362,7 @@ private struct ExerciseLogCard: View {
             }
             .padding(.top, 2)
         }
-        .gtCard(padding: 12, background: group.isComplete ? Theme.surface.opacity(0.55) : Theme.surface)
+        .gtCard(padding: 12, dimmed: group.isComplete)
         .sheet(isPresented: $showingDetail) {
             if let catalog = group.catalog {
                 NavigationStack { ExerciseDetailView(exercise: catalog) }
@@ -354,16 +372,14 @@ private struct ExerciseLogCard: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: group.isComplete ? "checkmark.circle.fill" : (group.catalog?.symbol ?? "dumbbell.fill"))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(group.isComplete ? Theme.accent : Theme.textSecondary)
-                .frame(width: 32, height: 32)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            GlyphTile(symbol: group.isComplete ? "checkmark" : (group.catalog?.symbol ?? "dumbbell.fill"),
+                      tint: group.isComplete ? Theme.positive : Theme.textSecondary,
+                      size: 32)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(group.name)
                     .font(Theme.rounded(16, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Text(lastTimeSummary)
                     .font(Theme.rounded(11, weight: .medium))
@@ -433,7 +449,7 @@ private struct SetRow: View {
             indexBadge(filled: true)
             Text(valueLabel)
                 .font(Theme.number(16))
-                .foregroundStyle(isPR ? .black : Theme.textPrimary)
+                .foregroundStyle(isPR ? AnyShapeStyle(Color.black) : AnyShapeStyle(Theme.ink))
             if isPR {
                 HStack(spacing: 3) {
                     Image(systemName: "trophy.fill").font(.system(size: 9))
@@ -454,8 +470,19 @@ private struct SetRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(isPR ? Theme.accent : Theme.accent.opacity(0.13),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+            // A PR is filled with the gradient and glows; an ordinary logged set
+            // is the same colour held back to a tint, so a record still stands
+            // out in a column of eight green rows.
+            shape.fill(isPR
+                       ? AnyShapeStyle(SessionPhase.working.gradient)
+                       : AnyShapeStyle(LinearGradient(colors: [SessionPhase.working.trail.opacity(0.16),
+                                                               SessionPhase.working.trail.opacity(0.05)],
+                                                      startPoint: .topLeading, endPoint: .bottomTrailing)))
+                .overlay { shape.strokeBorder(SessionPhase.working.trail.opacity(isPR ? 0 : 0.22), lineWidth: 1) }
+                .shadow(color: isPR ? SessionPhase.working.glow : .clear, radius: 10, y: 3)
+        }
     }
 
     // MARK: Pending (collapsed)
@@ -475,7 +502,11 @@ private struct SetRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 12)
-        .background(Theme.surfaceRaised.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Theme.well, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.04), lineWidth: 1)
+        }
     }
 
     // MARK: Expanded (the set being worked)
@@ -487,7 +518,7 @@ private struct SetRow: View {
                 Text("SET \(number)")
                     .font(Theme.eyebrow)
                     .tracking(1.2)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accent.wash)
                 Spacer()
                 if let previous {
                     Text(previousLabel(previous))
@@ -520,11 +551,22 @@ private struct SetRow: View {
             .buttonStyle(PrimaryButtonStyle())
         }
         .padding(14)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        // The set you're standing in is the only lit object on the screen: a
+        // tinted ground, a gradient edge and a glow under it, so it's findable
+        // from arm's length with a bar in your hands.
+        .background {
+            ZStack {
+                Theme.panel
+                LinearGradient(colors: [Theme.accent.opacity(0.13), Theme.accent.opacity(0.02)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1)
+                .strokeBorder(Theme.edge(.working), lineWidth: 1.5)
         )
+        .shadow(color: Theme.accent.opacity(0.14), radius: 12, y: 4)
         .sheet(isPresented: $showingScale) {
             if let catalog = set.catalog {
                 LoadScaleSheet(exercise: catalog, referenceKg: set.weightKg) { updated in
@@ -550,11 +592,13 @@ private struct SetRow: View {
             .font(Theme.number(12, weight: .bold))
             .foregroundStyle(filled ? (isPR ? Color.black : Theme.accent) : Theme.textTertiary)
             .frame(width: 26, height: 26)
-            .background(
+            .background {
                 Circle().fill(filled
-                              ? (isPR ? Color.black.opacity(0.15) : Theme.accent.opacity(0.18))
-                              : Color.white.opacity(0.06))
-            )
+                              ? (isPR ? AnyShapeStyle(Color.black.opacity(0.15))
+                                      : AnyShapeStyle(LinearGradient(colors: [Theme.accent.opacity(0.26), Theme.accent.opacity(0.1)],
+                                                                     startPoint: .top, endPoint: .bottom)))
+                              : AnyShapeStyle(Color.white.opacity(0.06)))
+            }
     }
 
     private var valueLabel: String {
@@ -606,10 +650,10 @@ struct RestTimerBar: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle().stroke(Color.black.opacity(0.2), lineWidth: 4)
+                Circle().stroke(Color.black.opacity(0.18), lineWidth: 4)
                 Circle()
                     .trim(from: 0, to: max(0.001, 1 - timer.progress))
-                    .stroke(Color.black, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(Color.black.opacity(0.85), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
             .frame(width: 34, height: 34)
@@ -646,8 +690,19 @@ struct RestTimerBar: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Theme.accent.opacity(0.3), radius: 16, y: 6)
+        // Amber, not lime: the bar that floats over the logger while you wait
+        // is the same colour the rest is on the Lock Screen and on the wrist.
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+            ZStack {
+                SessionPhase.resting.gradient
+                LinearGradient(colors: [Color.white.opacity(0.22), .clear],
+                               startPoint: .top, endPoint: .center)
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 1) }
+        }
+        .shadow(color: SessionPhase.resting.glow, radius: 18, y: 7)
     }
 }
 
@@ -673,7 +728,8 @@ struct LiveHeartRatePill: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(Theme.surfaceRaised, in: Capsule())
+        .background(Capsule().fill(Theme.negative.opacity(0.13)))
+        .overlay { Capsule().strokeBorder(Theme.negative.opacity(0.2), lineWidth: 1) }
         .onAppear { isBeating = true }
         .accessibilityLabel("Heart rate \(Int(bpm.rounded())) beats per minute")
     }

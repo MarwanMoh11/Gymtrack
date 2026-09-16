@@ -102,7 +102,11 @@ struct PlansView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 38, height: 38)
-                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Theme.edge, lineWidth: 1)
+                        }
                 }
             }
             .gtCard()
@@ -129,7 +133,11 @@ struct PlansView: View {
                     .foregroundStyle(day.weekday == nil ? Theme.textTertiary : Theme.accent)
             }
             .frame(width: 42, height: 42)
-            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Theme.edge, lineWidth: 1)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(day.name)
@@ -162,7 +170,8 @@ struct PlansView: View {
                 .font(Theme.rounded(12, weight: .bold))
                 .foregroundStyle(.black)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Theme.accent, in: Capsule())
+                .background(SessionPhase.working.gradient, in: Capsule())
+                .shadow(color: SessionPhase.working.glow, radius: 8, y: 2)
                 .buttonStyle(.plain)
             Button {
                 planPendingDeletion = plan
@@ -208,15 +217,11 @@ struct TemplatePickerView: View {
                     ForEach(PlanTemplate.all) { template in
                         Button { onPick(template) } label: {
                             HStack(spacing: 14) {
-                                Image(systemName: template.symbol)
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(Theme.accent)
-                                    .frame(width: 44, height: 44)
-                                    .background(Theme.accentDim, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                GlyphTile(symbol: template.symbol, size: 44)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(template.name)
                                         .font(Theme.rounded(16, weight: .bold))
-                                        .foregroundStyle(Theme.textPrimary)
+                                        .foregroundStyle(Theme.ink)
                                     Text(template.summary)
                                         .font(Theme.rounded(12, weight: .medium))
                                         .foregroundStyle(Theme.textSecondary)

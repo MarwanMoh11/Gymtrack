@@ -17,6 +17,7 @@ struct SessionDockBar: View {
     @State private var isPulsing = false
 
     private var isResting: Bool { workout.restTimer.isRunning }
+    private var phase: SessionPhase { workout.phase }
 
     var body: some View {
         Button(action: onResume) {
@@ -24,13 +25,23 @@ struct SessionDockBar: View {
                 progressLine
                 bar
             }
-            .background(Theme.surfaceRaised)
+            .background {
+                ZStack {
+                    Theme.panel
+                    LinearGradient(colors: [phase.tint.opacity(0.14), phase.trail.opacity(0.04), .clear],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(isResting ? Theme.accent.opacity(0.45) : Theme.hairline, lineWidth: 1)
+                    .strokeBorder(Theme.edge(phase), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.5), radius: 14, y: 5)
+            // It floats over a scrolling tab, so it needs a real shadow under it
+            // as well as its own colour above.
+            .shadow(color: .black.opacity(0.55), radius: 16, y: 6)
+            .shadow(color: phase.tint.opacity(0.16), radius: 12, y: 3)
+            .animation(.easeInOut(duration: 0.4), value: phase)
         }
         .buttonStyle(DockPressStyle())
         .contextMenu {
@@ -49,17 +60,17 @@ struct SessionDockBar: View {
 
     // MARK: - Pieces
 
+    /// A continuous line rather than the logger's ticks — at dock width, past
+    /// the tab bar, a picket fence of twenty segments is just texture.
     private var progressLine: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Color.white.opacity(0.08))
-                Rectangle()
-                    .fill(Theme.accent)
-                    .frame(width: geo.size.width * workout.progress)
-                    .animation(.spring(response: 0.45, dampingFraction: 0.9), value: workout.progress)
-            }
-        }
-        .frame(height: 3)
+        PhaseProgressBar(completed: workout.completedCount,
+                         total: workout.totalCount,
+                         phase: phase,
+                         height: 3,
+                         maxTicks: 0)
+            .animation(.spring(response: 0.45, dampingFraction: 0.9), value: workout.completedCount)
+            .padding(.horizontal, 10)
+            .padding(.top, 5)
     }
 
     private var bar: some View {
@@ -69,18 +80,19 @@ struct SessionDockBar: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(Theme.accent)
+                        .fill(phase.tint)
                         .frame(width: 6, height: 6)
+                        .shadow(color: phase.glow, radius: 3)
                         .opacity(isPulsing ? 0.35 : 1)
                         .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: isPulsing)
                     Text(workout.session.title)
                         .font(Theme.rounded(14, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                 }
                 Text(statusText)
                     .font(Theme.rounded(11, weight: .medium))
-                    .foregroundStyle(isResting ? Theme.accent : Theme.textSecondary)
+                    .foregroundStyle(phase == .working ? Theme.textSecondary : phase.tint)
                     .lineLimit(1)
             }
 
@@ -101,14 +113,11 @@ struct SessionDockBar: View {
     /// answers whatever the current question is.
     private var ring: some View {
         ZStack {
-            Circle().stroke(Color.white.opacity(0.1), lineWidth: 3.5)
-            Circle()
-                .trim(from: 0, to: max(0.02, isResting ? 1 - workout.restTimer.progress : workout.progress))
-                .stroke(Theme.accent, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            Image(systemName: isResting ? "hourglass" : "dumbbell.fill")
+            ProgressRing(progress: isResting ? 1 - workout.restTimer.progress : workout.progress,
+                         lineWidth: 3.5, phase: phase)
+            Image(systemName: phase.glyph)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(phase.tint.wash)
         }
         .frame(width: 32, height: 32)
     }
@@ -118,12 +127,13 @@ struct SessionDockBar: View {
         if isResting {
             Text(workout.restTimer.remaining.clockString)
                 .font(Theme.number(17))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(phase.tint)
+                .shadow(color: phase.glow, radius: 7)
         } else {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Text(workout.session.duration.clockString)
                     .font(Theme.number(17))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.ink)
             }
         }
     }

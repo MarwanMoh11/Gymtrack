@@ -91,6 +91,16 @@ enum SessionPhase {
     }
 }
 
+extension Color {
+    /// A two-stop wash of one colour, for anything that carries a tint of its
+    /// own — heart red, energy amber, a trophy's gold — rather than the
+    /// session's. A symbol filled with it has the same depth as one filled
+    /// with a phase gradient, without pretending to be a phase.
+    var wash: LinearGradient {
+        LinearGradient(colors: [self, opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+}
+
 extension Theme {
     /// White with a little fall-off. A headline drawn in it has some weight to
     /// it instead of sitting flat on the surface.
