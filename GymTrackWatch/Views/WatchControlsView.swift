@@ -11,6 +11,8 @@ struct WatchControlsView: View {
 
     @State private var confirmingDiscard = false
 
+    private var phase: SessionPhase { session.phase(resting: rest.isRunning) }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 7) {
@@ -20,32 +22,27 @@ struct WatchControlsView: View {
 
                 Button(action: onEnd) {
                     Label("Finish workout", systemImage: "flag.checkered")
-                        .font(Theme.rounded(14, weight: .bold))
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .foregroundStyle(.black)
+                // Green rather than the session's colour: finishing is the one
+                // button here that ends well, and it should look like it.
+                .buttonStyle(WatchProminentButtonStyle(phase: .done))
 
                 Button(role: .destructive) {
                     confirmingDiscard = true
                 } label: {
                     Label("Discard", systemImage: "trash")
-                        .font(Theme.rounded(13, weight: .semibold))
-                        .foregroundStyle(Theme.negative)
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                // The app's accent is applied at the root, and it swallows the
-                // destructive role — a discard button the colour of every
-                // other button is a discard button someone taps by mistake.
-                .tint(Theme.negative)
+                // Carried in red on purpose. The app's accent is applied at the
+                // root and swallows the destructive role — a discard button the
+                // colour of every other button is one someone taps by mistake.
+                .buttonStyle(WatchQuietButtonStyle(tint: Theme.negative, weight: .semibold))
 
                 syncFooter
             }
             .padding(.horizontal, 2)
         }
         .navigationTitle("Controls")
+        .watchScreenTint(phase)
         .alert("Discard this workout?", isPresented: $confirmingDiscard) {
             Button("Keep it", role: .cancel) {}
             Button("Discard", role: .destructive, action: onDiscard)
@@ -55,26 +52,29 @@ struct WatchControlsView: View {
     }
 
     private var progressCard: some View {
-        VStack(spacing: 4) {
-            Text("\(session.completedSets) of \(session.totalSets)")
-                .font(Theme.number(22))
-                .foregroundStyle(Theme.textPrimary)
-            Text("sets logged")
-                .font(Theme.eyebrow)
-                .foregroundStyle(Theme.textTertiary)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.1))
-                    Capsule()
-                        .fill(Theme.accent)
-                        .frame(width: max(2, geo.size.width * session.progress))
-                }
+        VStack(spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(session.completedSets)")
+                    .font(Theme.number(24))
+                    .foregroundStyle(phase.gradient)
+                    .shadow(color: phase.glow, radius: 6)
+                Text("of \(session.totalSets)")
+                    .font(Theme.number(15, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
             }
-            .frame(height: 4)
+            Text("SETS LOGGED")
+                .font(Theme.eyebrow)
+                .tracking(1.1)
+                .foregroundStyle(Theme.textTertiary)
+
+            // Twelve ticks is about all a 41mm screen can show before they
+            // stop reading as sets, so anything longer runs as one bar.
+            PhaseProgressBar(completed: session.completedSets, total: session.totalSets,
+                             phase: phase, height: 5, maxTicks: 12)
+                .padding(.top, 1)
         }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .multilineTextAlignment(.center)
+        .watchCard(phase: phase)
     }
 
     @ViewBuilder
@@ -86,24 +86,16 @@ struct WatchControlsView: View {
                     connector.send(.extendRest(seconds: 30))
                 } label: {
                     Text("+30s")
-                        .font(Theme.rounded(13, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .tint(Theme.surfaceRaised)
+                .buttonStyle(WatchQuietButtonStyle(tint: SessionPhase.resting.tint))
 
                 Button {
                     rest.stop()
                     connector.send(.stopRest)
                 } label: {
                     Text("Skip rest")
-                        .font(Theme.rounded(13, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .tint(Theme.surfaceRaised)
+                .buttonStyle(WatchQuietButtonStyle())
             }
         } else {
             Button {
@@ -112,12 +104,8 @@ struct WatchControlsView: View {
                 connector.send(.startRest(seconds: seconds))
             } label: {
                 Label("Start rest", systemImage: "timer")
-                    .font(Theme.rounded(13, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
-            .tint(Theme.surfaceRaised)
+            .buttonStyle(WatchQuietButtonStyle(tint: SessionPhase.resting.tint, weight: .semibold))
         }
     }
 
@@ -129,27 +117,24 @@ struct WatchControlsView: View {
                 connector.send(.addSet(catalogID: exercise.id))
             } label: {
                 Label("Add a set", systemImage: "plus")
-                    .font(Theme.rounded(13, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
-            .tint(Theme.surfaceRaised)
+            .buttonStyle(WatchQuietButtonStyle(weight: .semibold))
         }
     }
 
     /// Says plainly whether the phone has everything — the one thing a mirror
     /// UI owes the user when it's been out of range.
     private var syncFooter: some View {
-        HStack(spacing: 4) {
+        WatchChip(tint: connector.hasUnsyncedWork ? Theme.warning : Theme.textTertiary) {
             Image(systemName: connector.hasUnsyncedWork ? "arrow.triangle.2.circlepath" : "checkmark.icloud")
-                .font(.system(size: 10))
+                .font(.system(size: 9, weight: .bold))
             Text(connector.hasUnsyncedWork
                  ? "Sets waiting for your phone"
                  : (connector.isReachable ? "In sync with your phone" : "Will sync when in range"))
                 .font(Theme.rounded(10, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .foregroundStyle(Theme.textTertiary)
         .padding(.top, 2)
     }
 }

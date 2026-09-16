@@ -40,88 +40,6 @@ struct WorkoutLiveActivityWidget: Widget {
     }
 }
 
-// MARK: - Phase
-
-/// The four things a running session can be doing, and the colour each one
-/// owns.
-///
-/// Every tinted surface on the card — glyph tile, ring, bar, keyline, the bloom
-/// behind the whole thing — pulls from here, so the presentation reads as one
-/// object rather than a stack of separately coloured parts, and the state is
-/// legible from across the room before any of the words are.
-enum SessionPhase {
-    /// Between sets, counting down.
-    case resting
-    /// The rest ran out while the card was asleep.
-    case restOver
-    /// Under the bar, with sets still to log.
-    case working
-    /// Every set is in; all that's left is to end the session.
-    case done
-
-    /// The near end of every gradient, and the colour of anything drawn solid.
-    var tint: Color {
-        switch self {
-        case .resting: return Theme.warning
-        case .restOver, .working: return Theme.accent
-        case .done: return Theme.positive
-        }
-    }
-
-    /// The far end. Near enough in hue to read as shading rather than as a
-    /// second colour, far enough that a flat fill picks up some depth.
-    var trail: Color {
-        switch self {
-        case .resting: return Color(red: 1.0, green: 0.45, blue: 0.22)
-        case .restOver, .working: return Color(red: 0.33, green: 0.93, blue: 0.44)
-        case .done: return Color(red: 0.20, green: 0.80, blue: 0.87)
-        }
-    }
-
-    var glyph: String {
-        switch self {
-        case .resting: return "hourglass"
-        case .restOver: return "bolt.fill"
-        case .working: return "dumbbell.fill"
-        case .done: return "checkmark"
-        }
-    }
-
-    var eyebrow: String {
-        switch self {
-        case .resting: return "RESTING"
-        case .restOver: return "REST DONE"
-        case .working: return "ON DECK"
-        case .done: return "ALL SETS LOGGED"
-        }
-    }
-
-    /// Diagonal — for fills with area: the glyph tile, the call-to-action pill,
-    /// a number big enough to carry a gradient without muddying.
-    var gradient: LinearGradient {
-        LinearGradient(colors: [tint, trail], startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    /// Left to right, for the one thing on the card that reads as travel.
-    var bar: LinearGradient {
-        LinearGradient(colors: [trail, tint], startPoint: .leading, endPoint: .trailing)
-    }
-
-    /// Sweeps with the ring from twelve o'clock, so the leading edge of the arc
-    /// is also its brightest point.
-    var arc: AngularGradient {
-        AngularGradient(colors: [trail, tint, tint], center: .center, angle: .degrees(-90))
-    }
-
-    /// How hard a filled shape burns into the ground behind it.
-    var glow: Color { tint.opacity(0.45) }
-}
-
-/// White with a little fall-off. A headline drawn in it has some weight to it
-/// instead of sitting flat on the card.
-private let ink = LinearGradient(colors: [.white, Color.white.opacity(0.72)],
-                                 startPoint: .top, endPoint: .bottom)
-
 // MARK: - Lock Screen
 
 private struct LockScreenCard: View {
@@ -203,7 +121,7 @@ private struct LockScreenCard: View {
             HeroRow(phase: phase) {
                 Text("Finish up")
                     .font(Theme.rounded(22, weight: .heavy))
-                    .foregroundStyle(ink)
+                    .foregroundStyle(Theme.ink)
             } trailing: {
                 EmptyView()
             }
@@ -222,7 +140,7 @@ private struct LockScreenCard: View {
 
     private var footer: some View {
         VStack(spacing: 7) {
-            SetProgressBar(state: state, phase: phase)
+            PhaseProgressBar(completed: state.completedSets, total: state.totalSets, phase: phase)
             HStack(spacing: 6) {
                 Chip {
                     Text("\(state.completedSets)/\(state.totalSets) sets")
@@ -304,7 +222,7 @@ private struct ExerciseHeadline: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(state.currentExercise)
                 .font(Theme.rounded(21, weight: .heavy))
-                .foregroundStyle(ink)
+                .foregroundStyle(Theme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             Text(state.currentTarget)
@@ -355,7 +273,7 @@ private struct UpNext: View {
                 .foregroundStyle(Theme.textTertiary)
             Text(state.currentExercise)
                 .font(Theme.rounded(14, weight: .bold))
-                .foregroundStyle(ink)
+                .foregroundStyle(Theme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Text("Set \(state.currentSetNumber) · \(state.currentTarget)")
@@ -406,70 +324,6 @@ private struct StatusDot: View {
 }
 
 // MARK: - Pieces
-
-/// Sets completed across the whole session.
-///
-/// Drawn as one tick per set while the count is small enough to read — a set is
-/// a discrete thing, and a discrete bar shows you the one you're standing in.
-/// Longer sessions fall back to a continuous bar rather than a picket fence.
-private struct SetProgressBar: View {
-    let state: WorkoutActivity.ContentState
-    let phase: SessionPhase
-    var height: CGFloat = 6
-    var segmented = true
-
-    var body: some View {
-        Group {
-            if segmented, state.totalSets > 1, state.totalSets <= 20 {
-                segments
-            } else {
-                continuous
-            }
-        }
-        .frame(height: height)
-    }
-
-    /// One gradient run across the whole row, masked to the ticks that are
-    /// filled, so the colour travels with the session instead of restarting in
-    /// every segment.
-    private var segments: some View {
-        ZStack {
-            ticks { _ in true }
-                .foregroundStyle(Color.white.opacity(0.12))
-            phase.bar
-                .mask(ticks { $0 < state.completedSets })
-                .shadow(color: phase.glow, radius: 4, y: 1)
-        }
-    }
-
-    private func ticks(_ isFilled: @escaping (Int) -> Bool) -> some View {
-        HStack(spacing: 3) {
-            ForEach(0..<max(1, state.totalSets), id: \.self) { index in
-                Capsule().opacity(isFilled(index) ? 1 : 0)
-            }
-        }
-    }
-
-    private var continuous: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.12))
-                Capsule()
-                    .fill(phase.bar)
-                    .frame(width: filledWidth(in: geo.size.width))
-                    .shadow(color: phase.glow, radius: 4, y: 1)
-            }
-        }
-    }
-
-    private func filledWidth(in total: CGFloat) -> CGFloat {
-        guard total.isFinite, total > 0 else { return 0 }
-        let fraction = state.progress.isFinite ? min(1, max(0, state.progress)) : 0
-        guard fraction > 0 else { return 0 }
-        return min(total, max(height, total * fraction))
-    }
-}
 
 /// Ring used in the Dynamic Island. Shows rest remaining while resting and
 /// session completion otherwise, so the glanceable shape always answers the
@@ -525,7 +379,7 @@ private struct SetBadge: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("\(context.state.completedSets)/\(context.state.totalSets)")
                     .font(Theme.number(13, weight: .bold))
-                    .foregroundStyle(ink)
+                    .foregroundStyle(Theme.ink)
                 Text("SETS")
                     .font(Theme.microCaps)
                     .tracking(0.6)
@@ -570,7 +424,7 @@ private struct IslandFooter: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(headline)
                 .font(Theme.rounded(15, weight: .bold))
-                .foregroundStyle(phase == .restOver ? AnyShapeStyle(phase.gradient) : AnyShapeStyle(ink))
+                .foregroundStyle(phase == .restOver ? AnyShapeStyle(phase.gradient) : AnyShapeStyle(Theme.ink))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
@@ -589,7 +443,8 @@ private struct IslandFooter: View {
 
             // Continuous here: the island is half the Lock Screen's width, and
             // eighteen ticks across it would be lint rather than a bar.
-            SetProgressBar(state: context.state, phase: phase, height: 5, segmented: false)
+            PhaseProgressBar(completed: context.state.completedSets, total: context.state.totalSets,
+                             phase: phase, height: 5, maxTicks: 0)
                 .padding(.top, 2)
         }
         .padding(.top, 7)

@@ -68,6 +68,7 @@ struct WatchExerciseSnapshot: Codable, Hashable, Identifiable, Sendable {
 
     var completedCount: Int { sets.filter(\.isCompleted).count }
     var isComplete: Bool { !sets.isEmpty && completedCount == sets.count }
+    var progress: Double { sets.isEmpty ? 0 : Double(completedCount) / Double(sets.count) }
 }
 
 /// A session in progress, as the watch sees it.

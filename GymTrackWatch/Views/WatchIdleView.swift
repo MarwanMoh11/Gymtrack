@@ -6,6 +6,9 @@ struct WatchIdleView: View {
     var connector: WatchConnector
 
     private var idle: WatchIdleSnapshot { connector.idle }
+    /// Nothing is running, so the screen wears the colour a session would be
+    /// started in — except on a rest day, which has earned the calm green.
+    private var phase: SessionPhase { idle.todayTitle == nil ? .done : .working }
 
     var body: some View {
         ScrollView {
@@ -21,28 +24,35 @@ struct WatchIdleView: View {
             .padding(.horizontal, 4)
         }
         .navigationTitle("GymTrack")
-        .containerBackground(Theme.accent.gradient.opacity(0.25), for: .navigation)
+        .watchScreenTint(phase)
         .onAppear { connector.requestMirror() }
     }
 
     // MARK: - Today
 
     private var todayCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(idle.todayTitle == nil ? "Rest day" : "Today")
-                .font(Theme.eyebrow)
-                .foregroundStyle(Theme.textTertiary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                WatchGlyphTile(symbol: idle.todayTitle == nil ? "moon.zzz.fill"
+                                                             : "figure.strengthtraining.traditional",
+                               tint: phase.tint, size: 24)
+                Text(idle.todayTitle == nil ? "REST DAY" : "TODAY")
+                    .font(Theme.eyebrow)
+                    .tracking(1.2)
+                    .foregroundStyle(phase.tint.opacity(0.9))
+                Spacer(minLength: 0)
+            }
 
             Text(idle.todayTitle ?? "Nothing scheduled")
                 .font(Theme.rounded(19, weight: .heavy))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.ink)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
 
             if idle.todayTitle != nil {
                 Text("\(idle.todayExerciseCount) exercises · \(idle.todaySetCount) sets")
                     .font(Theme.number(12, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(phase.gradient)
             }
 
             if !idle.todayMuscles.isEmpty {
@@ -52,9 +62,7 @@ struct WatchIdleView: View {
                     .lineLimit(1)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .watchCard(phase: phase)
     }
 
     private var startButtons: some View {
@@ -65,12 +73,8 @@ struct WatchIdleView: View {
             } label: {
                 Label(idle.todayTitle == nil ? "Start freestyle" : "Start workout",
                       systemImage: "figure.strengthtraining.traditional")
-                    .font(Theme.rounded(15, weight: .bold))
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
-            .foregroundStyle(.black)
+            .buttonStyle(WatchProminentButtonStyle(phase: .working))
 
             if idle.todayTitle != nil {
                 Button {
@@ -78,22 +82,19 @@ struct WatchIdleView: View {
                     connector.send(.startFreestyle)
                 } label: {
                     Text("Freestyle instead")
-                        .font(Theme.rounded(13, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .tint(Theme.surfaceRaised)
+                .buttonStyle(WatchQuietButtonStyle(weight: .semibold))
             }
         }
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.accent)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Theme.warning.wash)
+                    .shadow(color: Theme.warning.opacity(idle.streak > 0 ? 0.5 : 0), radius: 4)
                 Text(idle.streak > 0 ? "\(idle.streak) day streak" : "No streak yet")
                     .font(Theme.rounded(12, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
@@ -101,6 +102,8 @@ struct WatchIdleView: View {
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
 
             if let title = idle.lastSessionTitle, let date = idle.lastSessionDate {
                 Text("Last: \(title), \(date.formatted(.relative(presentation: .numeric)))")
@@ -109,19 +112,21 @@ struct WatchIdleView: View {
                     .lineLimit(2)
             }
         }
+        .padding(.horizontal, 4)
         .padding(.top, 2)
     }
 
     // MARK: - Before the first mirror
 
     private var waitingForPhone: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "iphone.gen3.radiowaves.left.and.right")
-                .font(.system(size: 26))
-                .foregroundStyle(Theme.accent)
+        VStack(spacing: 9) {
+            WatchGlyphTile(symbol: "iphone.gen3.radiowaves.left.and.right",
+                           tint: Theme.accent, size: 46)
+                .shadow(color: Theme.accent.opacity(0.28), radius: 10)
             Text("Waiting for your phone")
                 .font(Theme.rounded(15, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(Theme.ink)
+                .multilineTextAlignment(.center)
             Text("Open GymTrack on iPhone once and your routine appears here.")
                 .font(Theme.rounded(12, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)

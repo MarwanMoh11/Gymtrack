@@ -36,6 +36,8 @@ struct WatchLoggerView: View {
     private var scale: LoadScale {
         exercise?.resolvedScale(sessionUnit: session.unit) ?? .standard(session.unit)
     }
+    /// What the screen is coloured in right now.
+    private var phase: SessionPhase { session.phase(resting: rest.isRunning) }
 
     var body: some View {
         ScrollView {
@@ -58,6 +60,7 @@ struct WatchLoggerView: View {
         // tap too many.
         .defaultFocus($isCrownFocused, true)
         .navigationTitle(session.title)
+        .watchScreenTint(phase)
         .sheet(isPresented: $showingExercises) {
             WatchExerciseListView(session: session, connector: connector)
         }
@@ -78,25 +81,36 @@ struct WatchLoggerView: View {
             WatchHaptics.tick()
             showingExercises = true
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(exercise?.name ?? "Freestyle")
-                    .font(Theme.rounded(15, weight: .heavy))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.75)
-                    .multilineTextAlignment(.leading)
+            HStack(spacing: 8) {
+                WatchGlyphTile(symbol: phase.glyph, tint: phase.tint, size: 26)
 
-                HStack(spacing: 5) {
-                    Text("Set \(session.currentSetNumber)/\(exercise?.sets.count ?? 0)")
-                        .font(Theme.number(11, weight: .bold))
-                        .foregroundStyle(Theme.accent)
-                    if let last = exercise?.lastTimeLabel {
-                        Text("last \(last)")
-                            .font(Theme.rounded(11, weight: .medium))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(exercise?.name ?? "Freestyle")
+                        .font(Theme.rounded(15, weight: .heavy))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 5) {
+                        // Once everything is logged there is no current set to
+                        // name, so the line switches to the session's total
+                        // rather than pointing at a set that's already done.
+                        Text(phase == .done
+                             ? "\(session.completedSets)/\(session.totalSets) sets"
+                             : "Set \(session.currentSetNumber)/\(exercise?.sets.count ?? 0)")
+                            .font(Theme.number(11, weight: .bold))
+                            .foregroundStyle(phase.gradient)
+                        if let last = exercise?.lastTimeLabel {
+                            Text("last \(last)")
+                                .font(Theme.rounded(11, weight: .medium))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                        }
                     }
+                    .minimumScaleFactor(0.8)
                 }
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -105,21 +119,22 @@ struct WatchLoggerView: View {
 
     // MARK: - Rest
 
+    /// The rest, when there is one. Amber and ringed — the same rest the Lock
+    /// Screen is showing, wearing the same colour.
     private var restStrip: some View {
         HStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .stroke(Theme.hairline, lineWidth: 4)
-                Circle()
-                    .trim(from: 0, to: rest.progress)
-                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-            }
-            .frame(width: 26, height: 26)
+            WatchRestRing(progress: rest.progress, phase: .resting, size: 28)
 
-            Text(rest.label)
-                .font(Theme.number(17, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(rest.label)
+                    .font(Theme.number(18, weight: .bold))
+                    .foregroundStyle(SessionPhase.resting.tint)
+                    .shadow(color: SessionPhase.resting.glow, radius: 5)
+                Text("REST")
+                    .font(Theme.microCaps)
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.textTertiary)
+            }
 
             Spacer(minLength: 0)
 
@@ -128,14 +143,11 @@ struct WatchLoggerView: View {
                 connector.send(.stopRest)
             } label: {
                 Text("Skip")
-                    .font(Theme.rounded(12, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
             }
-            .buttonStyle(.bordered)
-            .tint(Theme.surfaceRaised)
+            .buttonStyle(WatchQuietButtonStyle(tint: Theme.textPrimary, size: 12, compact: true))
+            .fixedSize()
         }
-        .padding(8)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .watchCard(padding: 8, radius: 12, phase: .resting)
     }
 
     // MARK: - The numbers
@@ -176,34 +188,13 @@ struct WatchLoggerView: View {
     /// A number, and whether the crown is on it.
     private func tile(title: String, value: String, field: Field, caption: String? = nil) -> some View {
         let isEditing = editing == field
-        return VStack(spacing: 0) {
-            Text(value)
-                .font(Theme.number(26))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-            HStack(spacing: 3) {
-                Text(title.uppercased())
-                    .font(Theme.eyebrow)
-                    .foregroundStyle(isEditing ? Theme.accent : Theme.textTertiary)
-                if let caption {
-                    Text("· \(caption)")
-                        .font(Theme.rounded(10, weight: .semibold))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(isEditing ? Theme.accent : Theme.hairline, lineWidth: isEditing ? 2 : 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture { select(field) }
-        .accessibilityLabel("\(title) \(value)")
-        .accessibilityHint(isEditing ? "The Digital Crown changes this" : "Tap to turn this with the Digital Crown")
+        return WatchValueTile(title: title, value: value, caption: caption,
+                              isEditing: isEditing, phase: phase)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture { select(field) }
+            .accessibilityLabel("\(title) \(value)")
+            .accessibilityHint(isEditing ? "The Digital Crown changes this"
+                                         : "Tap to turn this with the Digital Crown")
     }
 
     /// One increment either way on whichever number is selected.
@@ -225,11 +216,9 @@ struct WatchLoggerView: View {
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(maxWidth: .infinity, minHeight: 26)
+                .frame(minHeight: 14)
         }
-        .buttonStyle(.bordered)
-        .tint(Theme.surfaceRaised)
+        .buttonStyle(WatchQuietButtonStyle(tint: Theme.textPrimary))
         .accessibilityLabel("\(verb) \(editingName)")
     }
 
@@ -307,12 +296,10 @@ struct WatchLoggerView: View {
             log(set: set, exercise: exercise)
         } label: {
             Label("Log set", systemImage: "checkmark")
-                .font(Theme.rounded(15, weight: .heavy))
-                .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Theme.accent)
-        .foregroundStyle(.black)
+        // Always lime, even mid-rest: this is the button that ends the rest,
+        // so colouring it amber would be the screen arguing with itself.
+        .buttonStyle(WatchProminentButtonStyle(phase: .working))
     }
 
     private func log(set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) {
@@ -332,14 +319,13 @@ struct WatchLoggerView: View {
     }
 
     private var allDone: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 28))
-                .foregroundStyle(Theme.accent)
+        VStack(spacing: 7) {
+            WatchGlyphTile(symbol: "checkmark", tint: SessionPhase.done.tint, size: 42)
+                .shadow(color: SessionPhase.done.tint.opacity(0.3), radius: 9)
             Text("Every set logged")
                 .font(Theme.rounded(15, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-            Text("Swipe up to finish")
+                .foregroundStyle(Theme.ink)
+            Text("Swipe left to finish")
                 .font(Theme.rounded(12, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
         }
@@ -355,12 +341,8 @@ struct WatchLoggerView: View {
                 connector.undoSet(last)
             } label: {
                 Label("Undo last set", systemImage: "arrow.uturn.backward")
-                    .font(Theme.rounded(12, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
-            .tint(Theme.surfaceRaised)
+            .buttonStyle(WatchQuietButtonStyle(tint: Theme.textSecondary, weight: .semibold, size: 12))
         }
     }
 
@@ -419,23 +401,35 @@ struct WatchExerciseListView: View {
                     connector.send(.focusExercise(catalogID: exercise.id))
                     dismiss()
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: exercise.isComplete ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 13))
-                            .foregroundStyle(exercise.isComplete ? Theme.accent : Theme.textTertiary)
+                    HStack(spacing: 9) {
+                        // The ring carries the count, so a glance down the list
+                        // says how far into each exercise you are without
+                        // reading a single fraction.
+                        WatchRestRing(progress: exercise.progress,
+                                      phase: exercise.isComplete ? .done : .working,
+                                      size: 22, lineWidth: 3)
+
                         VStack(alignment: .leading, spacing: 1) {
                             Text(exercise.name)
                                 .font(Theme.rounded(13, weight: .bold))
-                                .foregroundStyle(Theme.textPrimary)
+                                .foregroundStyle(Theme.ink)
                                 .lineLimit(2)
                             Text("\(exercise.completedCount)/\(exercise.sets.count) sets")
                                 .font(Theme.number(11, weight: .semibold))
-                                .foregroundStyle(Theme.textSecondary)
+                                .foregroundStyle(exercise.isComplete
+                                                 ? AnyShapeStyle(SessionPhase.done.gradient)
+                                                 : AnyShapeStyle(Theme.textSecondary))
                         }
                     }
                 }
                 .listRowBackground(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.surface)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(LinearGradient(colors: [Theme.surfaceRaised, Theme.surface],
+                                             startPoint: .top, endPoint: .bottom))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Theme.hairline, lineWidth: 1)
+                        )
                 )
             }
         }

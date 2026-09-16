@@ -116,13 +116,20 @@ struct WatchRootView: View {
 private struct EndingOverlay: View {
     var body: some View {
         ZStack {
-            Theme.background.opacity(0.92).ignoresSafeArea()
-            VStack(spacing: 8) {
-                ProgressView().tint(Theme.accent)
+            Theme.background.opacity(0.94).ignoresSafeArea()
+            SessionPhase.done.bloom(strength: 1.4).ignoresSafeArea()
+            VStack(spacing: 9) {
+                ProgressView()
+                    .tint(SessionPhase.done.tint)
                 Text("Saving")
                     .font(Theme.rounded(13, weight: .bold))
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(Theme.ink)
+                Text("Closing the workout in Health")
+                    .font(Theme.rounded(10, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
             }
+            .padding(.horizontal, 12)
         }
     }
 }
