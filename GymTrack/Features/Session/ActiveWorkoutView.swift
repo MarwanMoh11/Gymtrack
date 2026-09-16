@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Combine
 
 /// The logging screen. Optimised for use mid-set: the next set is always
 /// expanded with large steppers, everything else collapses to a summary row.
