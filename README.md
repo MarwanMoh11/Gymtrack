@@ -58,6 +58,18 @@ last session's numbers sit next to each set so you know what to beat. A rest
 timer starts on its own when you log a set, keeps time correctly if you lock the
 phone, and notifies you when it's up.
 
+**Machine weights** — gyms aren't uniform, so the app doesn't pretend they are.
+Every exercise knows what its equipment is marked in and what one step is worth:
+a barbell moves 2.5 kg, a dumbbell 2, a pin-selected stack 5, and in a pound gym
+those become 5, 5 and 10. When a machine disagrees — the leg press is stamped in
+pounds, or its stack jumps in fifteens — tap the unit under the weight while
+you're logging it, pick kg or lb and the step, and that one exercise is put right
+for good. Steppers, the Digital Crown and the app's own progression suggestions
+then only ever offer weights that machine can actually be set to. Everything is
+still stored in kilograms and converted, so records, volume and Health stay
+comparable whatever each machine says; Settings → Machine weights lists anything
+you've corrected and the defaults behind everything else.
+
 **Putting a session down** — pull the logger down by its handle, or tap
 *Minimise*, and it shrinks into a bar above the tab bar that keeps the clock,
 the set count and the rest countdown in view. Tap it to go back. The session
@@ -102,6 +114,8 @@ deleting a session in GymTrack removes its workout from Health too.
 **Progressive overload** — double progression, built in. Clear the top of the
 rep range on every set and the app tells you to add weight and reset to the
 bottom of the range. Fall short and it tells you to hold the load or back off.
+The weight it names is always the next rung on that machine, never a number
+between two pins.
 
 **Personal records** — recognised on estimated 1RM, so heavier-for-fewer and
 lighter-for-more both count. Celebrated the moment you log the set.

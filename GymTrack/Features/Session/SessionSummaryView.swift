@@ -94,7 +94,7 @@ struct SessionSummaryView: View {
                             .foregroundStyle(Theme.textPrimary)
                         Text(set.tracking == .duration
                              ? "\(set.seconds)s"
-                             : "\(AppSettings.shared.weight(set.weightKg)) × \(set.reps)")
+                             : "\(set.weightLabel) × \(set.reps)")
                             .font(Theme.number(12, weight: .semibold))
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -117,7 +117,7 @@ struct SessionSummaryView: View {
                         ForEach(group.sets.filter(\.isCompleted)) { set in
                             Text(set.tracking == .duration
                                  ? "\(set.seconds)s"
-                                 : (set.weightKg == 0 ? "\(set.reps)" : "\(AppSettings.shared.weight(set.weightKg, showUnit: false))×\(set.reps)"))
+                                 : (set.weightKg == 0 ? "\(set.reps)" : "\(set.loadScale.format(set.weightKg, showUnit: false))×\(set.reps)"))
                                 .font(Theme.number(12, weight: .semibold))
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.horizontal, 8).padding(.vertical, 4)
@@ -211,7 +211,7 @@ struct SessionDetailView: View {
                                 Spacer()
                                 Text(set.tracking == .duration
                                      ? "\(set.seconds)s"
-                                     : "\(AppSettings.shared.weight(set.weightKg)) × \(set.reps)")
+                                     : "\(set.weightLabel) × \(set.reps)")
                                     .font(Theme.number(13, weight: .semibold))
                                     .foregroundStyle(Theme.textPrimary)
                             }

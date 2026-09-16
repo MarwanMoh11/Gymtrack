@@ -226,7 +226,10 @@ enum TrainingStats {
     /// Double progression: work up the rep range at a fixed load, then add
     /// weight and drop back to the bottom of the range.
     static func suggestion(for item: PlanItem, lastSets: [SetLog]) -> OverloadSuggestion {
-        let increment = weightIncrement(for: item)
+        // Every weight this returns has to be one the equipment can actually be
+        // set to, so the progression is read off the exercise's own ladder.
+        let scale = item.loadScale
+        let increment = scale.incrementKg
 
         guard !lastSets.isEmpty else {
             return OverloadSuggestion(
@@ -237,10 +240,17 @@ enum TrainingStats {
             )
         }
 
-        let workingWeight = lastSets.map(\.weightKg).max() ?? item.targetWeightKg
-        let setsAtWeight = lastSets.filter { $0.weightKg == workingWeight }
+        // What was actually lifted — used to find the sets that count, so it has
+        // to match the stored numbers exactly.
+        let lastWeight = lastSets.map(\.weightKg).max() ?? item.targetWeightKg
+        let setsAtWeight = lastSets.filter { $0.weightKg == lastWeight }
         let allHitTop = !setsAtWeight.isEmpty && setsAtWeight.allSatisfy { $0.reps >= item.targetRepsHigh }
         let minReps = setsAtWeight.map(\.reps).min() ?? 0
+
+        // What today is prescribed from: the same load, pulled onto the ladder
+        // this machine has. Otherwise the card names 60.5 kg while the logger
+        // opens on the 60 the stack can actually do.
+        let workingWeight = scale.snap(kg: lastWeight)
 
         if item.tracking == .duration {
             let best = lastSets.map(\.seconds).max() ?? item.targetSeconds
@@ -252,7 +262,7 @@ enum TrainingStats {
 
         // Unloaded bodyweight work has no weight to add — the progression is
         // reps, then eventually a belt or a vest.
-        let isUnloadedBodyweight = item.tracking == .bodyweightReps && workingWeight == 0
+        let isUnloadedBodyweight = item.tracking == .bodyweightReps && lastWeight == 0
 
         if allHitTop {
             if isUnloadedBodyweight {
@@ -261,20 +271,22 @@ enum TrainingStats {
                     message: "You cleared \(item.targetRepsHigh) reps on every set. Push past it, or start adding weight."
                 )
             }
+            let next = scale.step(kg: workingWeight, by: 1)
             return OverloadSuggestion(
                 action: .increaseWeight,
-                weightKg: workingWeight + increment,
+                weightKg: next,
                 reps: item.targetRepsLow,
-                message: "You cleared \(item.targetRepsHigh) reps on every set. Add \(AppSettings.shared.weight(increment)) and reset to \(item.targetRepsLow) reps."
+                message: "You cleared \(item.targetRepsHigh) reps on every set. Go to \(scale.format(next)) and reset to \(item.targetRepsLow) reps."
             )
         }
 
         if minReps < item.targetRepsLow - 2 && workingWeight > increment && !isUnloadedBodyweight {
+            let backOff = scale.step(kg: workingWeight, by: -1)
             return OverloadSuggestion(
                 action: .deload,
-                weightKg: max(0, workingWeight - increment),
+                weightKg: backOff,
                 reps: item.targetRepsLow,
-                message: "Reps fell below the range last time. Back off to \(AppSettings.shared.weight(max(0, workingWeight - increment))) and rebuild."
+                message: "Reps fell below the range last time. Back off to \(scale.format(backOff)) and rebuild."
             )
         }
 
@@ -285,18 +297,14 @@ enum TrainingStats {
             reps: goal,
             message: isUnloadedBodyweight
                 ? "Chase \(goal) reps on every set."
-                : "Stay at \(AppSettings.shared.weight(workingWeight)) and chase \(goal) reps on every set."
+                : "Stay at \(scale.format(workingWeight)) and chase \(goal) reps on every set."
         )
     }
 
-    /// Smallest jump that's actually loadable for the equipment in question.
-    static func weightIncrement(for item: PlanItem) -> Double {
-        guard let equipment = item.catalog?.equipment else { return 2.5 }
-        if equipment.contains("Dumbbell") || equipment.contains("Kettlebell") { return 2.0 }
-        if equipment.contains("Cable") || equipment.contains("Machine") { return 2.5 }
-        if equipment.contains("Band") { return 1.0 }
-        return 2.5   // barbell: 1.25 kg plates a side
-    }
+    /// Smallest jump that's actually loadable for the equipment in question,
+    /// in kilograms. Now a question for `LoadScaleBook` — it knows both what the
+    /// equipment implies and what the user has corrected it to.
+    static func weightIncrement(for item: PlanItem) -> Double { item.loadScale.incrementKg }
 }
 
 // MARK: - Progress screen metrics

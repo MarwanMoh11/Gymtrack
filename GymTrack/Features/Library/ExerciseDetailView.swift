@@ -9,6 +9,11 @@ struct ExerciseDetailView: View {
 
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
     @State private var metric: Metric = .estimatedMax
+    @State private var showingScale = false
+
+    /// Everything on this screen is one exercise, so every number on it reads
+    /// in that exercise's own unit rather than the app-wide one.
+    private var scale: LoadScale { exercise.loadScale }
 
     enum Metric: String, CaseIterable, Identifiable {
         case estimatedMax = "Est. 1RM"
@@ -91,8 +96,32 @@ struct ExerciseDetailView: View {
                     Pill(text: difficulty.capitalized)
                 }
             }
+
+            if exercise.tracking != .duration {
+                Divider().overlay(Theme.hairline)
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Loaded in")
+                            .font(Theme.eyebrow)
+                            .tracking(1.0)
+                            .foregroundStyle(Theme.textTertiary)
+                        Text("\(scale.unit.label), \(scale.incrementLabel) at a time")
+                            .font(Theme.rounded(13, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer(minLength: 8)
+                    LoadScaleChip(scale: scale,
+                                  isCustom: LoadScaleBook.shared.isCustomised(exercise.id)) {
+                        showingScale = true
+                    }
+                }
+            }
         }
         .gtCard()
+        .sheet(isPresented: $showingScale) {
+            LoadScaleSheet(exercise: exercise,
+                           referenceKg: history.first?.topSet?.weightKg ?? 0)
+        }
     }
 
     // MARK: - Bests
@@ -108,10 +137,10 @@ struct ExerciseDetailView: View {
                 StatTile(value: "\(allSets.map(\.seconds).max() ?? 0)s", label: "Longest hold")
                 StatTile(value: "\(history.count)", label: "Sessions")
             } else {
-                StatTile(value: AppSettings.shared.weight(heaviest, showUnit: false),
-                         label: "Heaviest \(AppSettings.shared.weightUnit.short)", tint: Theme.accent)
-                StatTile(value: AppSettings.shared.weight(bestE1RM, showUnit: false),
-                         label: "Est. 1RM")
+                StatTile(value: scale.format(heaviest, showUnit: false),
+                         label: "Heaviest \(scale.unit.short)", tint: Theme.accent)
+                StatTile(value: scale.format(bestE1RM, showUnit: false),
+                         label: "Est. 1RM \(scale.unit.short)")
                 StatTile(value: "\(bestReps)", label: "Most reps")
             }
         }
@@ -187,7 +216,7 @@ struct ExerciseDetailView: View {
             case .topSet: entry.topSet?.weightKg ?? 0
             case .volume: entry.volumeKg
             }
-            return (entry.date, AppSettings.shared.weightUnit.fromKg(value))
+            return (entry.date, scale.display(value))
         }
     }
 
@@ -203,7 +232,7 @@ struct ExerciseDetailView: View {
                             .font(Theme.rounded(13, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                         Spacer()
-                        Text("\(entry.sets.count) sets · \(AppSettings.shared.weight(entry.volumeKg))")
+                        Text("\(entry.sets.count) sets · \(scale.format(entry.volumeKg))")
                             .font(Theme.rounded(11, weight: .medium))
                             .foregroundStyle(Theme.textTertiary)
                     }
@@ -211,7 +240,7 @@ struct ExerciseDetailView: View {
                         ForEach(entry.sets) { set in
                             Text(set.tracking == .duration
                                  ? "\(set.seconds)s"
-                                 : (set.weightKg == 0 ? "\(set.reps)" : "\(AppSettings.shared.weight(set.weightKg, showUnit: false))×\(set.reps)"))
+                                 : (set.weightKg == 0 ? "\(set.reps)" : "\(scale.format(set.weightKg, showUnit: false))×\(set.reps)"))
                                 .font(Theme.number(12, weight: .semibold))
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.horizontal, 8).padding(.vertical, 4)

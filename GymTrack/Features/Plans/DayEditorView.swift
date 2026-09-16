@@ -156,6 +156,10 @@ struct PlanItemEditor: View {
     @Bindable var item: PlanItem
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @State private var showingScale = false
+
+    /// What this exercise is loaded in — the same ladder the logger will use.
+    private var scale: LoadScale { item.loadScale }
 
     var body: some View {
         NavigationStack {
@@ -179,18 +183,38 @@ struct PlanItemEditor: View {
                     }
                     .listRowBackground(Theme.surface)
 
-                    Section("Starting weight") {
+                    Section {
                         HStack {
-                            Text(AppSettings.shared.weight(item.targetWeightKg))
+                            Text(scale.format(item.targetWeightKg))
                                 .font(Theme.number(17))
                                 .foregroundStyle(Theme.textPrimary)
                             Spacer()
-                            Stepper("", value: weightBinding, in: 0...500, step: AppSettings.shared.weightUnit.step)
-                                .labelsHidden()
+                            // Walks the machine's own ladder, so a stack that
+                            // only does tens is never left on a half-step.
+                            Stepper("",
+                                    onIncrement: {
+                                        item.targetWeightKg = scale.step(kg: item.targetWeightKg, by: 1)
+                                    },
+                                    onDecrement: {
+                                        item.targetWeightKg = scale.step(kg: item.targetWeightKg, by: -1)
+                                    })
+                            .labelsHidden()
                         }
-                        Text("Once you've logged this exercise, the app carries your last working weight forward automatically.")
-                            .font(Theme.rounded(12, weight: .medium))
-                            .foregroundStyle(Theme.textTertiary)
+
+                        HStack {
+                            Text("Marked in")
+                                .font(Theme.rounded(14, weight: .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                            Spacer()
+                            LoadScaleChip(scale: scale,
+                                          isCustom: LoadScaleBook.shared.isCustomised(item.catalogID)) {
+                                showingScale = true
+                            }
+                        }
+                    } header: {
+                        Text("Starting weight")
+                    } footer: {
+                        Text("Once you've logged this exercise, the app carries your last working weight forward automatically — in whatever this machine is marked in.")
                     }
                     .listRowBackground(Theme.surface)
                 }
@@ -234,12 +258,14 @@ struct PlanItemEditor: View {
             }
         }
         .presentationBackground(Theme.background)
-    }
-
-    private var weightBinding: Binding<Double> {
-        Binding(
-            get: { AppSettings.shared.weightUnit.fromKg(item.targetWeightKg) },
-            set: { item.targetWeightKg = AppSettings.shared.weightUnit.toKg(max(0, $0)) }
-        )
+        .sheet(isPresented: $showingScale) {
+            if let catalog = item.catalog {
+                LoadScaleSheet(exercise: catalog, referenceKg: item.targetWeightKg) { updated in
+                    if item.targetWeightKg > 0 {
+                        item.targetWeightKg = updated.snap(kg: item.targetWeightKg)
+                    }
+                }
+            }
+        }
     }
 }

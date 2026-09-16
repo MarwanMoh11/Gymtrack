@@ -17,6 +17,10 @@ enum BackupService {
         /// first backup format.
         var bodyMetrics: [BodyMetricDTO]?
         var customExercises: [CustomExerciseDTO]
+        /// How individual machines are marked. Optional for the same reason as
+        /// the rest — a backup written before this existed still restores, and
+        /// every exercise in it falls back to its equipment default.
+        var loadScales: [LoadScaleDTO]?
     }
 
     struct Settings: Codable {
@@ -95,6 +99,12 @@ enum BackupService {
         var source: String
     }
 
+    struct LoadScaleDTO: Codable {
+        var catalogID: String
+        var unit: String
+        var increment: Double
+    }
+
     struct CustomExerciseDTO: Codable {
         var id: String
         var name: String
@@ -111,6 +121,7 @@ enum BackupService {
         let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
         let custom = try context.fetch(FetchDescriptor<CustomExerciseRecord>())
         let bodyMetrics = try context.fetch(FetchDescriptor<BodyMetric>())
+        let loadScales = try context.fetch(FetchDescriptor<ExerciseLoadPreference>())
 
         let archive = Archive(
             settings: Settings(
@@ -155,6 +166,9 @@ enum BackupService {
             customExercises: custom.map {
                 CustomExerciseDTO(id: $0.id, name: $0.name, category: $0.category,
                                   muscleRaw: $0.muscleRaw, equipment: $0.equipment, trackingRaw: $0.trackingRaw)
+            },
+            loadScales: loadScales.map {
+                LoadScaleDTO(catalogID: $0.catalogID, unit: $0.unitRaw, increment: $0.increment)
             }
         )
 
@@ -253,11 +267,17 @@ enum BackupService {
             context.insert(metric)
         }
 
+        for dto in archive.loadScales ?? [] {
+            let scale = LoadScale(unit: WeightUnit(rawValue: dto.unit) ?? .kg, increment: dto.increment)
+            context.insert(ExerciseLoadPreference(catalogID: dto.catalogID, scale: scale))
+        }
+
         AppSettings.shared.weightUnit = WeightUnit(rawValue: archive.settings.weightUnit) ?? .kg
         AppSettings.shared.userName = archive.settings.userName
         AppSettings.shared.defaultRestSeconds = archive.settings.defaultRestSeconds
 
         try context.save()
+        LoadScaleBook.shared.reload()
     }
 
     /// Deletes every record. Used by restore and by "erase all data".
@@ -277,7 +297,9 @@ enum BackupService {
         for item in try context.fetch(FetchDescriptor<PlanItem>()) { context.delete(item) }
         for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
         for set in try context.fetch(FetchDescriptor<SetLog>()) { context.delete(set) }
+        for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
 
         try context.save()
+        LoadScaleBook.shared.reload()
     }
 }

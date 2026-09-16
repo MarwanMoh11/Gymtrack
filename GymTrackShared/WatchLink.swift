@@ -55,6 +55,16 @@ struct WatchExerciseSnapshot: Codable, Hashable, Identifiable, Sendable {
     var sets: [WatchSetSnapshot]
     /// What the same exercise looked like last time — "last: 60 kg × 8".
     var lastTimeLabel: String?
+    /// What this exercise's equipment is marked in, and what one step of the
+    /// crown is worth on it. Optional only so a mirror in flight during an app
+    /// update still decodes — read it through `resolvedScale`.
+    var scale: LoadScale?
+
+    /// The ladder to draw and turn, falling back to the session's unit for a
+    /// mirror that predates per-exercise scales.
+    func resolvedScale(sessionUnit: WeightUnit) -> LoadScale {
+        scale ?? .standard(sessionUnit)
+    }
 
     var completedCount: Int { sets.filter(\.isCompleted).count }
     var isComplete: Bool { !sets.isEmpty && completedCount == sets.count }

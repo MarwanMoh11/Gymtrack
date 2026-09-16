@@ -388,6 +388,8 @@ struct ProgressDashboardView: View {
         return VStack(alignment: .leading, spacing: 10) {
             SectionHeader("Personal records")
             ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
+                // Each record reads in whatever that exercise is loaded in.
+                let scale = LoadScaleBook.shared.scale(for: record.catalogID)
                 HStack(spacing: 10) {
                     ZStack {
                         Circle().fill(index < 3 ? Theme.accentDim : Color.white.opacity(0.05))
@@ -414,10 +416,10 @@ struct ProgressDashboardView: View {
                     }
                     Spacer(minLength: 4)
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(AppSettings.shared.weight(record.heaviestKg)) × \(record.bestReps)")
+                        Text("\(scale.format(record.heaviestKg)) × \(record.bestReps)")
                             .font(Theme.number(13, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("1RM ≈ \(AppSettings.shared.weight(record.bestEstimatedOneRepMax))")
+                        Text("1RM ≈ \(scale.format(record.bestEstimatedOneRepMax))")
                             .font(Theme.rounded(10, weight: .medium))
                             .foregroundStyle(Theme.textTertiary)
                     }

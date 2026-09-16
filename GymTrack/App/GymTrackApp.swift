@@ -11,7 +11,8 @@ struct GymTrackApp: App {
             container = try ModelContainer(
                 for: Plan.self, PlanDay.self, PlanItem.self,
                 WorkoutSession.self, SetLog.self,
-                CustomExerciseRecord.self, BodyMetric.self
+                CustomExerciseRecord.self, BodyMetric.self,
+                ExerciseLoadPreference.self
             )
         } catch {
             // A store that can't be opened is unrecoverable; falling back to an
@@ -21,11 +22,17 @@ struct GymTrackApp: App {
                 for: Plan.self, PlanDay.self, PlanItem.self,
                 WorkoutSession.self, SetLog.self,
                 CustomExerciseRecord.self, BodyMetric.self,
+                ExerciseLoadPreference.self,
                 configurations: config
             )
         }
 
         Self.clearBakedRestOverrides(in: container)
+
+        // How each machine is marked is read from everywhere — the logger, a
+        // progression suggestion, the watch mirror — so the book is loaded once
+        // here rather than fetched per screen.
+        LoadScaleBook.shared.configure(container: container)
 
         // Before anything else can arrive: iOS wakes a terminated app in the
         // background to hand it a watch message, and the link has to be up and

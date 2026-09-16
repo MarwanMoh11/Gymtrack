@@ -14,6 +14,13 @@ struct SettingsView: View {
     @State private var showingWipeConfirm = false
     @State private var alert: AlertPayload?
 
+    /// "3 set up" — enough to say whether anything has been corrected without
+    /// opening the screen.
+    private var machineSummary: String {
+        let count = LoadScaleBook.shared.overrides.count
+        return count == 0 ? "All default" : "\(count) set up"
+    }
+
     private struct AlertPayload: Identifiable {
         let id = UUID()
         let title: String
@@ -34,13 +41,32 @@ struct SettingsView: View {
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(Theme.textSecondary)
                     }
+                }
+                .listRowBackground(Theme.surface)
 
+                Section {
                     Picker("Weight unit", selection: Binding(
                         get: { settings.weightUnit },
                         set: { settings.weightUnit = $0 }
                     )) {
                         ForEach(WeightUnit.allCases) { Text($0.label).tag($0) }
                     }
+
+                    NavigationLink {
+                        MachineWeightsView()
+                    } label: {
+                        HStack {
+                            Label("Machine weights", systemImage: "slider.horizontal.3")
+                            Spacer()
+                            Text(machineSummary)
+                                .font(Theme.rounded(13, weight: .medium))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                    }
+                } header: {
+                    Text("Weights")
+                } footer: {
+                    Text("A machine that disagrees with this — a stack stamped in pounds, or one that jumps in fifteens — can be put right on its own, from the unit under the weight while you log it.")
                 }
                 .listRowBackground(Theme.surface)
 

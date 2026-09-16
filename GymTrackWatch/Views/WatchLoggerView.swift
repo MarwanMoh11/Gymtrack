@@ -30,7 +30,12 @@ struct WatchLoggerView: View {
 
     private var exercise: WatchExerciseSnapshot? { session.currentExercise }
     private var set: WatchSetSnapshot? { session.currentSet }
-    private var unit: WeightUnit { session.unit }
+    /// What the exercise in front of you is marked in, and what one click of
+    /// the crown is worth on it. The leg press being stamped in pounds is as
+    /// true on the wrist as it is on the phone.
+    private var scale: LoadScale {
+        exercise?.resolvedScale(sessionUnit: session.unit) ?? .standard(session.unit)
+    }
 
     var body: some View {
         ScrollView {
@@ -144,7 +149,7 @@ struct WatchLoggerView: View {
             case .weightReps, .bodyweightReps:
                 HStack(spacing: 6) {
                     if exercise.tracking.logsWeight || set.weightKg > 0 {
-                        tile(title: unit.short, value: trimmed(weightDisplay), field: .weight)
+                        tile(title: scale.unit.short, value: trimmed(weightDisplay), field: .weight)
                     }
                     tile(title: "reps", value: "\(Int(repsValue))", field: .reps, caption: set.targetLabel)
                 }
@@ -238,7 +243,10 @@ struct WatchLoggerView: View {
 
     private func step(by delta: Double) {
         let current = currentValue(of: editing)
-        let next = min(max(current + delta, crownRange.lowerBound), crownRange.upperBound)
+        let stepped = editing == .weight
+            ? scale.step(display: current, by: delta > 0 ? 1 : -1)
+            : current + delta
+        let next = min(max(stepped, crownRange.lowerBound), crownRange.upperBound)
         guard next != current else { return }
         write(next)
         // Keep the crown where the buttons left off, or its next turn would
@@ -259,7 +267,10 @@ struct WatchLoggerView: View {
     /// What the crown writes back to, and the sane bounds for it.
     private func write(_ turned: Double) {
         switch editing {
-        case .weight: weightDisplay = max(0, turned)
+        // Onto the ladder: the crown is the only way in here — there is no
+        // keypad to reach a weight between two pins — so a turn should always
+        // land on something the machine can be set to.
+        case .weight: weightDisplay = scale.snap(display: max(0, turned))
         case .reps: repsValue = max(0, turned.rounded())
         case .seconds: secondsValue = max(0, turned.rounded())
         }
@@ -275,7 +286,7 @@ struct WatchLoggerView: View {
 
     private var crownRange: ClosedRange<Double> {
         switch editing {
-        case .weight: 0...(unit == .kg ? 400 : 880)
+        case .weight: 0...scale.displayCeiling
         case .reps: 0...50
         case .seconds: 5...600
         }
@@ -283,7 +294,7 @@ struct WatchLoggerView: View {
 
     private var crownStep: Double {
         switch editing {
-        case .weight: unit.step
+        case .weight: scale.increment
         case .reps: 1
         case .seconds: 5
         }
@@ -308,7 +319,7 @@ struct WatchLoggerView: View {
         WatchHaptics.log()
         connector.logSet(
             set,
-            weightKg: unit.toKg(weightDisplay),
+            weightKg: scale.kilograms(weightDisplay),
             reps: Int(repsValue),
             seconds: Int(secondsValue)
         )
@@ -366,7 +377,7 @@ struct WatchLoggerView: View {
     /// when the set has none of its own.
     private func load(_ set: WatchSetSnapshot?) {
         guard let set else { return }
-        weightDisplay = unit.snap(unit.fromKg(set.weightKg))
+        weightDisplay = scale.display(set.weightKg)
         repsValue = Double(set.reps > 0 ? set.reps : max(set.targetRepsLow, 1))
         secondsValue = Double(set.seconds > 0 ? set.seconds : 45)
         editing = defaultField
@@ -382,11 +393,7 @@ struct WatchLoggerView: View {
         }
     }
 
-    private func trimmed(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", value)
-            : String(format: "%.1f", value)
-    }
+    private func trimmed(_ value: Double) -> String { scale.text(value) }
 }
 
 // MARK: - Jumping between exercises

@@ -200,9 +200,52 @@ struct DisclosureChevron: View {
 struct StepperField: View {
     let title: String
     @Binding var value: Double
-    let step: Double
     var format: (Double) -> String
     var unit: String
+    /// Where a tap of − or + lands. A plain step for reps and seconds; the
+    /// machine's own ladder for a weight, so the field can't offer a load the
+    /// equipment doesn't have.
+    var advance: (Double, Int) -> Double
+    /// Set to make the unit caption a button — how the weight field opens
+    /// "how is this one marked?".
+    var unitAction: (() -> Void)?
+    /// Whether the caption describes something the user set themselves, which
+    /// is worth the accent so an unusual machine looks unusual.
+    var unitIsCustom = false
+    /// The ladder behind a weight field, drawn in the caption.
+    private var scale: LoadScale?
+
+    /// Fixed steps: reps, seconds, anything that isn't loaded on a machine.
+    init(title: String,
+         value: Binding<Double>,
+         step: Double,
+         format: @escaping (Double) -> String,
+         unit: String) {
+        self.title = title
+        self._value = value
+        self.format = format
+        self.unit = unit
+        self.advance = { current, direction in
+            max(0, current + Double(direction) * step)
+        }
+    }
+
+    /// A weight, stepped along the ladder its equipment actually has.
+    init(title: String,
+         value: Binding<Double>,
+         scale: LoadScale,
+         format: @escaping (Double) -> String,
+         unitAction: (() -> Void)? = nil,
+         unitIsCustom: Bool = false) {
+        self.title = title
+        self._value = value
+        self.format = format
+        self.unit = scale.shortLabel
+        self.advance = { current, direction in scale.step(display: current, by: direction) }
+        self.unitAction = unitAction
+        self.unitIsCustom = unitIsCustom
+        self.scale = scale
+    }
 
     @State private var isEditing = false
     @State private var draft = ""
@@ -215,19 +258,19 @@ struct StepperField: View {
                 .foregroundStyle(Theme.textTertiary)
 
             HStack(spacing: 4) {
-                stepButton(icon: "minus", enabled: value - step >= 0) {
-                    value = max(0, value - step)
+                stepButton(icon: "minus", enabled: value > 0) {
+                    value = max(0, advance(value, -1))
                     Haptics.tick()
                 }
 
-                // Tapping the number types it directly — stepping from 0 to a
-                // working weight would otherwise take dozens of taps.
-                Button {
-                    draft = value == 0 ? "" : trimmed(value)
-                    isEditing = true
-                    Haptics.tick()
-                } label: {
-                    VStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    // Tapping the number types it directly — stepping from 0 to
+                    // a working weight would otherwise take dozens of taps.
+                    Button {
+                        draft = value == 0 ? "" : trimmed(value)
+                        isEditing = true
+                        Haptics.tick()
+                    } label: {
                         Text(format(value))
                             .font(Theme.number(26))
                             .foregroundStyle(Theme.textPrimary)
@@ -235,24 +278,24 @@ struct StepperField: View {
                             .minimumScaleFactor(0.5)
                             .contentTransition(.numericText())
                             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: value)
-                        Text(unit)
-                            .font(Theme.rounded(10, weight: .semibold))
-                            .foregroundStyle(Theme.textTertiary)
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+
+                    caption
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
 
                 stepButton(icon: "plus", enabled: true) {
-                    value += step
+                    value = advance(value, 1)
                     Haptics.tick()
                 }
             }
             .frame(maxWidth: .infinity)
         }
         .alert("Enter \(title.lowercased())", isPresented: $isEditing) {
-            TextField(unit, text: $draft)
+            TextField(unitName, text: $draft)
                 .keyboardType(.decimalPad)
             Button("Set") {
                 if let entered = Double(draft.replacingOccurrences(of: ",", with: ".")) {
@@ -264,8 +307,30 @@ struct StepperField: View {
         }
     }
 
+    /// The unit under the number. For a weight it's a button — it's what opens
+    /// "how is this one marked?", and the only place anyone would look for it.
+    @ViewBuilder
+    private var caption: some View {
+        if let scale, let unitAction {
+            LoadScaleChip(scale: scale, isCustom: unitIsCustom, action: unitAction)
+        } else {
+            Text(unit)
+                .font(Theme.rounded(10, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+        }
+    }
+
+    /// Just the unit, for the keypad's placeholder — "kg · 2.5" reads as a
+    /// value to type rather than a hint.
+    private var unitName: String {
+        scale?.unit.short ?? unit
+    }
+
+    /// What the keypad opens on. A weight prefills at the precision its ladder
+    /// can express, so the number you're handed is the number you were reading.
     private func trimmed(_ number: Double) -> String {
-        number.truncatingRemainder(dividingBy: 1) == 0
+        if let scale { return scale.text(number) }
+        return number.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", number)
             : String(format: "%.2f", number).replacingOccurrences(of: "0$", with: "", options: .regularExpression)
     }
@@ -280,5 +345,36 @@ struct StepperField: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+    }
+}
+
+// MARK: - Load scale chip
+
+/// "kg · 2.5" — what a weight is being entered in, and what one tap of + is
+/// worth. Tapping it is how anyone discovers that a machine can be corrected.
+struct LoadScaleChip: View {
+    let scale: LoadScale
+    var isCustom: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(scale.shortLabel)
+                    .font(Theme.rounded(10, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+            }
+            .foregroundStyle(isCustom ? Theme.accent : Theme.textTertiary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(isCustom ? Theme.accentDim : Color.white.opacity(0.05))
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Weights in \(scale.unit.label), \(scale.incrementLabel) at a time")
+        .accessibilityHint("Change how this one is marked")
     }
 }

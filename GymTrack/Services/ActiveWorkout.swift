@@ -18,7 +18,11 @@ enum SessionFactory {
         for (exerciseIndex, item) in day.orderedItems.enumerated() {
             let last = TrainingStats.lastPerformance(of: item.catalogID, in: history)
             let suggestion = TrainingStats.suggestion(for: item, lastSets: last)
-            let startingWeight = last.isEmpty ? item.targetWeightKg : suggestion.weightKg
+            // Onto the machine's ladder: a target typed while the app was in
+            // kilograms shouldn't open as 61.2 lb on a stack marked in fives.
+            let startingWeight = item.loadScale.snap(
+                kg: last.isEmpty ? item.targetWeightKg : suggestion.weightKg
+            )
 
             for setIndex in 0..<max(1, item.targetSets) {
                 let previous = setIndex < last.count ? last[setIndex] : last.last
@@ -164,7 +168,7 @@ final class ActiveWorkout {
                : "\(set.targetRepsLow)–\(set.targetRepsHigh)")
             : "\(set.reps)"
         if set.weightKg == 0 { return "\(reps) reps" }
-        return "\(AppSettings.shared.weight(set.weightKg)) × \(reps)"
+        return "\(set.weightLabel) × \(reps)"
     }
 
     /// The exercise queued behind the current one.

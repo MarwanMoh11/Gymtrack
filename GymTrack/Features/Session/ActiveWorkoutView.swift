@@ -389,7 +389,7 @@ private struct ExerciseLogCard: View {
         }
         if best.tracking == .duration { return "Last: \(best.seconds)s" }
         if best.weightKg == 0 { return "Last: \(best.reps) reps × \(lastTime.count)" }
-        return "Last: \(AppSettings.shared.weight(best.weightKg)) × \(best.reps)"
+        return "Last: \(best.weightLabel) × \(best.reps)"
     }
 
     private var suggestion: String? {
@@ -410,6 +410,11 @@ private struct SetRow: View {
     let onUndo: () -> Void
 
     @State private var showingKeypad = false
+    @State private var showingScale = false
+
+    /// How the machine in front of you is marked. Read through the book rather
+    /// than the app-wide unit, so a stack stamped in pounds stays in pounds.
+    private var scale: LoadScale { self.set.loadScale }
 
     var body: some View {
         if set.isCompleted {
@@ -498,9 +503,10 @@ private struct SetRow: View {
                 } else {
                     if set.tracking == .weightReps || set.weightKg > 0 {
                         StepperField(title: "Weight", value: weightBinding,
-                                     step: AppSettings.shared.weightUnit.step,
-                                     format: { $0 == 0 && set.tracking == .bodyweightReps ? "BW" : formatWeight($0) },
-                                     unit: AppSettings.shared.weightUnit.short)
+                                     scale: scale,
+                                     format: { $0 == 0 && set.tracking == .bodyweightReps ? "BW" : scale.text($0) },
+                                     unitAction: { showingScale = true },
+                                     unitIsCustom: LoadScaleBook.shared.isCustomised(set.catalogID))
                     }
                     StepperField(title: "Reps", value: repsBinding, step: 1,
                                  format: { String(format: "%.0f", $0) }, unit: "reps")
@@ -519,6 +525,22 @@ private struct SetRow: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1)
         )
+        .sheet(isPresented: $showingScale) {
+            if let catalog = set.catalog {
+                LoadScaleSheet(exercise: catalog, referenceKg: set.weightKg) { updated in
+                    // Everything still to come on this exercise moves onto the
+                    // ladder it was just told about, not only the set in front
+                    // of you — the rest would otherwise sit a pin off and
+                    // quietly disagree with what the sheet just promised.
+                    let pending = (set.session?.sets ?? []).filter {
+                        $0.catalogID == set.catalogID && !$0.isCompleted && $0.weightKg > 0
+                    }
+                    for pendingSet in pending {
+                        pendingSet.weightKg = updated.snap(kg: pendingSet.weightKg)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: Pieces
@@ -539,7 +561,7 @@ private struct SetRow: View {
         switch set.tracking {
         case .duration: "\(set.seconds)s"
         case _ where set.weightKg == 0: "\(set.reps) reps"
-        default: "\(AppSettings.shared.weight(set.weightKg)) × \(set.reps)"
+        default: "\(scale.format(set.weightKg)) × \(set.reps)"
         }
     }
 
@@ -549,27 +571,21 @@ private struct SetRow: View {
             ? "\(set.targetRepsLow)"
             : "\(set.targetRepsLow)–\(set.targetRepsHigh)"
         if set.weightKg == 0 { return "\(range) reps" }
-        return "\(AppSettings.shared.weight(set.weightKg)) × \(range)"
+        return "\(scale.format(set.weightKg)) × \(range)"
     }
 
     private func previousLabel(_ previous: SetLog) -> String {
         if previous.tracking == .duration { return "was \(previous.seconds)s" }
         if previous.weightKg == 0 { return "was \(previous.reps)" }
-        return "was \(AppSettings.shared.weight(previous.weightKg, showUnit: false)) × \(previous.reps)"
-    }
-
-    private func formatWeight(_ display: Double) -> String {
-        display.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", display)
-            : String(format: "%.1f", display)
+        return "was \(scale.format(previous.weightKg, showUnit: false)) × \(previous.reps)"
     }
 
     // MARK: Bindings (display unit in, kilograms out)
 
     private var weightBinding: Binding<Double> {
         Binding(
-            get: { AppSettings.shared.weightUnit.fromKg(set.weightKg) },
-            set: { set.weightKg = AppSettings.shared.weightUnit.toKg(max(0, $0)) }
+            get: { scale.display(set.weightKg) },
+            set: { set.weightKg = scale.kilograms(max(0, $0)) }
         )
     }
 

@@ -294,7 +294,8 @@ enum WatchSnapshotFactory {
                             isCompleted: set.isCompleted
                         )
                     },
-                    lastTimeLabel: lastTimeLabel(group.catalogID)
+                    lastTimeLabel: lastTimeLabel(group.catalogID),
+                    scale: LoadScaleBook.shared.scale(for: group.catalogID)
                 )
             },
             currentSetID: currentSetID ?? nextSet?.id,
@@ -314,6 +315,6 @@ enum WatchSnapshotFactory {
         else { return nil }
         if best.tracking == .duration { return "\(best.seconds)s" }
         if best.weightKg == 0 { return "\(best.reps) reps" }
-        return "\(AppSettings.shared.weight(best.weightKg, showUnit: false)) × \(best.reps)"
+        return "\(best.loadScale.format(best.weightKg, showUnit: false)) × \(best.reps)"
     }
 }

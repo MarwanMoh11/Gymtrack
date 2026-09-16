@@ -373,3 +373,38 @@ final class BodyMetric {
 
     var isFromHealth: Bool { source == Source.health.rawValue }
 }
+
+// MARK: - Per-exercise load scale
+
+/// One exercise's machine, as the user corrected it: what the stack is marked
+/// in and what one pin or one plate is worth.
+///
+/// Only exercises the user has actually put right get a row. Everything else
+/// resolves from its equipment and the app-wide unit, so a new install and a
+/// new exercise both behave sensibly with nothing stored at all.
+@Model
+final class ExerciseLoadPreference {
+    /// The catalog exercise this corrects. Unique per exercise — the book
+    /// upserts rather than accumulating rows.
+    var catalogID: String = ""
+    var unitRaw: String = WeightUnit.kg.rawValue
+    /// The smallest jump, in `unitRaw`.
+    var increment: Double = 2.5
+    var updatedAt: Date = Date()
+
+    init(catalogID: String, scale: LoadScale) {
+        self.catalogID = catalogID
+        self.unitRaw = scale.unit.rawValue
+        self.increment = scale.increment
+        self.updatedAt = .now
+    }
+
+    var scale: LoadScale {
+        get { LoadScale(unit: WeightUnit(rawValue: unitRaw) ?? .kg, increment: increment) }
+        set {
+            unitRaw = newValue.unit.rawValue
+            increment = newValue.increment
+            updatedAt = .now
+        }
+    }
+}
