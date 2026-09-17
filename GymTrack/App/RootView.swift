@@ -39,6 +39,8 @@ struct RootView: View {
             seedSampleDataIfRequested()
             connectWatch()
             syncBodyWeightFromHealth()
+            publishWidgets()
+            runPendingAction()
         }
         .onChange(of: hasOnboarded) { _, done in
             if done { seedSampleDataIfRequested() }
@@ -46,14 +48,20 @@ struct RootView: View {
         .onChange(of: customExercises.count) { _, _ in syncCustomExercises() }
         // The watch's idle screen is built from the plan and the history, so
         // it has to be restamped whenever either moves.
-        .onChange(of: sessions.count) { _, _ in pushWatchIdle() }
-        .onChange(of: plans.count) { _, _ in pushWatchIdle() }
+        .onChange(of: sessions.count) { _, _ in pushWatchIdle(); publishWidgets() }
+        .onChange(of: plans.count) { _, _ in pushWatchIdle(); publishWidgets() }
         // Derived rather than set at each call site — the session can be put
         // away or brought back from the logger, the dock, the Today card and a
         // Live Activity tap, and every one of them has to agree.
         .onChange(of: isSessionMinimised) { _, minimised in
             sessionMinimised = minimised
         }
+        // Reading `activeWorkout` back inside the closure that just assigned it
+        // hands you the previous value — it's `@State`, and the write isn't
+        // visible through this copy of the view. So the widgets are republished
+        // off a change the view has already settled, rather than at each of the
+        // six call sites that start or end a session.
+        .onChange(of: activeWorkout?.session.id) { _, _ in publishWidgets() }
         // Restamp the card on the way out — that's the moment it becomes the
         // thing the user is looking at — and on the way back in, since the rest
         // timer can't tick while the app is suspended.
@@ -62,10 +70,20 @@ struct RootView: View {
             if phase == .active {
                 activeWorkout?.pushToWatch()
                 pushWatchIdle()
+                publishWidgets()
+                // Siri, a Shortcut, the Action Button or a widget button can
+                // only leave a note and bring the app forward — this is where
+                // the note gets read.
+                runPendingAction()
             }
         }
         .onOpenURL { url in
-            if url.host == "session" { expandSession() }
+            switch url.host {
+            case "session": expandSession()
+            case "start-today": startScheduledSession()
+            case "start-freestyle": startFreestyleSession()
+            default: break
+            }
         }
     }
 
@@ -179,6 +197,58 @@ struct RootView: View {
         activeWorkout?.discard()
         closeSession()
         pushWatchIdle()
+    }
+
+    // MARK: - Starting from outside the app
+
+    /// Siri, a Shortcut, the Action Button and the widgets all land here. None
+    /// of them can build a session themselves — see `GymTrackIntents` — so they
+    /// leave a note and bring the app forward, and this reads it.
+    private func runPendingAction() {
+        switch SharedStore.takeAction() {
+        case .startToday: startScheduledSession()
+        case .startFreestyle: startFreestyleSession()
+        case .openSession: expandSession()
+        case nil: break
+        }
+    }
+
+    /// Today's prescribed session, or a freestyle one when today isn't a
+    /// training day. Asking to start a workout on a rest day is still asking to
+    /// start a workout, and refusing would be the wrong answer to a button the
+    /// user deliberately pressed.
+    private func startScheduledSession() {
+        guard activeWorkout == nil else { return expandSession() }
+        let plan = plans.first(where: \.isActive) ?? plans.first
+        let history = sessions.filter { !$0.isActive }
+        if let day = plan?.day(for: .now) {
+            present(ActiveWorkout.start(day: day, plan: plan, context: context, history: history))
+        } else {
+            present(ActiveWorkout.startFreestyle(context: context, history: history))
+        }
+    }
+
+    private func startFreestyleSession() {
+        guard activeWorkout == nil else { return expandSession() }
+        present(ActiveWorkout.startFreestyle(context: context,
+                                             history: sessions.filter { !$0.isActive }))
+    }
+
+    /// Opens the logger straight away — unlike a session started from the
+    /// wrist, whoever pressed this was holding the phone.
+    private func present(_ workout: ActiveWorkout) {
+        activeWorkout = workout
+        isSessionExpanded = true
+        pushWatchIdle()
+    }
+
+    // MARK: - Widgets
+
+    /// Restamps what the Home Screen and Lock Screen draw. Called from the same
+    /// places the watch's idle mirror is, because it's built from the same two
+    /// things: the active plan and the finished sessions.
+    private func publishWidgets() {
+        WidgetPublisher.publish(plans: plans, sessions: sessions, running: activeWorkout)
     }
 
     // MARK: - Apple Watch

@@ -90,6 +90,10 @@ enum BackupService {
         var completedAt: Date?
         var targetRepsLow: Int
         var targetRepsHigh: Int
+        /// Optional so a backup written before effort tracking still restores —
+        /// and so a set that was never rated round-trips as unrated rather than
+        /// as an RPE of zero.
+        var rpe: Double?
     }
 
     struct BodyMetricDTO: Codable {
@@ -157,7 +161,8 @@ enum BackupService {
                                       weightKg: set.weightKg, reps: set.reps, seconds: set.seconds,
                                       isCompleted: set.isCompleted, isWarmup: set.isWarmup,
                                       completedAt: set.completedAt,
-                                      targetRepsLow: set.targetRepsLow, targetRepsHigh: set.targetRepsHigh)
+                                      targetRepsLow: set.targetRepsLow, targetRepsHigh: set.targetRepsHigh,
+                                      rpe: set.rpe)
                            })
             },
             bodyMetrics: bodyMetrics.map {
@@ -255,6 +260,7 @@ enum BackupService {
                                  isWarmup: setDTO.isWarmup)
                 set.isCompleted = setDTO.isCompleted
                 set.completedAt = setDTO.completedAt
+                set.rpe = setDTO.rpe
                 set.session = session
                 context.insert(set)
             }

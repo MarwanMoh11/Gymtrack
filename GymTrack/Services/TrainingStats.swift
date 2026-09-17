@@ -223,6 +223,28 @@ enum TrainingStats {
         let message: String
     }
 
+    /// The effort behind a group of sets, when the lifter recorded it.
+    ///
+    /// Median rather than mean: one brutal last set shouldn't recolour a whole
+    /// exercise, and sets left unrated shouldn't dilute the ones that were.
+    static func medianRPE(of sets: [SetLog]) -> Double? {
+        let values = sets.compactMap(\.rpe).sorted()
+        guard !values.isEmpty else { return nil }
+        return values[values.count / 2]
+    }
+
+    /// `LoadScale.step` moves exactly one rung however big the direction is, so
+    /// climbing two means asking twice — and asking twice is also the only way
+    /// to land on rungs the machine has when they aren't evenly spaced.
+    private static func climb(_ scale: LoadScale, from kg: Double, rungs: Int) -> Double {
+        (0..<max(1, rungs)).reduce(kg) { weight, _ in scale.step(kg: weight, by: 1) }
+    }
+
+    /// "8" or "8.5" — never "8.0".
+    static func rpeText(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    }
+
     /// Double progression: work up the rep range at a fixed load, then add
     /// weight and drop back to the bottom of the range.
     static func suggestion(for item: PlanItem, lastSets: [SetLog]) -> OverloadSuggestion {
@@ -264,23 +286,54 @@ enum TrainingStats {
         // reps, then eventually a belt or a vest.
         let isUnloadedBodyweight = item.tracking == .bodyweightReps && lastWeight == 0
 
+        // How hard it actually was, when the lifter said so. Reps alone can't
+        // tell a set that had three left in the tank from one that had none,
+        // which is why plain double progression climbs at the same rung a
+        // session either way.
+        let effort = medianRPE(of: setsAtWeight)
+
         if allHitTop {
             if isUnloadedBodyweight {
+                if let effort, effort <= 7 {
+                    return OverloadSuggestion(
+                        action: .addReps, weightKg: 0, reps: item.targetRepsHigh + 3,
+                        message: "You cleared \(item.targetRepsHigh) reps at RPE \(rpeText(effort)) — that's not close to failure. Push well past it, or start adding weight."
+                    )
+                }
                 return OverloadSuggestion(
                     action: .addReps, weightKg: 0, reps: item.targetRepsHigh + 1,
                     message: "You cleared \(item.targetRepsHigh) reps on every set. Push past it, or start adding weight."
                 )
             }
-            let next = scale.step(kg: workingWeight, by: 1)
-            return OverloadSuggestion(
-                action: .increaseWeight,
-                weightKg: next,
-                reps: item.targetRepsLow,
-                message: "You cleared \(item.targetRepsHigh) reps on every set. Go to \(scale.format(next)) and reset to \(item.targetRepsLow) reps."
-            )
+            // Two rungs when there was clearly room left. One stays the default,
+            // and stays it for every exercise that has never been rated.
+            let rungs = (effort ?? 10) <= 7 ? 2 : 1
+            let next = climb(scale, from: workingWeight, rungs: rungs)
+            let cleared = "You cleared \(item.targetRepsHigh) reps on every set"
+            let message: String
+            if let effort, rungs == 2 {
+                message = "\(cleared) at RPE \(rpeText(effort)) — there's room. Jump two steps to \(scale.format(next)) and reset to \(item.targetRepsLow) reps."
+            } else if let effort, effort >= 9.5 {
+                message = "\(cleared), but at RPE \(rpeText(effort)). Go to \(scale.format(next)) and expect it to be a fight."
+            } else {
+                message = "\(cleared). Go to \(scale.format(next)) and reset to \(item.targetRepsLow) reps."
+            }
+            return OverloadSuggestion(action: .increaseWeight, weightKg: next,
+                                      reps: item.targetRepsLow, message: message)
         }
 
         if minReps < item.targetRepsLow - 2 && workingWeight > increment && !isUnloadedBodyweight {
+            // Falling short of the range is only a reason to take weight off if
+            // the weight is what stopped you. Short reps at RPE 7 is a set that
+            // was ended early, and deloading it would be fixing the wrong thing.
+            if let effort, effort <= 7 {
+                return OverloadSuggestion(
+                    action: .repeatLoad,
+                    weightKg: workingWeight,
+                    reps: item.targetRepsLow,
+                    message: "Reps fell short, but you called it RPE \(rpeText(effort)) — the load isn't what stopped you. Stay at \(scale.format(workingWeight)) and take it closer to failure."
+                )
+            }
             let backOff = scale.step(kg: workingWeight, by: -1)
             return OverloadSuggestion(
                 action: .deload,
@@ -291,14 +344,17 @@ enum TrainingStats {
         }
 
         let goal = min(item.targetRepsHigh, minReps + 1)
-        return OverloadSuggestion(
-            action: .addReps,
-            weightKg: workingWeight,
-            reps: goal,
-            message: isUnloadedBodyweight
-                ? "Chase \(goal) reps on every set."
-                : "Stay at \(scale.format(workingWeight)) and chase \(goal) reps on every set."
-        )
+        let message: String
+        if isUnloadedBodyweight {
+            message = "Chase \(goal) reps on every set."
+        } else if let effort, effort >= 9.5 {
+            // Already at the limit inside the range: another rep is the goal,
+            // but repeating the session honestly is the way to earn it.
+            message = "Stay at \(scale.format(workingWeight)) — last time was RPE \(rpeText(effort)). Repeat it before you chase \(goal)."
+        } else {
+            message = "Stay at \(scale.format(workingWeight)) and chase \(goal) reps on every set."
+        }
+        return OverloadSuggestion(action: .addReps, weightKg: workingWeight, reps: goal, message: message)
     }
 
     /// Smallest jump that's actually loadable for the equipment in question,
@@ -341,7 +397,7 @@ extension TrainingStats {
         func value(of session: WorkoutSession) -> Double {
             switch self {
             case .volume: AppSettings.shared.weightUnit.fromKg(session.totalVolumeKg)
-            case .sets: Double(session.completedSets.count)
+            case .sets: Double(session.workingSets.count)
             case .reps: Double(session.totalReps)
             }
         }

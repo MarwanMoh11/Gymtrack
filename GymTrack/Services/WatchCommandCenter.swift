@@ -291,7 +291,8 @@ enum WatchSnapshotFactory {
                             seconds: set.seconds,
                             targetRepsLow: set.targetRepsLow,
                             targetRepsHigh: set.targetRepsHigh,
-                            isCompleted: set.isCompleted
+                            isCompleted: set.isCompleted,
+                            warmup: set.isWarmup ? true : nil
                         )
                     },
                     lastTimeLabel: lastTimeLabel(group.catalogID),

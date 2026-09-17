@@ -83,10 +83,15 @@ struct SessionSummaryView: View {
         }
     }
 
+    /// Working sets — the same ones the volume is built from. Counting the
+    /// warm-ups here would make the tile disagree with the one beside it.
+    private var warmupCount: Int { session.completedSets.count - session.workingSets.count }
+
     private var statGrid: some View {
         HStack(spacing: 10) {
             StatTile(value: session.duration.durationString, label: "Duration")
-            StatTile(value: "\(session.completedSets.count)", label: "Sets")
+            StatTile(value: "\(session.workingSets.count)",
+                     label: warmupCount > 0 ? "Sets · \(warmupCount) warm-up" : "Sets")
             StatTile(value: AppSettings.shared.weight(session.totalVolumeKg, showUnit: false),
                      label: "Volume \(AppSettings.shared.weightUnit.short)")
         }
@@ -125,14 +130,29 @@ struct SessionSummaryView: View {
                         .foregroundStyle(Theme.ink)
                     FlowRow(spacing: 6) {
                         ForEach(group.sets.filter(\.isCompleted)) { set in
-                            Text(set.tracking == .duration
-                                 ? "\(set.seconds)s"
-                                 : (set.weightKg == 0 ? "\(set.reps)" : "\(set.loadScale.format(set.weightKg, showUnit: false))×\(set.reps)"))
-                                .font(Theme.number(12, weight: .semibold))
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(Theme.panel, in: Capsule())
-                                .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
+                            // Warm-ups stay on the card — you did them — but in
+                            // the rest colour and behind a flame, so the row
+                            // reads as a ramp followed by work rather than as
+                            // six sets that all counted the same.
+                            HStack(spacing: 3) {
+                                if set.isWarmup {
+                                    Image(systemName: "flame.fill").font(.system(size: 8, weight: .bold))
+                                }
+                                Text((set.tracking == .duration
+                                      ? "\(set.seconds)s"
+                                      : (set.weightKg == 0 ? "\(set.reps)" : "\(set.loadScale.format(set.weightKg, showUnit: false))×\(set.reps)"))
+                                     + set.effortSuffix)
+                                    .font(Theme.number(12, weight: .semibold))
+                            }
+                            .foregroundStyle(set.isWarmup ? SessionPhase.resting.tint : Theme.textSecondary)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Theme.panel, in: Capsule())
+                            .overlay {
+                                Capsule().strokeBorder(set.isWarmup
+                                                       ? AnyShapeStyle(SessionPhase.resting.tint.opacity(0.3))
+                                                       : AnyShapeStyle(Theme.edge),
+                                                       lineWidth: 1)
+                            }
                         }
                     }
                 }

@@ -234,9 +234,10 @@ struct ExerciseDetailView: View {
                     }
                     FlowRow(spacing: 6) {
                         ForEach(entry.sets) { set in
-                            Text(set.tracking == .duration
-                                 ? "\(set.seconds)s"
-                                 : (set.weightKg == 0 ? "\(set.reps)" : "\(scale.format(set.weightKg, showUnit: false))×\(set.reps)"))
+                            Text((set.tracking == .duration
+                                  ? "\(set.seconds)s"
+                                  : (set.weightKg == 0 ? "\(set.reps)" : "\(scale.format(set.weightKg, showUnit: false))×\(set.reps)"))
+                                 + set.effortSuffix)
                                 .font(Theme.number(12, weight: .semibold))
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.horizontal, 8).padding(.vertical, 4)

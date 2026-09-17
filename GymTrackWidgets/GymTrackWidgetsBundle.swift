@@ -5,5 +5,7 @@ import WidgetKit
 struct GymTrackWidgetsBundle: WidgetBundle {
     var body: some Widget {
         WorkoutLiveActivityWidget()
+        TodayWidget()
+        StreakWidget()
     }
 }

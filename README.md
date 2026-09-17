@@ -23,6 +23,16 @@ a basement gym with no signal, and your training history is yours.
 With a free Apple ID the app stays installed for **7 days** before it needs
 re-running from Xcode. A paid Apple Developer account raises that to a year.
 
+The Home Screen widgets read their numbers out of an App Group —
+`group.com.marwanmohamed.gymtrack`, declared in all three entitlements files. If
+you changed the bundle identifier in step 4, change the group to match in
+`GymTrack.entitlements`, `GymTrackWatch.entitlements`,
+`GymTrackWidgets.entitlements` and `SharedStore.appGroup`, all four together.
+App Groups need a paid Apple Developer account; with a free Apple ID the
+capability can't be provisioned and the widgets fall back to their placeholder.
+Nothing else is affected — the app, the watch and the Live Activity don't go
+through the group.
+
 Minimum deployment target is **iOS 17**. The Live Activity appears on the Lock
 Screen on any supported iPhone; the Dynamic Island presentation needs a device
 that has one.
@@ -58,6 +68,24 @@ last session's numbers sit next to each set so you know what to beat. A rest
 timer starts on its own when you log a set, keeps time correctly if you lock the
 phone, and notifies you when it's up.
 
+**Warm-ups** — one tap builds a ramp up to your working weight: roughly 40, 60
+and 80% of it, each pulled onto a rung the machine in front of you actually has,
+with the reps coming down as the load goes up. Rungs that land on the same pin,
+or on the working weight itself, are dropped rather than logged twice. Warm-ups
+are numbered W1, W2, W3 in amber and the work stays 1, 2, 3 in green — adding a
+ramp never renumbers the sets you're measured on. They count towards finishing
+the session and they're written to Health as part of the time you spent on the
+exercise, but they're kept out of volume, records, muscle counts and the "last
+time" you're chasing, because a ramp isn't something you're trying to beat. Any
+set can be turned into a warm-up, or back, from the chip while you're on it or
+by holding a row you've already logged.
+
+**Effort** — after a set the logger asks how hard it was, 6 to 10. It's one
+optional tap that never blocks the next set, and it's what tells the app the
+difference between a set that had three reps left in it and one that had none.
+See *Progressive overload* for what it does with the answer. Turn the question
+off in Settings → Effort and everything behaves exactly as it did before.
+
 **Machine weights** — gyms aren't uniform, so the app doesn't pretend they are.
 Every exercise knows what its equipment is marked in and what one step is worth:
 a barbell moves 2.5 kg, a dumbbell 2, a pin-selected stack 5, and in a pound gym
@@ -82,6 +110,14 @@ Dynamic Island: which exercise and set is up, the weight and rep target, the
 rest countdown ticking down on its own, sets logged and volume moved. When the
 rest runs out the card says so without the app having to wake up. Tapping it
 lands straight back on the set you were about to do.
+
+**Home Screen and Siri** — a Today widget carrying the session you're due to do
+and a button that starts it, or, once you're training, the exercise you're on,
+the sets logged and the rest counting down. A Streak widget for the Home Screen
+and the Lock Screen, in circular, rectangular and inline shapes. And "Hey Siri,
+start my GymTrack workout" — which also puts GymTrack on the Action Button, in
+Spotlight and in Shortcuts, with no setup. Every one of those routes lands in
+the logger on the first set, not on the Today tab.
 
 **Apple Watch** — the session, on your wrist. Swipe between three screens:
 controls, the set you're on, and what your body is doing. The weight and reps
@@ -116,6 +152,15 @@ rep range on every set and the app tells you to add weight and reset to the
 bottom of the range. Fall short and it tells you to hold the load or back off.
 The weight it names is always the next rung on that machine, never a number
 between two pins.
+
+Effort ratings sharpen all of that, because reps alone can't tell a set you
+finished with three in the tank from one that nearly buried you. Clear the range
+at RPE 7 and it moves you two rungs instead of one, which is what stops a plain
+double progression crawling back up through weights you already owned. Clear it
+at RPE 10 and it still adds weight, but says to expect a fight. Fall short at
+RPE 7 and it stops suggesting a deload — the load isn't what stopped you, so
+taking weight off would be fixing the wrong thing. Rate nothing and every
+suggestion is identical to what it was.
 
 **Personal records** — recognised on estimated 1RM, so heavier-for-fewer and
 lighter-for-more both count. Celebrated the moment you log the set.
@@ -155,7 +200,8 @@ GymTrackShared/      Compiled into every target: theme tokens, weight units,
                      the Live Activity's attributes, and the phone/watch
                      payloads
 GymTrackWidgets/     Widget extension — the Lock Screen and Dynamic Island
-                     presentations of a running session
+                     presentations of a running session, plus the Today and
+                     Streak widgets for the Home and Lock Screens
 ```
 
 Built with SwiftUI, SwiftData and Swift Charts. No third-party dependencies.
@@ -181,6 +227,17 @@ Built with SwiftUI, SwiftData and Swift Charts. No third-party dependencies.
   holds the beat-by-beat heart rate. The phone waits for the watch's workout ID
   rather than racing it to a duplicate, and writes its own copy only when no
   watch was involved.
+- The widgets get a small snapshot written into the App Group rather than a
+  share of the database. Moving the SwiftData store into the group container
+  would strand the history already on anyone's device, and a widget only ever
+  needs a dozen numbers — so the app restamps those whenever they move, the same
+  arrangement the watch has and for the same reason.
+- Nothing outside the app can start a workout: a session needs the store, the
+  plan behind today, the progression that picks the opening weights, a Live
+  Activity and the watch link. So Siri, the Action Button, a Shortcut and the
+  widget's own button all do the same thing — leave a note in the App Group and
+  bring the app forward, which reads it as it comes to the front. Notes older
+  than two minutes are dropped rather than replayed.
 - `SampleData.swift` fills the app with a couple of months of plausible history
   for design work. It's `#if DEBUG` only; launch with `-GTSeedSampleData`.
 

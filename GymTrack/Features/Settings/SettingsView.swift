@@ -93,6 +93,19 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Theme.surface)
 
+                Section {
+                    Toggle("Rate each set", isOn: Binding(
+                        get: { settings.trackRPE },
+                        set: { settings.trackRPE = $0 }
+                    ))
+                    .tint(Theme.accent)
+                } header: {
+                    Text("Effort")
+                } footer: {
+                    Text("After a set, the logger asks how hard it was on the 6–10 RPE scale. Clearing a rep range at RPE 7 earns two steps up instead of one, and falling short at RPE 7 stops the app suggesting a deload it can tell you don't need. Skipping the question leaves the progression exactly as it is.")
+                }
+                .listRowBackground(Theme.surface)
+
                 Section("Feel") {
                     Toggle("Haptics", isOn: Binding(
                         get: { settings.hapticsEnabled },

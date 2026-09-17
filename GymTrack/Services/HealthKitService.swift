@@ -155,16 +155,22 @@ final class HealthKitService {
                 let activityEnd = min(end, max(cursor, finished))
                 guard activityEnd > cursor else { continue }
 
+                // The activity spans everything you spent on the exercise,
+                // warm-ups included — that time was real. What it's *counted*
+                // as is the working sets, so Health and the app agree on the
+                // volume rather than disagreeing by a ramp.
+                let working = sets.filter { !$0.isWarmup }
+
                 let activity = HKWorkoutActivity(
                     workoutConfiguration: configuration,
                     start: cursor,
                     end: activityEnd,
                     metadata: [
                         Metadata.exercise: group.name,
-                        Metadata.sets: sets.count,
-                        Metadata.reps: sets.reduce(0) { $0 + $1.reps },
-                        Metadata.volume: sets.reduce(0) { $0 + $1.volumeKg },
-                        Metadata.topSet: Self.setLabel(sets.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }),
+                        Metadata.sets: working.count,
+                        Metadata.reps: working.reduce(0) { $0 + $1.reps },
+                        Metadata.volume: working.reduce(0) { $0 + $1.volumeKg },
+                        Metadata.topSet: Self.setLabel(working.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }),
                     ]
                 )
                 // One exercise Health won't take is not a reason to lose the

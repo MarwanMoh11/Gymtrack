@@ -98,6 +98,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				GymTrackWidgets.entitlements,
 			);
 			target = A100000000000000000047 /* GymTrackWidgets */;
 		};
@@ -447,6 +448,7 @@
 		A100000000000000000092 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GymTrackWidgets/GymTrackWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = AH95VDDZQB;
 				CURRENT_PROJECT_VERSION = 1;
@@ -473,6 +475,7 @@
 		A100000000000000000093 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GymTrackWidgets/GymTrackWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = AH95VDDZQB;
 				CURRENT_PROJECT_VERSION = 1;

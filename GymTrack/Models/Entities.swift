@@ -194,11 +194,16 @@ final class WorkoutSession {
 
     var completedSets: [SetLog] { sets.filter(\.isCompleted) }
 
+    /// The sets that count as training. Warm-ups are work you did, but they
+    /// aren't load you're trying to beat, so every number the app compares
+    /// across sessions is built from these.
+    var workingSets: [SetLog] { completedSets.filter { !$0.isWarmup } }
+
     var totalVolumeKg: Double {
-        completedSets.reduce(0) { $0 + $1.volumeKg }
+        workingSets.reduce(0) { $0 + $1.volumeKg }
     }
 
-    var totalReps: Int { completedSets.reduce(0) { $0 + $1.reps } }
+    var totalReps: Int { workingSets.reduce(0) { $0 + $1.reps } }
 
     /// Exercises in the order they appear in the session.
     var exerciseGroups: [SessionExerciseGroup] {
@@ -236,6 +241,28 @@ struct SessionExerciseGroup: Identifiable {
     var completedCount: Int { sets.filter(\.isCompleted).count }
     var isComplete: Bool { !sets.isEmpty && completedCount == sets.count }
     var catalog: CatalogExercise? { ExerciseCatalog.shared.exercise(id: catalogID) }
+
+    /// Warm-ups still have to be performed, so they stay in `sets` and in the
+    /// session's progress — they're just not what the exercise is measured on.
+    var warmupSets: [SetLog] { sets.filter(\.isWarmup) }
+    var workingSets: [SetLog] { sets.filter { !$0.isWarmup } }
+
+    /// What a set is called on screen. Warm-ups get their own W1, W2 sequence
+    /// so adding one doesn't renumber the working sets underneath it — "set 3"
+    /// has to mean the same thing before and after you add a ramp.
+    func label(for set: SetLog) -> String {
+        let siblings = set.isWarmup ? warmupSets : workingSets
+        let position = (siblings.firstIndex { $0.id == set.id } ?? 0) + 1
+        return set.isWarmup ? "W\(position)" : "\(position)"
+    }
+
+    /// Position of a working set among the working sets, which is what lines it
+    /// up with last session's numbers. Counting rows would put set 1's history
+    /// next to a warm-up.
+    func workingPosition(of set: SetLog) -> Int? {
+        guard !set.isWarmup else { return nil }
+        return workingSets.firstIndex { $0.id == set.id }
+    }
 }
 
 // MARK: - Set log
@@ -311,6 +338,14 @@ final class SetLog {
 
     var hitTopOfRange: Bool {
         targetRepsHigh > 0 && reps >= targetRepsHigh
+    }
+
+    /// " @8" when the set was rated, nothing when it wasn't. Appended to the
+    /// compact chips history is drawn from, where a dozen sit in a row and a
+    /// second colour per chip would be unreadable.
+    var effortSuffix: String {
+        guard let rpe else { return "" }
+        return " @\(TrainingStats.rpeText(rpe))"
     }
 }
 

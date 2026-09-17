@@ -330,15 +330,18 @@ private struct ExerciseLogCard: View {
             }
 
             VStack(spacing: 8) {
-                ForEach(Array(group.sets.enumerated()), id: \.element.id) { index, set in
+                ForEach(group.sets) { set in
                     SetRow(
                         set: set,
-                        number: index + 1,
+                        label: group.label(for: set),
                         isExpanded: set.id == activeSetID,
-                        previous: index < lastTime.count ? lastTime[index] : nil,
+                        previous: previousSet(for: set),
                         isPR: workout.isPR(set),
                         onLog: { workout.complete(set, restSeconds: planItem?.restSeconds) },
-                        onUndo: { workout.uncomplete(set) }
+                        onUndo: { workout.uncomplete(set) },
+                        onWarmupToggle: { workout.setWarmup(set, $0) },
+                        isLastLogged: workout.lastLoggedSetID == set.id,
+                        onRate: { workout.rate(set, rpe: $0) }
                     )
                 }
             }
@@ -351,7 +354,7 @@ private struct ExerciseLogCard: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
 
-                if group.sets.count > 1 {
+                if group.workingSets.count > 1 {
                     Button { workout.removeLastSet(from: group) } label: {
                         Label("Remove", systemImage: "minus")
                             .font(Theme.rounded(12, weight: .semibold))
@@ -360,6 +363,7 @@ private struct ExerciseLogCard: View {
                     .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer()
+                if !group.isComplete { warmupButton }
             }
             .padding(.top, 2)
         }
@@ -400,6 +404,31 @@ private struct ExerciseLogCard: View {
         }
     }
 
+    /// Builds the ramp on the first tap and extends it on the next, so the
+    /// common case — "warm me up to this" — is one press and nothing to read.
+    private var warmupButton: some View {
+        let hasRamp = !group.warmupSets.isEmpty
+        return Button {
+            if hasRamp { workout.addWarmupSet(to: group) } else { workout.addWarmupRamp(to: group) }
+        } label: {
+            Label(hasRamp ? "Add warm-up" : "Warm-up ramp", systemImage: "flame.fill")
+                .font(Theme.rounded(12, weight: .semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(SessionPhase.resting.tint)
+        .accessibilityHint(hasRamp
+                           ? "Adds one more warm-up set"
+                           : "Builds a ramp up to your working weight")
+    }
+
+    /// Last session's matching set. Paired by position among the *working*
+    /// sets — counting rows would put set one's history next to a warm-up the
+    /// moment a ramp is added.
+    private func previousSet(for set: SetLog) -> SetLog? {
+        guard let position = group.workingPosition(of: set), position < lastTime.count else { return nil }
+        return lastTime[position]
+    }
+
     private var lastTimeSummary: String {
         guard let best = lastTime.max(by: { $0.weightKg < $1.weightKg }) else {
             return "First time logging this"
@@ -419,15 +448,24 @@ private struct ExerciseLogCard: View {
 
 private struct SetRow: View {
     @Bindable var set: SetLog
-    let number: Int
+    /// "3", or "W1" for a warm-up — warm-ups carry their own sequence so
+    /// adding one doesn't renumber the work underneath it.
+    let label: String
     let isExpanded: Bool
     let previous: SetLog?
     let isPR: Bool
     let onLog: () -> Void
     let onUndo: () -> Void
+    let onWarmupToggle: (Bool) -> Void
+    /// Whether this is the set that was logged most recently — the only one
+    /// that volunteers the effort question.
+    let isLastLogged: Bool
+    let onRate: (Double) -> Void
 
     @State private var showingKeypad = false
     @State private var showingScale = false
+    /// Set by tapping an answer already given, to change it.
+    @State private var editingEffort = false
 
     /// How the machine in front of you is marked. Read through the book rather
     /// than the app-wide unit, so a stack stamped in pounds stays in pounds.
@@ -446,43 +484,147 @@ private struct SetRow: View {
     // MARK: Completed
 
     private var completedRow: some View {
-        HStack(spacing: 10) {
-            indexBadge(filled: true)
-            Text(valueLabel)
-                .font(Theme.number(16))
-                .foregroundStyle(isPR ? AnyShapeStyle(Color.black) : AnyShapeStyle(Theme.ink))
-            if isPR {
-                HStack(spacing: 3) {
-                    Image(systemName: "trophy.fill").font(.system(size: 9))
-                    Text("PR").font(Theme.rounded(10, weight: .black))
+        VStack(spacing: 7) {
+            HStack(spacing: 10) {
+                indexBadge(filled: true)
+                Text(valueLabel)
+                    .font(Theme.number(16))
+                    .foregroundStyle(isPR ? AnyShapeStyle(Color.black) : AnyShapeStyle(Theme.ink))
+                if isPR {
+                    HStack(spacing: 3) {
+                        Image(systemName: "trophy.fill").font(.system(size: 9))
+                        Text("PR").font(Theme.rounded(10, weight: .black))
+                    }
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.black.opacity(0.15), in: Capsule())
                 }
-                .foregroundStyle(.black)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.black.opacity(0.15), in: Capsule())
+                if let rpe = self.set.rpe, !showsEffortStrip { effortBadge(rpe) }
+                Spacer()
+                Button(action: onUndo) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(isPR ? .black.opacity(0.6) : Theme.textTertiary)
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
             }
-            Spacer()
-            Button(action: onUndo) {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(isPR ? .black.opacity(0.6) : Theme.textTertiary)
-                    .frame(width: 34, height: 34)
-            }
-            .buttonStyle(.plain)
+
+            if showsEffortStrip { effortStrip }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showsEffortStrip)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background {
             let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
             // A PR is filled with the gradient and glows; an ordinary logged set
             // is the same colour held back to a tint, so a record still stands
-            // out in a column of eight green rows.
+            // out in a column of eight green rows. A warm-up takes the rest
+            // colour instead, which is the app's word for "not the work".
             shape.fill(isPR
-                       ? AnyShapeStyle(SessionPhase.working.gradient)
-                       : AnyShapeStyle(LinearGradient(colors: [SessionPhase.working.trail.opacity(0.16),
-                                                               SessionPhase.working.trail.opacity(0.05)],
+                       ? AnyShapeStyle(rowPhase.gradient)
+                       : AnyShapeStyle(LinearGradient(colors: [rowPhase.trail.opacity(set.isWarmup ? 0.10 : 0.16),
+                                                               rowPhase.trail.opacity(0.04)],
                                                       startPoint: .topLeading, endPoint: .bottomTrailing)))
-                .overlay { shape.strokeBorder(SessionPhase.working.trail.opacity(isPR ? 0 : 0.22), lineWidth: 1) }
-                .shadow(color: isPR ? SessionPhase.working.glow : .clear, radius: 10, y: 3)
+                .overlay { shape.strokeBorder(rowPhase.trail.opacity(isPR ? 0 : 0.22), lineWidth: 1) }
+                .shadow(color: isPR ? rowPhase.glow : .clear, radius: 10, y: 3)
+        }
+        // The second way to reclassify a set: the chip above only exists while
+        // the set is the one being worked, and the realisation that something
+        // was a warm-up usually arrives after it's logged.
+        .contextMenu {
+            Button {
+                onWarmupToggle(!set.isWarmup)
+            } label: {
+                Label(set.isWarmup ? "Count as a working set" : "Mark as warm-up",
+                      systemImage: set.isWarmup ? "dumbbell.fill" : "flame.fill")
+            }
+        }
+    }
+
+    /// Which colour this row belongs to. Warm-ups borrow the rest amber so a
+    /// ramp reads as preparation rather than as four more sets of work.
+    private var rowPhase: SessionPhase { self.set.isWarmup ? .resting : .working }
+
+    // MARK: Effort
+
+    /// The five answers worth offering. Below 6 the question stops meaning
+    /// anything on a working set, and half points are a precision nobody has
+    /// mid-set with a bar in their hands.
+    private static let effortChoices: [Double] = [6, 7, 8, 9, 10]
+
+    /// Shown on the set just logged and nowhere else, so finishing an exercise
+    /// leaves a column of results rather than a column of open questions.
+    private var showsEffortStrip: Bool {
+        guard AppSettings.shared.trackRPE, self.set.isCompleted, !self.set.isWarmup else { return false }
+        return editingEffort || (isLastLogged && self.set.rpe == nil)
+    }
+
+    private var effortStrip: some View {
+        HStack(spacing: 5) {
+            Text("HOW HARD?")
+                .font(Theme.microCaps)
+                .tracking(0.8)
+                .foregroundStyle(isPR ? .black.opacity(0.55) : Theme.textTertiary)
+            Spacer(minLength: 2)
+            ForEach(Self.effortChoices, id: \.self) { value in
+                Button {
+                    onRate(value)
+                    editingEffort = false
+                } label: {
+                    Text(TrainingStats.rpeText(value))
+                        .font(Theme.number(12, weight: .bold))
+                        .foregroundStyle(self.set.rpe == value ? .black : Theme.textSecondary)
+                        .frame(width: 30, height: 26)
+                        .background {
+                            Capsule().fill(self.set.rpe == value
+                                           ? AnyShapeStyle(Self.effortTint(value).gradient)
+                                           : AnyShapeStyle(Color.white.opacity(0.07)))
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("RPE \(TrainingStats.rpeText(value))")
+                .accessibilityHint(Self.effortHint(value))
+            }
+        }
+    }
+
+    /// The answer, once given. Tapping it asks again.
+    private func effortBadge(_ value: Double) -> some View {
+        Button { editingEffort = true } label: {
+            Text("RPE \(TrainingStats.rpeText(value))")
+                .font(Theme.number(10, weight: .bold))
+                .foregroundStyle(isPR ? .black.opacity(0.7) : Self.effortTint(value))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background {
+                    Capsule().fill(isPR
+                                   ? AnyShapeStyle(Color.black.opacity(0.15))
+                                   : AnyShapeStyle(Self.effortTint(value).opacity(0.16)))
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Effort RPE \(TrainingStats.rpeText(value))")
+        .accessibilityHint("Change it")
+    }
+
+    /// Green where there's room, amber where there isn't much, red at the
+    /// limit — the same reading the progression makes of the number.
+    private static func effortTint(_ value: Double) -> Color {
+        switch value {
+        case ..<8: Theme.positive
+        case ..<9: Theme.accent
+        case ..<10: Theme.warning
+        default: Theme.negative
+        }
+    }
+
+    private static func effortHint(_ value: Double) -> String {
+        switch value {
+        case ..<7: "Four or more reps left"
+        case ..<8: "About three reps left"
+        case ..<9: "About two reps left"
+        case ..<10: "One rep left"
+        default: "Nothing left"
         }
     }
 
@@ -514,18 +656,21 @@ private struct SetRow: View {
 
     private var expandedRow: some View {
         VStack(spacing: 12) {
-            HStack {
+            HStack(spacing: 8) {
                 indexBadge(filled: false)
-                Text("SET \(number)")
+                Text(set.isWarmup ? "WARM-UP" : "SET \(label)")
                     .font(Theme.eyebrow)
                     .tracking(1.2)
-                    .foregroundStyle(Theme.accent.wash)
-                Spacer()
+                    .foregroundStyle((set.isWarmup ? SessionPhase.resting.tint : Theme.accent).wash)
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
                 if let previous {
                     Text(previousLabel(previous))
                         .font(Theme.rounded(11, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
                 }
+                warmupToggle
             }
 
             HStack(spacing: 14) {
@@ -589,17 +734,51 @@ private struct SetRow: View {
     // MARK: Pieces
 
     private func indexBadge(filled: Bool) -> some View {
-        Text("\(number)")
-            .font(Theme.number(12, weight: .bold))
-            .foregroundStyle(filled ? (isPR ? Color.black : Theme.accent) : Theme.textTertiary)
+        // A warm-up badge is amber and never lime: the colour is what tells you
+        // at a glance which rows the session is actually measured on.
+        let tint = set.isWarmup ? SessionPhase.resting.tint : Theme.accent
+        return Text(label)
+            .font(Theme.number(set.isWarmup ? 10 : 12, weight: .bold))
+            .foregroundStyle(filled ? (isPR ? Color.black : tint) : Theme.textTertiary)
             .frame(width: 26, height: 26)
             .background {
                 Circle().fill(filled
                               ? (isPR ? AnyShapeStyle(Color.black.opacity(0.15))
-                                      : AnyShapeStyle(LinearGradient(colors: [Theme.accent.opacity(0.26), Theme.accent.opacity(0.1)],
+                                      : AnyShapeStyle(LinearGradient(colors: [tint.opacity(0.26), tint.opacity(0.1)],
                                                                      startPoint: .top, endPoint: .bottom)))
                               : AnyShapeStyle(Color.white.opacity(0.06)))
             }
+    }
+
+    /// Promotes or demotes the set in front of you. Deliberately a plain chip
+    /// rather than a menu: deciding a set was a warm-up happens mid-exercise,
+    /// with one hand, and it has to be undoable just as cheaply.
+    private var warmupToggle: some View {
+        Button {
+            onWarmupToggle(!set.isWarmup)
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "flame.fill").font(.system(size: 9, weight: .bold))
+                Text("Warm-up").font(Theme.rounded(10, weight: .bold))
+            }
+            .foregroundStyle(set.isWarmup ? .black : Theme.textTertiary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background {
+                Capsule().fill(set.isWarmup
+                               ? AnyShapeStyle(SessionPhase.resting.gradient)
+                               : AnyShapeStyle(Color.white.opacity(0.06)))
+            }
+            .overlay {
+                Capsule().strokeBorder(set.isWarmup
+                                       ? AnyShapeStyle(Color.clear)
+                                       : AnyShapeStyle(Theme.edge),
+                                       lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(set.isWarmup ? "Warm-up set" : "Mark as warm-up")
+        .accessibilityAddTraits(set.isWarmup ? [.isSelected] : [])
     }
 
     private var valueLabel: String {
@@ -612,9 +791,16 @@ private struct SetRow: View {
 
     private var targetLabel: String {
         if set.tracking == .duration { return "\(set.seconds)s target" }
-        let range = set.targetRepsLow == set.targetRepsHigh
-            ? "\(set.targetRepsLow)"
-            : "\(set.targetRepsLow)–\(set.targetRepsHigh)"
+        // A warm-up has no rep range to work up — it's a rung on the way to the
+        // work, so it states the reps it was built with rather than a target.
+        let range: String
+        if set.isWarmup || set.targetRepsHigh <= 0 {
+            range = "\(set.reps)"
+        } else if set.targetRepsLow == set.targetRepsHigh {
+            range = "\(set.targetRepsLow)"
+        } else {
+            range = "\(set.targetRepsLow)–\(set.targetRepsHigh)"
+        }
         if set.weightKg == 0 { return "\(range) reps" }
         return "\(scale.format(set.weightKg)) × \(range)"
     }

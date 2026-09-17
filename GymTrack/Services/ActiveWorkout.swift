@@ -58,6 +58,11 @@ final class ActiveWorkout {
     /// Set IDs that just earned a PR, so the UI can celebrate once.
     private(set) var recentPRs: Set<UUID> = []
 
+    /// The set logged most recently. Only that one row offers an effort
+    /// rating — asking on every completed set at once would turn a column of
+    /// finished work into a column of unanswered questions.
+    private(set) var lastLoggedSetID: UUID?
+
     private let context: ModelContext
     private var history: [WorkoutSession]
 
@@ -190,6 +195,9 @@ final class ActiveWorkout {
     func complete(_ set: SetLog, restSeconds: Int?) {
         set.isCompleted = true
         set.completedAt = .now
+        // Warm-ups are never rated: an effort score on a ramp is noise the
+        // progression would then have to learn to ignore.
+        lastLoggedSetID = set.isWarmup ? nil : set.id
         carryLoadForward(from: set)
         save()
 
@@ -208,10 +216,16 @@ final class ActiveWorkout {
 
     /// Mirrors the load just used onto the remaining sets of the same exercise.
     /// Without this you re-dial the weight for every set of every exercise.
+    ///
+    /// The warm-up boundary is deliberately one-way: a ramp is lighter than the
+    /// work on purpose, so logging 40 kg on the second warm-up must not quietly
+    /// rewrite the 100 kg waiting underneath it.
     private func carryLoadForward(from set: SetLog) {
+        guard !set.isWarmup else { return }
         for other in session.sets
         where other.catalogID == set.catalogID
             && !other.isCompleted
+            && !other.isWarmup
             && other.setIndex > set.setIndex {
             other.weightKg = set.weightKg
             if other.tracking == .duration { other.seconds = set.seconds }
@@ -221,17 +235,30 @@ final class ActiveWorkout {
     func uncomplete(_ set: SetLog) {
         set.isCompleted = false
         set.completedAt = nil
+        set.rpe = nil
         recentPRs.remove(set.id)
+        if lastLoggedSetID == set.id { lastLoggedSetID = nil }
         save()
         Haptics.tick()
     }
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
 
+    /// How hard that set was, 6–10. Passing the value it already holds clears
+    /// it, so the same tap that answers the question takes the answer back.
+    func rate(_ set: SetLog, rpe: Double?) {
+        set.rpe = set.rpe == rpe ? nil : rpe
+        save()
+        Haptics.tick()
+    }
+
     // MARK: - Structure edits
 
     func addSet(to group: SessionExerciseGroup) {
-        guard let template = group.sets.last else { return }
+        // Modelled on the last working set, never on a warm-up — an extra set
+        // added to an exercise that has only been ramped so far should still
+        // open at the weight you intend to work with.
+        guard let template = group.workingSets.last ?? group.sets.last else { return }
         let set = SetLog(
             catalogID: group.catalogID,
             exerciseName: group.name,
@@ -249,11 +276,118 @@ final class ActiveWorkout {
         Haptics.tick()
     }
 
+    /// Takes a working set off the end. It won't eat into the warm-ups — those
+    /// are removed by demoting them, not by this button, which is the pair of
+    /// `addSet` and should undo exactly what that did.
     func removeLastSet(from group: SessionExerciseGroup) {
-        guard group.sets.count > 1, let last = group.sets.last else { return }
+        guard group.workingSets.count > 1, let last = group.workingSets.last else { return }
         context.delete(last)
+        resequence(group.catalogID)
         save()
         Haptics.tick()
+    }
+
+    // MARK: Warm-ups
+
+    /// The ramp, as a share of the working weight and the reps to do there.
+    /// Light and brief on purpose: this is the part that gets you ready, not
+    /// the part that makes you tired.
+    private static let warmupRamp: [(fraction: Double, reps: Int)] = [
+        (0.4, 8), (0.6, 5), (0.8, 3)
+    ]
+
+    /// Builds a ramp up to the first working set — every rung pulled onto the
+    /// ladder the machine actually has, which is the whole reason the app can
+    /// offer this at all. Rungs that collapse onto each other, or onto the
+    /// working weight itself, are dropped rather than logged twice.
+    func addWarmupRamp(to group: SessionExerciseGroup) {
+        guard let reference = group.workingSets.first ?? group.sets.first else { return }
+        var rungs: [(weightKg: Double, reps: Int, seconds: Int)] = []
+
+        if reference.tracking == .duration {
+            rungs = [(0, 0, max(5, reference.seconds / 2))]
+        } else {
+            let scale = reference.loadScale
+            let working = reference.weightKg
+            var previous = 0.0
+            if working > 0 {
+                for step in Self.warmupRamp {
+                    let rung = scale.snap(kg: working * step.fraction)
+                    guard rung > 0, rung < working, rung > previous else { continue }
+                    rungs.append((rung, step.reps, reference.seconds))
+                    previous = rung
+                }
+            }
+            // Bodyweight work, or a load with no rung beneath it: the warm-up
+            // is the movement itself, done easy.
+            if rungs.isEmpty {
+                rungs = [(working, max(1, min(reference.reps, 10)), reference.seconds)]
+            }
+        }
+
+        for rung in rungs {
+            insertWarmup(into: group, weightKg: rung.weightKg, reps: rung.reps, seconds: rung.seconds)
+        }
+        resequence(group.catalogID)
+        save()
+        Haptics.log()
+    }
+
+    /// One more warm-up, carrying whatever the last one used.
+    func addWarmupSet(to group: SessionExerciseGroup) {
+        let template = group.warmupSets.last ?? group.workingSets.first
+        insertWarmup(into: group,
+                     weightKg: template?.weightKg ?? 0,
+                     reps: template?.reps ?? 8,
+                     seconds: template?.seconds ?? 30)
+        resequence(group.catalogID)
+        save()
+        Haptics.tick()
+    }
+
+    /// Reclassifies a set already on screen. The load is left exactly as it is —
+    /// calling something a warm-up says what it counts as, not what it weighs.
+    func setWarmup(_ set: SetLog, _ isWarmup: Bool) {
+        guard set.isWarmup != isWarmup else { return }
+        set.isWarmup = isWarmup
+        // A set that was celebrated as a record and has just been demoted to a
+        // warm-up isn't one any more.
+        if isWarmup { recentPRs.remove(set.id) }
+        resequence(set.catalogID)
+        save()
+        Haptics.tick()
+    }
+
+    private func insertWarmup(into group: SessionExerciseGroup,
+                              weightKg: Double, reps: Int, seconds: Int) {
+        let existing = session.sets.filter { $0.catalogID == group.catalogID && $0.isWarmup }
+        let set = SetLog(
+            catalogID: group.catalogID,
+            exerciseName: group.name,
+            exerciseOrder: group.order,
+            setIndex: (existing.map(\.setIndex).max() ?? -1) + 1,
+            weightKg: weightKg,
+            reps: reps,
+            seconds: seconds,
+            isWarmup: true
+        )
+        set.session = session
+        context.insert(set)
+    }
+
+    /// Renumbers one exercise so its warm-ups sit above its working sets.
+    /// `setIndex` is what orders a card, and it's also what pairs a set with
+    /// last session's numbers, so the two groups are kept contiguous rather
+    /// than interleaved by whenever a row happened to be added.
+    private func resequence(_ catalogID: String) {
+        let sets = session.sets
+            .filter { $0.catalogID == catalogID }
+            .sorted {
+                $0.isWarmup == $1.isWarmup
+                    ? $0.setIndex < $1.setIndex
+                    : $0.isWarmup && !$1.isWarmup
+            }
+        for (index, set) in sets.enumerated() { set.setIndex = index }
     }
 
     func addExercise(_ exercise: CatalogExercise, sets: Int = 3) {
@@ -304,6 +438,7 @@ final class ActiveWorkout {
         WorkoutLiveActivity.shared.end(with: activityState)
         WatchBridge.shared.update(session: nil)
         WatchBridge.shared.clearMetrics()
+        WidgetPublisher.updateSession(nil)
         recordToHealth()
         Haptics.success()
     }
@@ -316,6 +451,7 @@ final class ActiveWorkout {
         WorkoutLiveActivity.shared.end(with: nil)
         WatchBridge.shared.update(session: nil)
         WatchBridge.shared.clearMetrics()
+        WidgetPublisher.updateSession(nil)
     }
 
     // MARK: - Health
@@ -361,6 +497,7 @@ final class ActiveWorkout {
         writeThrough()
         pushLiveActivity()
         pushToWatch()
+        WidgetPublisher.updateSession(self)
     }
 
     private func writeThrough() {

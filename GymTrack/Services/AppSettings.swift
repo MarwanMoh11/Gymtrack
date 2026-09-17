@@ -8,6 +8,8 @@ enum SettingsKey {
     static let restTimerSound = "settings.restTimerSound"
     static let defaultRestSeconds = "settings.defaultRestSeconds"
     static let keepScreenAwake = "settings.keepScreenAwake"
+    /// Whether the logger asks how hard a set was once it's logged.
+    static let trackRPE = "settings.trackRPE"
     static let hasSeeded = "settings.hasSeeded"
     static let hasOnboarded = "settings.hasOnboarded"
     static let userName = "settings.userName"
@@ -59,6 +61,13 @@ final class AppSettings {
     var userName: String {
         didSet { defaults.set(userName, forKey: SettingsKey.userName) }
     }
+    /// Offer an effort rating after each set, and let it steer the progression.
+    /// The strip only ever appears on the set you just logged and never blocks
+    /// the next one, so leaving it unanswered costs nothing — which is what
+    /// makes it safe to have on by default.
+    var trackRPE: Bool {
+        didSet { defaults.set(trackRPE, forKey: SettingsKey.trackRPE) }
+    }
 
     // MARK: Health & watch
 
@@ -89,6 +98,7 @@ final class AppSettings {
             SettingsKey.restTimerAutoStart: true,
             SettingsKey.defaultRestSeconds: 90,
             SettingsKey.keepScreenAwake: true,
+            SettingsKey.trackRPE: true,
             SettingsKey.healthWriteWorkouts: true,
             SettingsKey.healthReadVitals: true,
             SettingsKey.healthBodyWeight: false,
@@ -99,6 +109,7 @@ final class AppSettings {
         restTimerAutoStart = defaults.bool(forKey: SettingsKey.restTimerAutoStart)
         defaultRestSeconds = defaults.integer(forKey: SettingsKey.defaultRestSeconds)
         keepScreenAwake = defaults.bool(forKey: SettingsKey.keepScreenAwake)
+        trackRPE = defaults.bool(forKey: SettingsKey.trackRPE)
         userName = defaults.string(forKey: SettingsKey.userName) ?? ""
         healthWriteWorkouts = defaults.bool(forKey: SettingsKey.healthWriteWorkouts)
         healthReadVitals = defaults.bool(forKey: SettingsKey.healthReadVitals)
