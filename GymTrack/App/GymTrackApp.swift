@@ -6,13 +6,32 @@ struct GymTrackApp: App {
 
     let container: ModelContainer
 
+    /// Where the database lives, pinned rather than left to the default.
+    ///
+    /// SwiftData follows `NSPersistentContainer.defaultDirectoryURL()`, which
+    /// silently moves to the *App Group* container the moment an app has the
+    /// app-groups entitlement. Adding that entitlement for the widgets would
+    /// therefore have pointed the app at a brand-new empty store and left every
+    /// existing session sitting unread in the old location — the app would look
+    /// like it had lost your training history. So the path is stated outright,
+    /// and it is the one the app has always used.
+    private static var storeURL: URL {
+        URL.applicationSupportDirectory.appending(path: "default.store")
+    }
+
     init() {
         do {
+            // Core Data creates this directory itself, but not on every OS
+            // version, and a missing one fails the open.
+            try? FileManager.default.createDirectory(
+                at: .applicationSupportDirectory, withIntermediateDirectories: true
+            )
             container = try ModelContainer(
                 for: Plan.self, PlanDay.self, PlanItem.self,
                 WorkoutSession.self, SetLog.self,
                 CustomExerciseRecord.self, BodyMetric.self,
-                ExerciseLoadPreference.self
+                ExerciseLoadPreference.self,
+                configurations: ModelConfiguration(url: Self.storeURL)
             )
         } catch {
             // A store that can't be opened is unrecoverable; falling back to an

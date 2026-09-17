@@ -1,20 +1,26 @@
-import AppIntents
 import SwiftUI
 import WidgetKit
 
 /// Today's session on the Home Screen, and a way into it that skips the app.
 ///
 /// It has three things to say and shows exactly one: what's running, what's
-/// scheduled, or that today is a rest day. The start button is a real button —
-/// the intent behind it opens the app on the first set rather than on the
-/// Today tab, which is the difference between two taps and none.
+/// scheduled, or that today is a rest day. Starting is a link rather than an
+/// interactive button on purpose — the app has to come forward to build a
+/// session anyway, and a link needs nothing shared with this process, which
+/// keeps the App Group to the one job only it can do: the numbers above.
 struct TodayWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "GymTrackToday", provider: SnapshotProvider()) { entry in
-            TodayWidgetView(snapshot: entry.snapshot)
-                .containerBackground(for: .widget) {
-                    WidgetBackground(phase: entry.snapshot.widgetPhase)
+            Group {
+                if let snapshot = entry.snapshot {
+                    TodayWidgetView(snapshot: snapshot)
+                } else {
+                    WidgetUnavailableView()
                 }
+            }
+            .containerBackground(for: .widget) {
+                WidgetBackground(phase: entry.snapshot?.widgetPhase ?? .working)
+            }
         }
         .configurationDisplayName("Today")
         .description("The session you're due to do, or the one you're in.")
@@ -40,7 +46,7 @@ private struct TodayWidgetView: View {
                 resting
             }
         }
-        .widgetURL(URL(string: snapshot.session == nil ? "gymtrack://open" : "gymtrack://session"))
+        .widgetURL(snapshot.session == nil ? GymTrackDeepLink.open : GymTrackDeepLink.session)
     }
 
     // MARK: A session in progress
@@ -136,7 +142,7 @@ private struct TodayWidgetView: View {
 
             Spacer(minLength: 6)
 
-            StartButton(title: "Start", intent: StartTodayWorkoutIntent())
+            StartLink(title: "Start")
         }
     }
 
@@ -174,8 +180,7 @@ private struct TodayWidgetView: View {
 
             // A rest day is a suggestion, not a lock — the routine doesn't know
             // you moved leg day.
-            StartButton(title: snapshot.hasPlan ? "Train anyway" : "Start a session",
-                        intent: StartTodayWorkoutIntent())
+            StartLink(title: snapshot.hasPlan ? "Train anyway" : "Start a session")
         }
     }
 
@@ -219,15 +224,18 @@ private struct StreakPill: View {
     }
 }
 
-/// The one control on the card. Interactive widgets can run an intent in place,
-/// but this one deliberately opens the app: building a session needs the store,
-/// the plan and the progression, none of which exist out here.
-private struct StartButton<I: AppIntent>: View {
+/// The one control on the card.
+///
+/// An interactive widget could run an intent in place, but building a session
+/// needs the store, the plan, the progression, a Live Activity and the watch
+/// link — so it has to open the app whatever it does. A link does that without
+/// the widget process needing to write anywhere the app can read, which leaves
+/// the App Group responsible for the one thing only it can do.
+private struct StartLink: View {
     let title: String
-    let intent: I
 
     var body: some View {
-        Button(intent: intent) {
+        Link(destination: GymTrackDeepLink.startToday) {
             HStack(spacing: 4) {
                 Image(systemName: "bolt.horizontal.fill").font(.system(size: 10, weight: .black))
                 Text(title).font(Theme.rounded(12, weight: .heavy))
@@ -237,8 +245,69 @@ private struct StartButton<I: AppIntent>: View {
             .padding(.vertical, 7)
             .background(SessionPhase.working.gradient, in: Capsule())
         }
-        .buttonStyle(.plain)
     }
+}
+
+/// What a widget has instead of data: the app has never published a snapshot.
+/// On a build where the App Group isn't provisioned, this is every refresh —
+/// so it says what's true rather than borrowing "no routine yet", which would
+/// tell someone with a routine that they haven't got one.
+///
+/// The whole widget is already a link to the app, so the accessory sizes say
+/// their piece and stop; only the Home Screen ones have room for a control.
+struct WidgetUnavailableView: View {
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        content.widgetURL(GymTrackDeepLink.open)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch family {
+        case .accessoryInline:
+            Text("GymTrack — open to set up")
+
+        case .accessoryCircular:
+            ZStack {
+                AccessoryWidgetBackground()
+                Image(systemName: "bolt.horizontal.fill").font(.system(size: 17, weight: .bold))
+            }
+
+        case .accessoryRectangular:
+            VStack(alignment: .leading, spacing: 1) {
+                Text("GYMTRACK")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .widgetAccentable()
+                Text("Open to fill this in")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        default:
+            VStack(alignment: .leading, spacing: 0) {
+                Eyebrow(text: "GYMTRACK", tint: Theme.textSecondary)
+                Text("Open GymTrack to fill this in")
+                    .font(Theme.rounded(15, weight: .heavy))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.7)
+                    .padding(.top, 5)
+                Spacer(minLength: 6)
+                StartLink(title: "Open")
+            }
+        }
+    }
+}
+
+/// The URLs the app answers on — see `RootView.onOpenURL`.
+enum GymTrackDeepLink {
+    static let open = URL(string: "gymtrack://open")!
+    static let session = URL(string: "gymtrack://session")!
+    /// Falls back to a freestyle session when today isn't a training day.
+    static let startToday = URL(string: "gymtrack://start-today")!
 }
 
 /// The ground every GymTrack widget sits on: the app's near-black, lifted by a

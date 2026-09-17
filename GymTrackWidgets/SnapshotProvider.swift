@@ -8,7 +8,11 @@ import WidgetKit
 /// of the routine.
 struct GymTrackEntry: TimelineEntry {
     let date: Date
-    let snapshot: GymTrackSnapshot
+    /// `nil` when the app has never published anything — which is also what an
+    /// unprovisioned App Group looks like from out here. The views draw that as
+    /// "open GymTrack" rather than borrowing the state for a real account with
+    /// no routine, which would tell someone who has one that they don't.
+    let snapshot: GymTrackSnapshot?
 }
 
 struct SnapshotProvider: TimelineProvider {
@@ -20,20 +24,14 @@ struct SnapshotProvider: TimelineProvider {
     /// The gallery preview. Falls back to the placeholder so a widget being
     /// picked out never shows an empty card, whether or not the app has run.
     func getSnapshot(in context: Context, completion: @escaping (GymTrackEntry) -> Void) {
-        completion(GymTrackEntry(date: .now, snapshot: current(allowPlaceholder: context.isPreview)))
+        completion(GymTrackEntry(date: .now,
+                                 snapshot: SharedStore.readSnapshot()
+                                     ?? (context.isPreview ? .placeholder : nil)))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<GymTrackEntry>) -> Void) {
-        let entry = GymTrackEntry(date: .now, snapshot: current(allowPlaceholder: false))
+        let entry = GymTrackEntry(date: .now, snapshot: SharedStore.readSnapshot())
         completion(Timeline(entries: [entry], policy: .after(nextRefresh())))
-    }
-
-    /// The real snapshot, or an empty one that the views know how to draw as
-    /// "open GymTrack". The placeholder's invented Push Day is only ever shown
-    /// in the gallery — putting it on someone's Home Screen would be a lie.
-    private func current(allowPlaceholder: Bool) -> GymTrackSnapshot {
-        if let snapshot = SharedStore.readSnapshot() { return snapshot }
-        return allowPlaceholder ? .placeholder : GymTrackSnapshot()
     }
 
     /// Just after midnight. A widget showing "Push Day" has to stop showing it

@@ -24,14 +24,14 @@ With a free Apple ID the app stays installed for **7 days** before it needs
 re-running from Xcode. A paid Apple Developer account raises that to a year.
 
 The Home Screen widgets read their numbers out of an App Group —
-`group.com.marwanmohamed.gymtrack`, declared in all three entitlements files. If
-you changed the bundle identifier in step 4, change the group to match in
-`GymTrack.entitlements`, `GymTrackWatch.entitlements`,
-`GymTrackWidgets.entitlements` and `SharedStore.appGroup`, all four together.
-App Groups need a paid Apple Developer account; with a free Apple ID the
-capability can't be provisioned and the widgets fall back to their placeholder.
-Nothing else is affected — the app, the watch and the Live Activity don't go
-through the group.
+`group.com.marwanmohamed.gymtrack`, declared in `GymTrack.entitlements` and
+`GymTrackWidgets.entitlements`. If you changed the bundle identifier in step 4,
+change the group to match in both, and in `SharedStore.appGroup`, all three
+together. App Groups need a paid Apple Developer account; with a free Apple ID
+the capability can't be provisioned, and the widgets say "Open GymTrack to fill
+this in" rather than pretending you have no routine. Nothing else is affected —
+the app, the watch and the Live Activity never go through the group, and
+starting a workout from a widget is an ordinary `gymtrack://` link.
 
 Minimum deployment target is **iOS 17**. The Live Activity appears on the Lock
 Screen on any supported iPhone; the Dynamic Island presentation needs a device
@@ -234,10 +234,18 @@ Built with SwiftUI, SwiftData and Swift Charts. No third-party dependencies.
   arrangement the watch has and for the same reason.
 - Nothing outside the app can start a workout: a session needs the store, the
   plan behind today, the progression that picks the opening weights, a Live
-  Activity and the watch link. So Siri, the Action Button, a Shortcut and the
-  widget's own button all do the same thing — leave a note in the App Group and
-  bring the app forward, which reads it as it comes to the front. Notes older
-  than two minutes are dropped rather than replayed.
+  Activity and the watch link. So all of it ends in the app. The widget's own
+  button is a plain `gymtrack://start-today` link, which needs nothing shared
+  with the widget's process; Siri, the Action Button and a Shortcut go through
+  an App Intent that leaves a note for the app to read as it comes to the front,
+  and notes older than two minutes are dropped rather than replayed.
+- The store's path is stated outright in `GymTrackApp` rather than left to
+  SwiftData's default, because that default is `NSPersistentContainer`'s — which
+  moves to the App Group container the moment an app has the app-groups
+  entitlement. Adding that entitlement for the widgets would otherwise have
+  pointed the app at a new empty store and left every existing session unread in
+  the old location, which on an installed copy looks exactly like losing your
+  training history.
 - `SampleData.swift` fills the app with a couple of months of plausible history
   for design work. It's `#if DEBUG` only; launch with `-GTSeedSampleData`.
 

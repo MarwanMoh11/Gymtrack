@@ -9,10 +9,18 @@ import WidgetKit
 struct StreakWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "GymTrackStreak", provider: SnapshotProvider()) { entry in
-            StreakWidgetView(snapshot: entry.snapshot)
-                .containerBackground(for: .widget) {
-                    WidgetBackground(phase: entry.snapshot.widgetPhase)
+            Group {
+                if let snapshot = entry.snapshot {
+                    StreakWidgetView(snapshot: snapshot)
+                } else {
+                    // Says so at whatever size it's in, rather than drawing a
+                    // streak of zero that would read as a fact.
+                    WidgetUnavailableView()
                 }
+            }
+            .containerBackground(for: .widget) {
+                WidgetBackground(phase: entry.snapshot?.widgetPhase ?? .working)
+            }
         }
         .configurationDisplayName("Streak")
         .description("Days in a row, and what this week looks like.")
@@ -26,7 +34,7 @@ private struct StreakWidgetView: View {
 
     var body: some View {
         content
-            .widgetURL(URL(string: "gymtrack://open"))
+            .widgetURL(GymTrackDeepLink.open)
             .accessibilityLabel(accessibilityLine)
     }
 
