@@ -24,14 +24,16 @@ With a free Apple ID the app stays installed for **7 days** before it needs
 re-running from Xcode. A paid Apple Developer account raises that to a year.
 
 The Home Screen widgets read their numbers out of an App Group —
-`group.com.marwanmohamed.gymtrack`, declared in `GymTrack.entitlements` and
-`GymTrackWidgets.entitlements`. If you changed the bundle identifier in step 4,
-change the group to match in both, and in `SharedStore.appGroup`, all three
-together. App Groups need a paid Apple Developer account; with a free Apple ID
-the capability can't be provisioned, and the widgets say "Open GymTrack to fill
-this in" rather than pretending you have no routine. Nothing else is affected —
-the app, the watch and the Live Activity never go through the group, and
-starting a workout from a widget is an ordinary `gymtrack://` link.
+`group.com.marwanmohamed.gymtrack`, declared in the Release entitlements for the
+app and widgets. If you changed the bundle identifier in step 4, change the
+group to match in `GymTrack.entitlements`, `GymTrackWidgets.entitlements`, and
+`SharedStore.appGroup`, all three together. App Groups need a paid Apple
+Developer account, so the default Debug configuration leaves that entitlement
+out and can be installed with a free Apple ID. In that build, the widgets say
+"Open GymTrack to fill this in" rather than pretending you have no routine.
+Nothing else is affected — the app, the watch and the Live Activity never go
+through the group, and starting a workout from a widget is an ordinary
+`gymtrack://` link.
 
 Minimum deployment target is **iOS 17**. The Live Activity appears on the Lock
 Screen on any supported iPhone; the Dynamic Island presentation needs a device
@@ -45,6 +47,18 @@ app on your phone under *Available Apps*.
 
 Two things worth knowing:
 
+- A locally signed build must provision the physical watch as well as the
+  iPhone. Connect and unlock the paired iPhone, then open **Xcode → Open
+  Developer Tool → Device Hub**. For iOS/watchOS 26 or earlier, the iPhone must
+  be connected to the Mac with a data-capable cable; Xcode 27's **+ → Pair
+  Nearby Device…** workflow requires iOS/watchOS 27 or later. Begin pairing the
+  Apple Watch; the Developer Mode switch may remain hidden until this step.
+  Accept the trust prompts on both devices, then enable **Settings → Privacy &
+  Security → Developer Mode** on the watch and restart it when prompted. Back
+  in Xcode, select the **GymTrackWatch** scheme and the physical watch and press
+  ⌘R once. Xcode then registers the watch and refreshes its provisioning
+  profile. If the watch is absent from Xcode, installing it from the iPhone's
+  Watch app can fail with “integrity could not be verified.”
 - Building the project needs **watchOS platform support** installed in Xcode
   (Xcode → Settings → Components). Without it the iPhone scheme won't build
   either, because it embeds the watch app.
