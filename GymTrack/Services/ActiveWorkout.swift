@@ -209,6 +209,11 @@ final class ActiveWorkout {
         // Logging another set is an answer of its own — you took the weight you
         // took — so the offer, and the chance to undo having taken it, both go
         // rather than hanging over the new row.
+        //
+        // And that answer is the one that goes on the record: lifting the next
+        // set at the old weight is a decline whether or not anybody tapped the
+        // cross, and the two are indistinguishable from here.
+        if let standing = pendingNudge { subject(of: standing)?.recordLoadNudge(.declined, toKg: standing.toKg) }
         pendingNudge = nil
         takenNudge = nil
         // The rest this set's announcement cut short can no longer be put
@@ -319,6 +324,7 @@ final class ActiveWorkout {
         // that answers the question also un-answers it.
         guard set.rpe != feel.rawValue else { return clearRating(set) }
         set.rpe = feel.rawValue
+        forgetUntakenNudge(on: set)
         pendingNudge = nudge(after: set)
         save()
         Haptics.tick()
@@ -330,8 +336,26 @@ final class ActiveWorkout {
     func clearRating(_ set: SetLog) {
         set.rpe = nil
         if pendingNudge?.setID == set.id { pendingNudge = nil }
+        forgetUntakenNudge(on: set)
         save()
         Haptics.tick()
+    }
+
+    /// Takes an offer the lifter turned down off the record along with the
+    /// answer that produced it. The question is being un-asked back to never
+    /// having been put, and an offer nobody acted on leaves nothing behind it.
+    ///
+    /// A taken one stays. It moved real weights and withdrawing the answer
+    /// doesn't move them back — that is the line `clearRating` already draws,
+    /// and the record follows the weights rather than the fiction.
+    private func forgetUntakenNudge(on set: SetLog) {
+        guard set.loadNudgeOutcome == .declined else { return }
+        set.clearLoadNudge()
+    }
+
+    /// The set whose answer produced an offer — where the outcome is filed.
+    private func subject(of nudge: LoadNudge) -> SetLog? {
+        session.sets.first { $0.id == nudge.setID }
     }
 
     // MARK: - Acting on the answer
@@ -421,6 +445,10 @@ final class ActiveWorkout {
         }
         pendingNudge = nil
         takenNudge = previous.isEmpty ? nil : TakenNudge(nudge: nudge, previousKg: previous)
+        // Only where something actually moved. An offer that found no sets left
+        // to change was not taken — nothing happened — and saying it was would
+        // put a rung on the record that nobody ever lifted.
+        if takenNudge != nil { subject(of: nudge)?.recordLoadNudge(.taken, toKg: nudge.toKg) }
         save()
         Haptics.log()
     }
@@ -431,6 +459,11 @@ final class ActiveWorkout {
         guard let taken = takenNudge else { return }
         restoreWeights()
         pendingNudge = taken.nudge
+        // Off the record entirely, not filed as a decline. The weights are back
+        // where they were and the offer is standing again, so the screen reads
+        // as though the button was never pressed, and the record has to say the
+        // same thing — the lifter has made no decision yet.
+        subject(of: taken.nudge)?.clearLoadNudge()
         save()
         Haptics.tick()
     }
@@ -447,7 +480,13 @@ final class ActiveWorkout {
     }
 
     func dismissNudge() {
+        guard let nudge = pendingNudge else { return }
+        subject(of: nudge)?.recordLoadNudge(.declined, toKg: nudge.toKg)
         pendingNudge = nil
+        // This used to change nothing on disk, so there was nothing to write.
+        // Now the cross puts something in the record, and the record has to
+        // survive the phone dying mid-session like everything else here.
+        save()
         Haptics.tick()
     }
 
@@ -791,4 +830,38 @@ final class ActiveWorkout {
             state: activityState
         )
     }
+}
+
+// MARK: - What became of an offer
+
+/// What the lifter did with a load offer.
+///
+/// It is an autoregulation signal, and the reason the effort question is worth
+/// asking at all. Told there is a rung above this one, some lifters take it
+/// every time and some never do, and those two need coaching in opposite
+/// directions. Nothing else in this record says which is which: the weights
+/// alone can't, because a lifter who was never offered anything and a lifter
+/// who turned every offer down both just look like somebody who stayed put.
+///
+/// Two words, because the app can honestly tell two things apart. Tapping the
+/// cross and simply logging the next set both mean the offer was made and the
+/// weight stayed where it was; what separates them is how deliberate the
+/// refusal felt, and a phone on a bench cannot see that. Splitting them would
+/// hand a reader a distinction between a considered no and not having noticed
+/// which the data does not support — and they would believe it, because it
+/// would be sitting in the file looking like a measurement.
+///
+/// Two outcomes deliberately record nothing at all. An offer taken and then
+/// undone leaves no trace: `undoTakenNudge` puts every weight back verbatim and
+/// stands the offer back up, and a record that outlived that would be the only
+/// thing in the app still claiming the button was pressed. And an offer still
+/// standing when the session ends is not a decline — `finish` deletes the sets
+/// it would have moved, so nobody lifted anything at either weight and there is
+/// no decision to report. Both leave the set with no key at all, exactly like
+/// the sets that were never offered anything, which is what they are.
+enum LoadNudgeOutcome: String, Sendable {
+    /// Taken: every set of that exercise still to come moved onto the new rung.
+    case taken
+    /// Not taken: the cross, or the next set logged at the weight that stood.
+    case declined
 }

@@ -154,6 +154,31 @@ enum BackupService {
         /// heart rate and never otherwise, so a reader is never left deciding
         /// for themselves how much to trust a number this file handed them.
         var heartRateWindow: String?
+        /// The load the app offered off the back of this set's rating, and what
+        /// the lifter did with it. Absent — the whole key — on every set that
+        /// was never offered anything, which is nearly all of them, and absent
+        /// again wherever an offer was taken and then undone. Optional like the
+        /// rest, so a backup written before this existed still restores.
+        var loadNudge: LoadNudgeDTO?
+    }
+
+    /// One load offer and what became of it.
+    ///
+    /// This is the autoregulation signal in the file: whether the lifter pushes
+    /// when told there is room, or holds. `outcome` is `taken` or `declined` —
+    /// declining covers the cross and simply lifting the next set at the weight
+    /// that stood, which the app can't tell apart and doesn't pretend to.
+    ///
+    /// The rung travels with the outcome because neither is worth anything
+    /// alone: turning down 62.5 → 65 on a squat and turning down 20 → 25 on a
+    /// curl are different decisions. The other end of it is the set's own
+    /// `weightKg` — every offer is computed from it — so it isn't copied here,
+    /// where a reader would have two numbers that could disagree.
+    struct LoadNudgeDTO: Codable {
+        /// `taken` or `declined`.
+        var outcome: String
+        /// The weight the offer moved the remaining sets to, in kilograms.
+        var toKg: Double
     }
 
     struct BodyMetricDTO: Codable {
@@ -269,7 +294,8 @@ enum BackupService {
                                       // since been cleared can't reach the file
                                       // on its own, describing a window over
                                       // numbers that aren't there.
-                                      heartRateWindow: set.heartRateWindow?.rawValue)
+                                      heartRateWindow: set.heartRateWindow?.rawValue,
+                                      loadNudge: loadNudge(of: set))
                            })
             },
             bodyMetrics: bodyMetrics.map {
@@ -316,6 +342,16 @@ enum BackupService {
             ExerciseNoteDTO(catalogID: $0.catalogID, exerciseName: $0.exerciseName,
                             text: $0.trimmedText, tags: $0.tags.map(\.rawValue))
         }
+    }
+
+    /// What the app offered this set's rating and what came of it, where an
+    /// offer was both made and resolved. Nothing is written otherwise: a set
+    /// nobody was offered a rung on has to stay indistinguishable from a set
+    /// logged before any of this existed, which is what a null or a "none"
+    /// would quietly break.
+    private static func loadNudge(of set: SetLog) -> LoadNudgeDTO? {
+        guard let outcome = set.loadNudgeOutcome, let toKg = set.loadNudgeToKg else { return nil }
+        return LoadNudgeDTO(outcome: outcome.rawValue, toKg: toKg)
     }
 
     /// The library definitions behind the exercises the archive's plans and
@@ -451,6 +487,13 @@ enum BackupService {
                 // truth about them once their label is unreadable.
                 set.heartRateWindowRaw = setDTO.heartRateWindow
                     .flatMap(HeartRateWindowSource.init(rawValue:))?.rawValue
+                // An outcome the app can't read is dropped whole, rung and all.
+                // Unlike a heart rate, whose numbers survive losing their
+                // label, there is nothing left here once the word goes: a rung
+                // on its own doesn't say whether anybody took it.
+                if let nudge = setDTO.loadNudge, let outcome = LoadNudgeOutcome(rawValue: nudge.outcome) {
+                    set.recordLoadNudge(outcome, toKg: nudge.toKg)
+                }
                 set.session = session
                 context.insert(set)
             }

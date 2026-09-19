@@ -430,6 +430,24 @@ final class SetLog {
     /// measurement.
     var heartRateWindowRaw: String?
 
+    // MARK: The offer this set's answer produced
+
+    /// What the lifter did with the load offer this set's rating produced — a
+    /// `LoadNudgeOutcome` raw value — and the rung that offer named.
+    ///
+    /// They are written and cleared together and neither means anything alone:
+    /// "declined" says nothing without knowing what was declined, and a rung
+    /// nobody acted on is not a decision. Both are absent on the great majority
+    /// of sets, which are never offered anything, and absent again wherever an
+    /// offer was taken and then undone — see `LoadNudgeOutcome`.
+    ///
+    /// The other half of the pair, what the offer was *from*, is this set's own
+    /// `weightKg`: the offer is computed from it, and a logged set's weight
+    /// can't change without the set being un-logged, which clears all of this.
+    /// Copying it here would only let the two disagree.
+    var loadNudgeOutcomeRaw: String?
+    var loadNudgeToKg: Double?
+
     var session: WorkoutSession?
 
     init(catalogID: String,
@@ -530,6 +548,30 @@ final class SetLog {
         heartRateWindowRaw = nil
     }
 
+    // MARK: The load offer
+
+    /// What became of the offer this set's answer produced, as the word rather
+    /// than the raw string. `nil` on a set that was never offered anything, or
+    /// whose offer was never resolved.
+    var loadNudgeOutcome: LoadNudgeOutcome? {
+        guard loadNudgeToKg != nil else { return nil }
+        return loadNudgeOutcomeRaw.flatMap(LoadNudgeOutcome.init(rawValue:))
+    }
+
+    /// Files an outcome and the rung it was about, together, because a reader
+    /// can do nothing with either on its own.
+    func recordLoadNudge(_ outcome: LoadNudgeOutcome, toKg: Double) {
+        loadNudgeOutcomeRaw = outcome.rawValue
+        loadNudgeToKg = toKg
+    }
+
+    /// Forgets the offer ever happened. Called where the record has to read as
+    /// though the button was never pressed and the question never asked.
+    func clearLoadNudge() {
+        loadNudgeOutcomeRaw = nil
+        loadNudgeToKg = nil
+    }
+
     // MARK: Taking it back
 
     /// Puts the set back to never having been logged.
@@ -560,6 +602,10 @@ final class SetLog {
         // being taken back — kept, they would sit on whatever gets logged in
         // its place and describe minutes nobody spent doing it.
         clearHeartRate()
+        // The offer came out of the rating being cleared two lines up. With the
+        // answer gone there was never a reading of this set to act on, so what
+        // was done about it stops being a fact about anything.
+        clearLoadNudge()
     }
 }
 
