@@ -122,6 +122,15 @@ enum BackupService {
         /// backups still restore, and ignored — a set is a set now.
         var isWarmup: Bool?
         var completedAt: Date?
+        /// The moment the lifter said the set was beginning, where they said
+        /// so. Optional like the rest — a backup written before this existed
+        /// still restores, and a set nobody announced is absent here rather
+        /// than carrying a stamp copied off `completedAt`: the whole point of
+        /// the field is that the reader can tell the two apart. With both, a
+        /// coach reading this file gets the set's own length and the real rest
+        /// before it; with only `completedAt`, the gap to the previous set is
+        /// rest and set together and can't be pulled apart.
+        var startedAt: Date?
         var targetRepsLow: Int
         var targetRepsHigh: Int
         /// Optional so a backup written before effort tracking still restores —
@@ -232,6 +241,7 @@ enum BackupService {
                                       weightKg: set.weightKg, reps: set.reps, seconds: set.seconds,
                                       isCompleted: set.isCompleted,
                                       completedAt: set.completedAt,
+                                      startedAt: set.startedAt,
                                       targetRepsLow: set.targetRepsLow, targetRepsHigh: set.targetRepsHigh,
                                       rpe: set.rpe)
                            })
@@ -403,6 +413,7 @@ enum BackupService {
                                  targetRepsLow: setDTO.targetRepsLow, targetRepsHigh: setDTO.targetRepsHigh)
                 set.isCompleted = setDTO.isCompleted
                 set.completedAt = setDTO.completedAt
+                set.startedAt = setDTO.startedAt
                 set.rpe = setDTO.rpe
                 set.session = session
                 context.insert(set)

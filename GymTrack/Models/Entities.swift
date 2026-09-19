@@ -212,24 +212,65 @@ final class WorkoutSession {
 
     var totalReps: Int { completedSets.reduce(0) { $0 + $1.reps } }
 
-    /// The gaps between consecutive logged sets, in seconds. What you actually
-    /// took between sets — including the set itself, because the only two
-    /// timestamps a set has are the one it was logged at and the one before it.
+    /// One interval per pair of consecutive logged sets, each with whether it
+    /// is a rest and nothing else.
     ///
-    /// Nothing is asked for here: the numbers were already being written every
-    /// time a set was logged.
-    var setGaps: [TimeInterval] {
-        let stamps = completedSets.compactMap(\.completedAt).sorted()
-        guard stamps.count > 1 else { return [] }
-        return zip(stamps, stamps.dropFirst()).map { $1.timeIntervalSince($0) }
+    /// Where the lifter announced the start of a set — see `SetLog.startedAt` —
+    /// the interval runs from the previous set being logged to this one being
+    /// begun, which is the rest with the set taken out of it. Where nobody
+    /// announced anything it falls back to the distance between the two logged
+    /// stamps, which is rest *plus* the set that followed it and is the most
+    /// those two stamps can say on their own.
+    private var gapsWithProvenance: [(seconds: TimeInterval, isRest: Bool)] {
+        let logged = completedSets
+            .compactMap { set -> (begun: Date?, logged: Date)? in
+                guard let end = set.completedAt else { return nil }
+                return (set.startedAt, end)
+            }
+            .sorted { $0.logged < $1.logged }
+        guard logged.count > 1 else { return [] }
+
+        return zip(logged, logged.dropFirst()).map { previous, next in
+            // A start is only believed where it falls inside the gap it claims
+            // to split. One outside it — a clock moved, a backup restored from
+            // a device in another timezone — would report a negative rest, or
+            // a rest longer than the interval containing it, and a confident
+            // wrong number does more damage here than a coarse right one.
+            if let begun = next.begun, begun > previous.logged, begun <= next.logged {
+                return (begun.timeIntervalSince(previous.logged), true)
+            }
+            return (next.logged.timeIntervalSince(previous.logged), false)
+        }
     }
+
+    /// What you actually took between sets, in seconds — the real rest for
+    /// every set whose start was announced, and the old gap arithmetic for the
+    /// ones where it wasn't. The two kinds live in one list deliberately: a
+    /// session with three announced starts and eight without still has to
+    /// report a rest, and each number is the best one available for its own gap.
+    ///
+    /// Nothing is asked for either way. The fallback numbers were already being
+    /// written every time a set was logged, and announcing a start is optional.
+    var setGaps: [TimeInterval] { gapsWithProvenance.map(\.seconds) }
 
     /// The rest you typically take. Median rather than mean, so the one set you
     /// spent ten minutes waiting for a rack doesn't become "your" rest.
+    ///
+    /// Exact for the sets whose start was announced; for the others it still
+    /// has the set inside it and so runs long — which is what this number
+    /// always was, and why announcing a start exists.
     var typicalRestSeconds: Int? {
         let gaps = setGaps.sorted()
         guard !gaps.isEmpty else { return nil }
         return Int(gaps[gaps.count / 2].rounded())
+    }
+
+    /// Whether every interval behind `typicalRestSeconds` was a rest and only
+    /// a rest. The summary says which it is, because a measured 1:30 and an
+    /// inferred 1:30 are different claims about the same session.
+    var restIsMeasured: Bool {
+        let gaps = gapsWithProvenance
+        return !gaps.isEmpty && gaps.allSatisfy(\.isRest)
     }
 
     /// Volume moved per minute of session — how hard the hour worked, which two
@@ -348,6 +389,14 @@ final class SetLog {
 
     var isCompleted: Bool = false
     var completedAt: Date?
+    /// When the lifter said they were about to start this set, if they said so
+    /// — one tap on the expanded row, and nothing at all is the normal case.
+    ///
+    /// Never inferred. The moment a set is logged is measured; the moment it
+    /// began is only known if somebody announced it, and writing a guess here
+    /// would turn the one thing that separates rest from work into a number
+    /// that looks measured and isn't.
+    var startedAt: Date?
 
     var session: WorkoutSession?
 
@@ -400,6 +449,15 @@ final class SetLog {
     /// Whether the set came in under what was asked of it.
     var fellShortOfRange: Bool {
         targetRepsLow > 0 && reps < targetRepsLow
+    }
+
+    /// How long the set itself took: announced start to logged. `nil` wherever
+    /// the start wasn't announced, and wherever the two stamps don't run
+    /// forwards — a set logged before it began is a clock problem, not a set
+    /// that took negative time.
+    var timeUnderTension: TimeInterval? {
+        guard let startedAt, let completedAt, completedAt > startedAt else { return nil }
+        return completedAt.timeIntervalSince(startedAt)
     }
 
     /// How the set felt, as one of the four words it was answered with. Ratings

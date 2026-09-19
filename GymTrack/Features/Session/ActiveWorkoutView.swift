@@ -377,6 +377,8 @@ private struct ExerciseLogCard: View {
                         isPR: workout.isPR(set),
                         onLog: { workout.complete(set, restSeconds: planItem?.restSeconds) },
                         onUndo: { workout.uncomplete(set) },
+                        onStart: { workout.announceStart(set) },
+                        onCancelStart: { workout.cancelStart(set) },
                         isLastLogged: workout.lastLoggedSetID == set.id,
                         // The rest bar is already holding the question up at
                         // thumb height; two copies of it would be one too many.
@@ -572,6 +574,9 @@ private struct SetRow: View {
     let isPR: Bool
     let onLog: () -> Void
     let onUndo: () -> Void
+    /// Saying you're going, and taking that back.
+    let onStart: () -> Void
+    let onCancelStart: () -> Void
     /// Whether this is the set that was logged most recently — the only one
     /// that volunteers the effort question.
     let isLastLogged: Bool
@@ -618,6 +623,7 @@ private struct SetRow: View {
                     .background(Color.black.opacity(0.15), in: Capsule())
                 }
                 if let gain { gainBadge(gain) }
+                if let underTension = set.timeUnderTension { tensionBadge(underTension) }
                 Spacer()
                 if let feel = set.feel, !showsEffortStrip {
                     effortBadge(feel)
@@ -715,6 +721,26 @@ private struct SetRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Felt \(feel.label). \(feel.spokenDetail)")
         .accessibilityHint("Change it")
+    }
+
+    /// How long the set took, shown only where that was measured. It is the
+    /// half of the announcement the lifter gets back for making it — without
+    /// it, saying "starting now" feeds a file they never see and the tap has
+    /// nothing to show for itself.
+    private func tensionBadge(_ seconds: TimeInterval) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: "stopwatch")
+                .font(.system(size: 8, weight: .black))
+            Text(seconds.clockString)
+                .font(Theme.number(10, weight: .bold))
+        }
+        .foregroundStyle(isPR ? AnyShapeStyle(Color.black.opacity(0.65)) : AnyShapeStyle(Theme.textSecondary))
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background {
+            Capsule().fill(isPR ? AnyShapeStyle(Color.black.opacity(0.12))
+                                : AnyShapeStyle(Color.white.opacity(0.07)))
+        }
+        .accessibilityLabel("Took \(seconds.durationString)")
     }
 
     // MARK: Beating last time
@@ -818,11 +844,14 @@ private struct SetRow: View {
             }
             .frame(maxWidth: .infinity)
 
+            SetStartStrip(startedAt: set.startedAt, onStart: onStart, onCancel: onCancelStart)
+
             Button(action: onLog) {
                 Label("Log set", systemImage: "checkmark")
             }
             .buttonStyle(PrimaryButtonStyle())
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: set.startedAt)
         .padding(14)
         // The set you're standing in is the only lit object on the screen: a
         // tinted ground, a gradient edge and a glow under it, so it's findable
@@ -918,6 +947,105 @@ private struct SetRow: View {
 
     private var secondsBinding: Binding<Double> {
         Binding(get: { Double(set.seconds) }, set: { set.seconds = max(0, Int($0)) })
+    }
+}
+
+// MARK: - Saying you're starting
+
+/// The announcement, and the clock it becomes: one tap to say the set is
+/// beginning now, and a running readout of how long you've been under the bar.
+///
+/// It lives in the expanded row, between the numbers and *Log set*, because
+/// that is the order the thing actually happens in — read the weight, say
+/// you're on it, do the set, log it. Nothing else on the screen is at that
+/// point in the sequence, and the row is already the one lit object on the
+/// logger, so the tap is findable from arm's length.
+///
+/// Deliberately not a step you have to take. It is a low, quiet capsule under
+/// the full-strength Log button rather than beside it, it never blocks or
+/// precedes logging, and a set logged without it is logged exactly as it always
+/// was. Once tapped it stops being a button at all — there is nothing left to
+/// press but the small cross that takes it back, so the announcement can't be
+/// made twice and the thumb's path to *Log set* stays clear.
+private struct SetStartStrip: View {
+    let startedAt: Date?
+    let onStart: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        if let startedAt {
+            working(since: startedAt)
+        } else {
+            invitation
+        }
+    }
+
+    private var invitation: some View {
+        Button(action: onStart) {
+            HStack(spacing: 7) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 11, weight: .black))
+                Text("Start set")
+                    .font(Theme.rounded(13, weight: .bold))
+                Spacer(minLength: 0)
+                Text("optional")
+                    .font(Theme.rounded(11, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Theme.well, in: Capsule())
+            .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Start set")
+        .accessibilityHint("Optional. Records the moment this set begins, so the rest before it and the set itself are separate numbers")
+        .transition(.opacity)
+    }
+
+    /// The clock ticks off a `TimelineView` rather than a timer of its own:
+    /// the view already knows when the set began, and a second ticking object
+    /// per expanded row — there is one on every unfinished exercise — would be
+    /// several timers running to draw one number each.
+    private func working(since start: Date) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: "stopwatch.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Theme.accent.wash)
+            Text("WORKING")
+                .font(Theme.eyebrow)
+                .tracking(1.2)
+                .foregroundStyle(Theme.accent.wash)
+            TimelineView(.periodic(from: start, by: 1)) { context in
+                Text(max(0, context.date.timeIntervalSince(start)).clockString)
+                    .font(Theme.number(15))
+                    .foregroundStyle(Theme.ink)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .black))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.07), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel — this set hasn't started")
+        }
+        .padding(.leading, 13)
+        .padding(.trailing, 5)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity)
+        .background {
+            Capsule().fill(LinearGradient(colors: [Theme.accent.opacity(0.18), Theme.accent.opacity(0.05)],
+                                          startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay { Capsule().strokeBorder(Theme.accent.opacity(0.28), lineWidth: 1) }
+        }
+        .accessibilityElement(children: .contain)
+        .transition(.opacity)
     }
 }
 

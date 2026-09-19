@@ -99,6 +99,11 @@ struct SessionSummaryView: View {
     /// The half of the session nobody was asked about: how long you actually
     /// took between sets, and how much work that hour held. Both are read off
     /// the timestamps every logged set already carried.
+    ///
+    /// The rest says which kind of number it is. Where every set was announced
+    /// as starting it is the rest and nothing else; otherwise it still has the
+    /// set inside it, and a tile that read the same either way would quietly
+    /// claim a precision it only sometimes has.
     @ViewBuilder
     private var paceRow: some View {
         let rest = session.typicalRestSeconds
@@ -107,7 +112,8 @@ struct SessionSummaryView: View {
             HStack(spacing: 10) {
                 if let rest {
                     StatTile(value: TimeInterval(rest).clockString,
-                             label: "Typical rest", caption: "between sets",
+                             label: "Typical rest",
+                             caption: session.restIsMeasured ? "measured" : "between sets",
                              tint: SessionPhase.resting.tint)
                 }
                 if density > 0 {

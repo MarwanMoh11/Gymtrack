@@ -211,6 +211,9 @@ final class ActiveWorkout {
         // rather than hanging over the new row.
         pendingNudge = nil
         takenNudge = nil
+        // The rest this set's announcement cut short can no longer be put
+        // back: the set it would have been counting down to has been done.
+        restCancelledByStart = nil
         carryLoadForward(from: set)
         save()
 
@@ -243,6 +246,11 @@ final class ActiveWorkout {
         set.isCompleted = false
         set.completedAt = nil
         set.rpe = nil
+        // Taking the set back takes back when it began as well. A start kept
+        // here would pair with whatever timestamp the set is logged at next —
+        // after however long the fixing took — and report a time under tension
+        // nobody spent under a bar.
+        set.startedAt = nil
         recentPRs.remove(set.id)
         if lastLoggedSetID == set.id { lastLoggedSetID = nil }
         if pendingNudge?.setID == set.id { pendingNudge = nil }
@@ -257,6 +265,56 @@ final class ActiveWorkout {
     }
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
+
+    // MARK: - Saying you're starting
+
+    /// The rest that announcing a start stopped, kept only long enough for the
+    /// announcement to be taken back. Not persisted: it describes a countdown
+    /// on screen, and a countdown doesn't survive the session either.
+    private var restCancelledByStart: (setID: UUID, endsAt: Date, totalSeconds: Int)?
+
+    /// Marks the moment the lifter says they're going. Everything the record
+    /// gains comes from this one stamp: the rest before it stops being a guess
+    /// with a set hidden inside it, and the set itself gets a length.
+    ///
+    /// Optional in the strongest sense — nothing here is required for a set to
+    /// be logged, and a session where it's never touched behaves exactly as it
+    /// did before this existed.
+    func announceStart(_ set: SetLog) {
+        guard !set.isCompleted, set.startedAt == nil else { return }
+        set.startedAt = .now
+
+        // The rest is over the moment you say you're starting — that is the
+        // thing the countdown was counting down to. Left running it would tick
+        // on through the set and fire "Rest over" with the bar on your back,
+        // and the whole app would read as resting while you work: amber header,
+        // amber Lock Screen, amber wrist. `complete` is what starts a rest;
+        // this is the other thing that ends one, and the only one that knows
+        // the rest ended early.
+        if restTimer.isRunning, let endsAt = restTimer.endsAt {
+            restCancelledByStart = (set.id, endsAt, restTimer.totalSeconds)
+            restTimer.stop()
+        }
+
+        save()
+        // Deliberately the small tick and not `log()`: the heavier buzz means
+        // "that's in the record", and it stays unique to a set being logged.
+        Haptics.tick()
+    }
+
+    /// Un-says it, all the way back to never having tapped. The stamp goes, and
+    /// the rest the tap cut short comes back exactly where it was — a mis-tap
+    /// on a small control mid-workout has to cost nothing at all, including the
+    /// countdown you were watching.
+    func cancelStart(_ set: SetLog) {
+        set.startedAt = nil
+        if let cancelled = restCancelledByStart, cancelled.setID == set.id {
+            restTimer.restore(endingAt: cancelled.endsAt, totalSeconds: cancelled.totalSeconds)
+            restCancelledByStart = nil
+        }
+        save()
+        Haptics.tick()
+    }
 
     /// How the set felt. The answer is acted on immediately rather than filed
     /// away for next week: that's the whole difference between a question with
