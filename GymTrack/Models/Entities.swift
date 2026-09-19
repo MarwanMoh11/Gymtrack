@@ -529,6 +529,38 @@ final class SetLog {
         maxHeartRate = nil
         heartRateWindowRaw = nil
     }
+
+    // MARK: Taking it back
+
+    /// Puts the set back to never having been logged.
+    ///
+    /// Every field here was written by the act of logging, or read through the
+    /// window logging defined, so all of it goes at once. A mis-tap is not
+    /// data: this record exists to be read months later, and a set carrying an
+    /// effort answer or a time under tension nobody spent is worse than a set
+    /// carrying nothing.
+    ///
+    /// It lives on the set rather than in the logger because there are two ways
+    /// a set gets un-logged. The phone has `ActiveWorkout.uncomplete`; the
+    /// wrist can also un-log one with the phone asleep in a locker, and that
+    /// message is applied straight to the store by `WatchCommandCenter` with no
+    /// `ActiveWorkout` anywhere to route through. The two paths erasing
+    /// different amounts is precisely how a set ends up half taken back.
+    func unlog() {
+        isCompleted = false
+        completedAt = nil
+        rpe = nil
+        // Taking the set back takes back when it began as well. A start kept
+        // here would pair with whatever timestamp the set is logged at next —
+        // after however long the fixing took — and report a time under tension
+        // nobody spent under a bar.
+        startedAt = nil
+        // And the heart rate read through that window. The beats were real, but
+        // the window they were read through was this set's, and this set is
+        // being taken back — kept, they would sit on whatever gets logged in
+        // its place and describe minutes nobody spent doing it.
+        clearHeartRate()
+    }
 }
 
 // MARK: - Exercise note

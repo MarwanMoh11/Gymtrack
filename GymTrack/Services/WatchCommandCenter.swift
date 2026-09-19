@@ -80,8 +80,13 @@ final class WatchCommandCenter {
 
         case .undoSet(let id):
             guard let set = setLog(id: id, in: context) else { return }
-            set.isCompleted = false
-            set.completedAt = nil
+            // The same erasure the phone's own undo performs, and deliberately
+            // the identical call. Clearing the completion alone left the effort
+            // answer, the announced start and the heart rate read through it
+            // sitting on a set the lifter had taken back — so a mis-tap on the
+            // wrist wrote a rating and a time under tension into the record for
+            // a set that, as far as the record is concerned, never happened.
+            set.unlog()
             save(context)
             pushMirror(context: context)
 

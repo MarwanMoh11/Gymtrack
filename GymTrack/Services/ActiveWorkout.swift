@@ -243,19 +243,9 @@ final class ActiveWorkout {
     }
 
     func uncomplete(_ set: SetLog) {
-        set.isCompleted = false
-        set.completedAt = nil
-        set.rpe = nil
-        // Taking the set back takes back when it began as well. A start kept
-        // here would pair with whatever timestamp the set is logged at next —
-        // after however long the fixing took — and report a time under tension
-        // nobody spent under a bar.
-        set.startedAt = nil
-        // And the heart rate read through that window. The beats were real, but
-        // the window they were read through was this set's, and this set is
-        // being taken back — kept, they would sit on whatever gets logged in
-        // its place and describe minutes nobody spent doing it.
-        set.clearHeartRate()
+        // Everything the set itself gained by being logged — see `SetLog.unlog`,
+        // which is also what the wrist's own undo runs so the two can't drift.
+        set.unlog()
         recentPRs.remove(set.id)
         if lastLoggedSetID == set.id { lastLoggedSetID = nil }
         if pendingNudge?.setID == set.id { pendingNudge = nil }
