@@ -89,7 +89,9 @@ enum BackupService {
         var reps: Int
         var seconds: Int
         var isCompleted: Bool
-        var isWarmup: Bool
+        /// Written by versions that had a warm-up flag. Decoded so those
+        /// backups still restore, and ignored — a set is a set now.
+        var isWarmup: Bool?
         var completedAt: Date?
         var targetRepsLow: Int
         var targetRepsHigh: Int
@@ -163,7 +165,7 @@ enum BackupService {
                                SetDTO(catalogID: set.catalogID, exerciseName: set.exerciseName,
                                       exerciseOrder: set.exerciseOrder, setIndex: set.setIndex,
                                       weightKg: set.weightKg, reps: set.reps, seconds: set.seconds,
-                                      isCompleted: set.isCompleted, isWarmup: set.isWarmup,
+                                      isCompleted: set.isCompleted,
                                       completedAt: set.completedAt,
                                       targetRepsLow: set.targetRepsLow, targetRepsHigh: set.targetRepsHigh,
                                       rpe: set.rpe)
@@ -261,8 +263,7 @@ enum BackupService {
                 let set = SetLog(catalogID: setDTO.catalogID, exerciseName: setDTO.exerciseName,
                                  exerciseOrder: setDTO.exerciseOrder, setIndex: setDTO.setIndex,
                                  weightKg: setDTO.weightKg, reps: setDTO.reps, seconds: setDTO.seconds,
-                                 targetRepsLow: setDTO.targetRepsLow, targetRepsHigh: setDTO.targetRepsHigh,
-                                 isWarmup: setDTO.isWarmup)
+                                 targetRepsLow: setDTO.targetRepsLow, targetRepsHigh: setDTO.targetRepsHigh)
                 set.isCompleted = setDTO.isCompleted
                 set.completedAt = setDTO.completedAt
                 set.rpe = setDTO.rpe

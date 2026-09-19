@@ -86,19 +86,11 @@ struct WatchLoggerView: View {
                         // Once everything is logged there is no current set to
                         // name, so the line switches to the session's total
                         // rather than pointing at a set that's already done.
-                        // A warm-up drops the counter and says what it is. The
-                        // wrist is where you most need to know whether the set
-                        // you're about to log is one the app will measure you
-                        // on, and "Warm-up 2/5" makes you do that arithmetic.
                         Text(phase == .done
                              ? "\(session.completedSets)/\(session.totalSets) sets"
-                             : (set?.isWarmup == true
-                                ? "Warm-up"
-                                : "Set \(session.currentSetNumber)/\(exercise?.sets.count ?? 0)"))
+                             : "Set \(session.currentSetNumber)/\(exercise?.sets.count ?? 0)")
                             .font(Theme.number(11, weight: .bold))
-                            .foregroundStyle(set?.isWarmup == true && phase != .done
-                                             ? SessionPhase.resting.gradient
-                                             : phase.gradient)
+                            .foregroundStyle(phase.gradient)
                         if let last = exercise?.lastTimeLabel {
                             Text("last \(last)")
                                 .font(Theme.rounded(11, weight: .medium))

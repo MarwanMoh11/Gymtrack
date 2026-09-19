@@ -58,10 +58,19 @@ final class ActiveWorkout {
     /// Set IDs that just earned a PR, so the UI can celebrate once.
     private(set) var recentPRs: Set<UUID> = []
 
-    /// The set logged most recently. Only that one row offers an effort
-    /// rating — asking on every completed set at once would turn a column of
-    /// finished work into a column of unanswered questions.
+    /// The set logged most recently — the one the effort question is about
+    /// while it's still unanswered. Asking on every completed set at once would
+    /// turn a column of finished work into a column of open questions; older
+    /// sets can still be answered, they just have to be asked for.
     private(set) var lastLoggedSetID: UUID?
+
+    /// The set the rest bar is asking about — the one just logged, whether or
+    /// not it has been answered for. It stays after an answer so the answer can
+    /// be seen, changed, or cleared outright from the same place it was given.
+    var ratingSubject: SetLog? {
+        guard AppSettings.shared.trackRPE, let id = lastLoggedSetID else { return nil }
+        return session.sets.first { $0.id == id && $0.isCompleted }
+    }
 
     private let context: ModelContext
     private var history: [WorkoutSession]
@@ -195,9 +204,13 @@ final class ActiveWorkout {
     func complete(_ set: SetLog, restSeconds: Int?) {
         set.isCompleted = true
         set.completedAt = .now
-        // Warm-ups are never rated: an effort score on a ramp is noise the
-        // progression would then have to learn to ignore.
-        lastLoggedSetID = set.isWarmup ? nil : set.id
+        lastLoggedSetID = set.id
+        // Whatever the last answer offered belonged to the set before this one.
+        // Logging another set is an answer of its own — you took the weight you
+        // took — so the offer, and the chance to undo having taken it, both go
+        // rather than hanging over the new row.
+        pendingNudge = nil
+        takenNudge = nil
         carryLoadForward(from: set)
         save()
 
@@ -216,16 +229,10 @@ final class ActiveWorkout {
 
     /// Mirrors the load just used onto the remaining sets of the same exercise.
     /// Without this you re-dial the weight for every set of every exercise.
-    ///
-    /// The warm-up boundary is deliberately one-way: a ramp is lighter than the
-    /// work on purpose, so logging 40 kg on the second warm-up must not quietly
-    /// rewrite the 100 kg waiting underneath it.
     private func carryLoadForward(from set: SetLog) {
-        guard !set.isWarmup else { return }
         for other in session.sets
         where other.catalogID == set.catalogID
             && !other.isCompleted
-            && !other.isWarmup
             && other.setIndex > set.setIndex {
             other.weightKg = set.weightKg
             if other.tracking == .duration { other.seconds = set.seconds }
@@ -238,6 +245,10 @@ final class ActiveWorkout {
         set.rpe = nil
         recentPRs.remove(set.id)
         if lastLoggedSetID == set.id { lastLoggedSetID = nil }
+        if pendingNudge?.setID == set.id { pendingNudge = nil }
+        // Taking the set back takes back everything answering for it did,
+        // including a weight change its answer put on the sets underneath.
+        if takenNudge?.nudge.setID == set.id { restoreWeights() }
         // The rest belonged to the set being taken back, so it goes with it.
         // `complete` is what started it; this is the other half of that.
         restTimer.stop()
@@ -247,21 +258,150 @@ final class ActiveWorkout {
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
 
-    /// How hard that set was, 6–10. Passing the value it already holds clears
-    /// it, so the same tap that answers the question takes the answer back.
-    func rate(_ set: SetLog, rpe: Double?) {
-        set.rpe = set.rpe == rpe ? nil : rpe
+    /// How the set felt. The answer is acted on immediately rather than filed
+    /// away for next week: that's the whole difference between a question with
+    /// a point and a quiz.
+    func rate(_ set: SetLog, feel: SetFeel) {
+        // Tapping the answer it already holds takes it back, so the gesture
+        // that answers the question also un-answers it.
+        guard set.rpe != feel.rawValue else { return clearRating(set) }
+        set.rpe = feel.rawValue
+        pendingNudge = nudge(after: set)
         save()
+        Haptics.tick()
+    }
+
+    /// Un-answers the question, all the way back to never having been asked.
+    /// An offer the answer produced goes with it; a change already taken has
+    /// its own undo, because that one moved real numbers.
+    func clearRating(_ set: SetLog) {
+        set.rpe = nil
+        if pendingNudge?.setID == set.id { pendingNudge = nil }
+        save()
+        Haptics.tick()
+    }
+
+    // MARK: - Acting on the answer
+
+    /// A change to the sets still to come, offered the moment you say how the
+    /// last one felt. Never applied on its own — the lifter takes it or ignores
+    /// it, and ignoring it is one of the two normal outcomes.
+    struct LoadNudge: Identifiable, Equatable {
+        /// The set whose answer produced this.
+        let setID: UUID
+        /// Its position in the exercise — only the sets after it are moved.
+        let fromIndex: Int
+        let catalogID: String
+        let fromKg: Double
+        let toKg: Double
+        /// How many sets of this exercise it would move.
+        let setCount: Int
+        let feel: SetFeel
+
+        var id: UUID { setID }
+
+        /// True when the offer is to take weight off rather than put it on.
+        var isBackOff: Bool { toKg < fromKg }
+    }
+
+    private(set) var pendingNudge: LoadNudge?
+
+    /// Reads the set just rated the way the progression would read it next
+    /// week, and applies that reading to the sets still in front of you.
+    ///
+    /// Only the two unambiguous cases: cleared the range with three reps in the
+    /// tank (the load is too light to be teaching anything), or buried yourself
+    /// and still came up short (the load is why). Everything in between is left
+    /// alone — a suggestion after every single set would be noise, and noise is
+    /// what people learn to tap past.
+    private func nudge(after set: SetLog) -> LoadNudge? {
+        guard let feel = set.feel, set.tracking != .duration, set.weightKg > 0 else { return nil }
+
+        let remaining = session.sets.filter {
+            $0.catalogID == set.catalogID && !$0.isCompleted && $0.setIndex > set.setIndex
+        }
+        guard !remaining.isEmpty else { return nil }
+
+        let scale = set.loadScale
+        let target: Double
+        switch feel {
+        case .easy where set.hitTopOfRange || set.targetRepsHigh <= 0:
+            target = scale.step(kg: set.weightKg, by: 1)
+        case .allOut where set.fellShortOfRange:
+            target = scale.step(kg: set.weightKg, by: -1)
+        default:
+            return nil
+        }
+
+        // A ladder with nowhere left to go — the bottom rung, or an exercise
+        // whose scale has no step at this weight — has nothing to offer.
+        guard target > 0, target != set.weightKg else { return nil }
+
+        return LoadNudge(setID: set.id, fromIndex: set.setIndex, catalogID: set.catalogID,
+                         fromKg: set.weightKg, toKg: target,
+                         setCount: remaining.count, feel: feel)
+    }
+
+    /// A change that was taken, and every weight it overwrote. Kept so that
+    /// taking one by mistake costs exactly nothing: a misfire on a small button
+    /// mid-workout has to be undoable back to the state before the tap, not
+    /// merely adjustable afterwards.
+    struct TakenNudge: Identifiable, Equatable {
+        let nudge: LoadNudge
+        /// What each set weighed before — restored verbatim, not recomputed.
+        let previousKg: [UUID: Double]
+        var id: UUID { nudge.setID }
+    }
+
+    private(set) var takenNudge: TakenNudge?
+
+    /// Takes the offer: every set of that exercise still to come moves onto the
+    /// new rung.
+    func apply(_ nudge: LoadNudge) {
+        var previous: [UUID: Double] = [:]
+        for set in session.sets
+        where set.catalogID == nudge.catalogID
+            && !set.isCompleted
+            && set.setIndex > nudge.fromIndex {
+            previous[set.id] = set.weightKg
+            set.weightKg = nudge.toKg
+        }
+        pendingNudge = nil
+        takenNudge = previous.isEmpty ? nil : TakenNudge(nudge: nudge, previousKg: previous)
+        save()
+        Haptics.log()
+    }
+
+    /// Puts every weight back where it was and stands the offer back up, so the
+    /// screen reads exactly as it did before the button was pressed.
+    func undoTakenNudge() {
+        guard let taken = takenNudge else { return }
+        restoreWeights()
+        pendingNudge = taken.nudge
+        save()
+        Haptics.tick()
+    }
+
+    /// The weights half of that, without restoring the offer — for when the set
+    /// that produced it is being un-logged and the offer is going too.
+    private func restoreWeights() {
+        guard let taken = takenNudge else { return }
+        for set in session.sets {
+            guard let weight = taken.previousKg[set.id], !set.isCompleted else { continue }
+            set.weightKg = weight
+        }
+        takenNudge = nil
+    }
+
+    func dismissNudge() {
+        pendingNudge = nil
         Haptics.tick()
     }
 
     // MARK: - Structure edits
 
     func addSet(to group: SessionExerciseGroup) {
-        // Modelled on the last working set, never on a warm-up — an extra set
-        // added to an exercise that has only been ramped so far should still
-        // open at the weight you intend to work with.
-        guard let template = group.workingSets.last ?? group.sets.last else { return }
+        guard let template = group.sets.last else { return }
         let set = SetLog(
             catalogID: group.catalogID,
             exerciseName: group.name,
@@ -279,117 +419,24 @@ final class ActiveWorkout {
         Haptics.tick()
     }
 
-    /// Takes a working set off the end. It won't eat into the warm-ups — those
-    /// are removed by demoting them, not by this button, which is the pair of
-    /// `addSet` and should undo exactly what that did.
+    /// Takes a set off the end — the pair of `addSet`, undoing exactly what
+    /// that did. The last set of an exercise stays: removing it would leave a
+    /// card with nothing on it.
     func removeLastSet(from group: SessionExerciseGroup) {
-        guard group.workingSets.count > 1, let last = group.workingSets.last else { return }
+        guard group.sets.count > 1, let last = group.sets.last else { return }
         context.delete(last)
         resequence(group.catalogID)
         save()
         Haptics.tick()
     }
 
-    // MARK: Warm-ups
-
-    /// The ramp, as a share of the working weight and the reps to do there.
-    /// Light and brief on purpose: this is the part that gets you ready, not
-    /// the part that makes you tired.
-    private static let warmupRamp: [(fraction: Double, reps: Int)] = [
-        (0.4, 8), (0.6, 5), (0.8, 3)
-    ]
-
-    /// Builds a ramp up to the first working set — every rung pulled onto the
-    /// ladder the machine actually has, which is the whole reason the app can
-    /// offer this at all. Rungs that collapse onto each other, or onto the
-    /// working weight itself, are dropped rather than logged twice.
-    func addWarmupRamp(to group: SessionExerciseGroup) {
-        guard let reference = group.workingSets.first ?? group.sets.first else { return }
-        var rungs: [(weightKg: Double, reps: Int, seconds: Int)] = []
-
-        if reference.tracking == .duration {
-            rungs = [(0, 0, max(5, reference.seconds / 2))]
-        } else {
-            let scale = reference.loadScale
-            let working = reference.weightKg
-            var previous = 0.0
-            if working > 0 {
-                for step in Self.warmupRamp {
-                    let rung = scale.snap(kg: working * step.fraction)
-                    guard rung > 0, rung < working, rung > previous else { continue }
-                    rungs.append((rung, step.reps, reference.seconds))
-                    previous = rung
-                }
-            }
-            // Bodyweight work, or a load with no rung beneath it: the warm-up
-            // is the movement itself, done easy.
-            if rungs.isEmpty {
-                rungs = [(working, max(1, min(reference.reps, 10)), reference.seconds)]
-            }
-        }
-
-        for rung in rungs {
-            insertWarmup(into: group, weightKg: rung.weightKg, reps: rung.reps, seconds: rung.seconds)
-        }
-        resequence(group.catalogID)
-        save()
-        Haptics.log()
-    }
-
-    /// One more warm-up, carrying whatever the last one used.
-    func addWarmupSet(to group: SessionExerciseGroup) {
-        let template = group.warmupSets.last ?? group.workingSets.first
-        insertWarmup(into: group,
-                     weightKg: template?.weightKg ?? 0,
-                     reps: template?.reps ?? 8,
-                     seconds: template?.seconds ?? 30)
-        resequence(group.catalogID)
-        save()
-        Haptics.tick()
-    }
-
-    /// Reclassifies a set already on screen. The load is left exactly as it is —
-    /// calling something a warm-up says what it counts as, not what it weighs.
-    func setWarmup(_ set: SetLog, _ isWarmup: Bool) {
-        guard set.isWarmup != isWarmup else { return }
-        set.isWarmup = isWarmup
-        // A set that was celebrated as a record and has just been demoted to a
-        // warm-up isn't one any more.
-        if isWarmup { recentPRs.remove(set.id) }
-        resequence(set.catalogID)
-        save()
-        Haptics.tick()
-    }
-
-    private func insertWarmup(into group: SessionExerciseGroup,
-                              weightKg: Double, reps: Int, seconds: Int) {
-        let existing = session.sets.filter { $0.catalogID == group.catalogID && $0.isWarmup }
-        let set = SetLog(
-            catalogID: group.catalogID,
-            exerciseName: group.name,
-            exerciseOrder: group.order,
-            setIndex: (existing.map(\.setIndex).max() ?? -1) + 1,
-            weightKg: weightKg,
-            reps: reps,
-            seconds: seconds,
-            isWarmup: true
-        )
-        set.session = session
-        context.insert(set)
-    }
-
-    /// Renumbers one exercise so its warm-ups sit above its working sets.
-    /// `setIndex` is what orders a card, and it's also what pairs a set with
-    /// last session's numbers, so the two groups are kept contiguous rather
-    /// than interleaved by whenever a row happened to be added.
+    /// Renumbers one exercise so its sets run 0, 1, 2 with no gaps. `setIndex`
+    /// is what orders a card, and it's also what pairs a set with the same set
+    /// last session, so a deletion in the middle can't be left as a hole.
     private func resequence(_ catalogID: String) {
         let sets = session.sets
             .filter { $0.catalogID == catalogID }
-            .sorted {
-                $0.isWarmup == $1.isWarmup
-                    ? $0.setIndex < $1.setIndex
-                    : $0.isWarmup && !$1.isWarmup
-            }
+            .sorted { $0.setIndex < $1.setIndex }
         for (index, set) in sets.enumerated() { set.setIndex = index }
     }
 

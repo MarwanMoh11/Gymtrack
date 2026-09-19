@@ -194,16 +194,39 @@ final class WorkoutSession {
 
     var completedSets: [SetLog] { sets.filter(\.isCompleted) }
 
-    /// The sets that count as training. Warm-ups are work you did, but they
-    /// aren't load you're trying to beat, so every number the app compares
-    /// across sessions is built from these.
-    var workingSets: [SetLog] { completedSets.filter { !$0.isWarmup } }
-
     var totalVolumeKg: Double {
-        workingSets.reduce(0) { $0 + $1.volumeKg }
+        completedSets.reduce(0) { $0 + $1.volumeKg }
     }
 
-    var totalReps: Int { workingSets.reduce(0) { $0 + $1.reps } }
+    var totalReps: Int { completedSets.reduce(0) { $0 + $1.reps } }
+
+    /// The gaps between consecutive logged sets, in seconds. What you actually
+    /// took between sets — including the set itself, because the only two
+    /// timestamps a set has are the one it was logged at and the one before it.
+    ///
+    /// Nothing is asked for here: the numbers were already being written every
+    /// time a set was logged.
+    var setGaps: [TimeInterval] {
+        let stamps = completedSets.compactMap(\.completedAt).sorted()
+        guard stamps.count > 1 else { return [] }
+        return zip(stamps, stamps.dropFirst()).map { $1.timeIntervalSince($0) }
+    }
+
+    /// The rest you typically take. Median rather than mean, so the one set you
+    /// spent ten minutes waiting for a rack doesn't become "your" rest.
+    var typicalRestSeconds: Int? {
+        let gaps = setGaps.sorted()
+        guard !gaps.isEmpty else { return nil }
+        return Int(gaps[gaps.count / 2].rounded())
+    }
+
+    /// Volume moved per minute of session — how hard the hour worked, which two
+    /// sessions of identical volume can differ wildly on.
+    var densityKgPerMinute: Double {
+        let minutes = duration / 60
+        guard minutes >= 1, totalVolumeKg > 0 else { return 0 }
+        return totalVolumeKg / minutes
+    }
 
     /// Exercises in the order they appear in the session.
     var exerciseGroups: [SessionExerciseGroup] {
@@ -242,26 +265,13 @@ struct SessionExerciseGroup: Identifiable {
     var isComplete: Bool { !sets.isEmpty && completedCount == sets.count }
     var catalog: CatalogExercise? { ExerciseCatalog.shared.exercise(id: catalogID) }
 
-    /// Warm-ups still have to be performed, so they stay in `sets` and in the
-    /// session's progress — they're just not what the exercise is measured on.
-    var warmupSets: [SetLog] { sets.filter(\.isWarmup) }
-    var workingSets: [SetLog] { sets.filter { !$0.isWarmup } }
+    /// What a set is called on screen — 1, 2, 3 down the card.
+    func label(for set: SetLog) -> String { "\(position(of: set) + 1)" }
 
-    /// What a set is called on screen. Warm-ups get their own W1, W2 sequence
-    /// so adding one doesn't renumber the working sets underneath it — "set 3"
-    /// has to mean the same thing before and after you add a ramp.
-    func label(for set: SetLog) -> String {
-        let siblings = set.isWarmup ? warmupSets : workingSets
-        let position = (siblings.firstIndex { $0.id == set.id } ?? 0) + 1
-        return set.isWarmup ? "W\(position)" : "\(position)"
-    }
-
-    /// Position of a working set among the working sets, which is what lines it
-    /// up with last session's numbers. Counting rows would put set 1's history
-    /// next to a warm-up.
-    func workingPosition(of set: SetLog) -> Int? {
-        guard !set.isWarmup else { return nil }
-        return workingSets.firstIndex { $0.id == set.id }
+    /// Position of a set within its exercise, which is also what lines it up
+    /// with the same set last session.
+    func position(of set: SetLog) -> Int {
+        sets.firstIndex { $0.id == set.id } ?? 0
     }
 }
 
@@ -281,13 +291,15 @@ final class SetLog {
     var weightKg: Double = 0
     var reps: Int = 0
     var seconds: Int = 0
+    /// How hard the set was, on the 6–10 scale. Stored as the number it always
+    /// was so the progression reads what it always read; asked for, and shown,
+    /// as one of four words — see `feel`.
     var rpe: Double?
 
     var targetRepsLow: Int = 0
     var targetRepsHigh: Int = 0
 
     var isCompleted: Bool = false
-    var isWarmup: Bool = false
     var completedAt: Date?
 
     var session: WorkoutSession?
@@ -300,8 +312,7 @@ final class SetLog {
          reps: Int = 0,
          seconds: Int = 0,
          targetRepsLow: Int = 0,
-         targetRepsHigh: Int = 0,
-         isWarmup: Bool = false) {
+         targetRepsHigh: Int = 0) {
         self.id = UUID()
         self.catalogID = catalogID
         self.exerciseName = exerciseName
@@ -312,7 +323,6 @@ final class SetLog {
         self.seconds = seconds
         self.targetRepsLow = targetRepsLow
         self.targetRepsHigh = targetRepsHigh
-        self.isWarmup = isWarmup
     }
 
     var catalog: CatalogExercise? { ExerciseCatalog.shared.exercise(id: catalogID) }
@@ -340,12 +350,16 @@ final class SetLog {
         targetRepsHigh > 0 && reps >= targetRepsHigh
     }
 
-    /// " @8" when the set was rated, nothing when it wasn't. Appended to the
-    /// compact chips history is drawn from, where a dozen sit in a row and a
-    /// second colour per chip would be unreadable.
-    var effortSuffix: String {
-        guard let rpe else { return "" }
-        return " @\(TrainingStats.rpeText(rpe))"
+    /// Whether the set came in under what was asked of it.
+    var fellShortOfRange: Bool {
+        targetRepsLow > 0 && reps < targetRepsLow
+    }
+
+    /// How the set felt, as one of the four words it was answered with. Ratings
+    /// left over from the old 6–10 strip land on the nearest of them.
+    var feel: SetFeel? {
+        guard let rpe else { return nil }
+        return SetFeel.nearest(to: rpe)
     }
 }
 

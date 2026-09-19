@@ -83,18 +83,49 @@ struct SessionSummaryView: View {
         }
     }
 
-    /// Working sets — the same ones the volume is built from. Counting the
-    /// warm-ups here would make the tile disagree with the one beside it.
-    private var warmupCount: Int { session.completedSets.count - session.workingSets.count }
-
     private var statGrid: some View {
-        HStack(spacing: 10) {
-            StatTile(value: session.duration.durationString, label: "Duration")
-            StatTile(value: "\(session.workingSets.count)",
-                     label: warmupCount > 0 ? "Sets · \(warmupCount) warm-up" : "Sets")
-            StatTile(value: AppSettings.shared.weight(session.totalVolumeKg, showUnit: false),
-                     label: "Volume \(AppSettings.shared.weightUnit.short)")
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                StatTile(value: session.duration.durationString, label: "Duration")
+                StatTile(value: "\(session.completedSets.count)", label: "Sets")
+                StatTile(value: AppSettings.shared.weight(session.totalVolumeKg, showUnit: false),
+                         label: "Volume \(AppSettings.shared.weightUnit.short)")
+            }
+            paceRow
         }
+    }
+
+    /// The half of the session nobody was asked about: how long you actually
+    /// took between sets, and how much work that hour held. Both are read off
+    /// the timestamps every logged set already carried.
+    @ViewBuilder
+    private var paceRow: some View {
+        let rest = session.typicalRestSeconds
+        let density = session.densityKgPerMinute
+        if rest != nil || density > 0 {
+            HStack(spacing: 10) {
+                if let rest {
+                    StatTile(value: TimeInterval(rest).clockString,
+                             label: "Typical rest", caption: "between sets",
+                             tint: SessionPhase.resting.tint)
+                }
+                if density > 0 {
+                    StatTile(value: AppSettings.shared.weight(density, showUnit: false, decimals: 0),
+                             label: "\(AppSettings.shared.weightUnit.short) per min",
+                             caption: "how dense it was")
+                }
+                if let feel = TrainingStats.feel(of: session.completedSets) {
+                    StatTile(value: feel.label, label: "Felt", caption: feel.detail, tint: feel.tint)
+                }
+            }
+        }
+    }
+
+    /// A set read out the way you'd say it, for the chips that draw it short.
+    private func setSpoken(_ set: SetLog) -> String {
+        if set.tracking == .duration { return "\(set.seconds) seconds" }
+        if set.weightKg == 0 { return "\(set.reps) reps" }
+        return "\(set.weightLabel) for \(set.reps) reps"
     }
 
     private var prSection: some View {
@@ -130,29 +161,30 @@ struct SessionSummaryView: View {
                         .foregroundStyle(Theme.ink)
                     FlowRow(spacing: 6) {
                         ForEach(group.sets.filter(\.isCompleted)) { set in
-                            // Warm-ups stay on the card — you did them — but in
-                            // the rest colour and behind a flame, so the row
-                            // reads as a ramp followed by work rather than as
-                            // six sets that all counted the same.
-                            HStack(spacing: 3) {
-                                if set.isWarmup {
-                                    Image(systemName: "flame.fill").font(.system(size: 8, weight: .bold))
-                                }
-                                Text((set.tracking == .duration
-                                      ? "\(set.seconds)s"
-                                      : (set.weightKg == 0 ? "\(set.reps)" : "\(set.loadScale.format(set.weightKg, showUnit: false))×\(set.reps)"))
-                                     + set.effortSuffix)
+                            // A rated set carries a dot in the colour of the
+                            // answer. The word itself would be four chips wide;
+                            // the colour says the same thing at a glance, and
+                            // the label spells it out for VoiceOver.
+                            HStack(spacing: 4) {
+                                Text(set.tracking == .duration
+                                     ? "\(set.seconds)s"
+                                     : (set.weightKg == 0
+                                        ? "\(set.reps)"
+                                        : "\(set.loadScale.format(set.weightKg, showUnit: false))×\(set.reps)"))
                                     .font(Theme.number(12, weight: .semibold))
+                                if let feel = set.feel {
+                                    Circle()
+                                        .fill(feel.tint)
+                                        .frame(width: 5, height: 5)
+                                }
                             }
-                            .foregroundStyle(set.isWarmup ? SessionPhase.resting.tint : Theme.textSecondary)
+                            .foregroundStyle(Theme.textSecondary)
                             .padding(.horizontal, 8).padding(.vertical, 4)
                             .background(Theme.panel, in: Capsule())
-                            .overlay {
-                                Capsule().strokeBorder(set.isWarmup
-                                                       ? AnyShapeStyle(SessionPhase.resting.tint.opacity(0.3))
-                                                       : AnyShapeStyle(Theme.edge),
-                                                       lineWidth: 1)
-                            }
+                            .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(set.feel.map { "\(setSpoken(set)), felt \($0.label)" }
+                                                ?? setSpoken(set))
                         }
                     }
                 }

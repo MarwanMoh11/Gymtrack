@@ -432,7 +432,7 @@ struct SessionRow: View {
                     .font(Theme.rounded(15, weight: .bold))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
-                Text("\(session.workingSets.count) sets · \(AppSettings.shared.weight(session.totalVolumeKg)) · \(session.duration.durationString)")
+                Text("\(session.completedSets.count) sets · \(AppSettings.shared.weight(session.totalVolumeKg)) · \(session.duration.durationString)")
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)

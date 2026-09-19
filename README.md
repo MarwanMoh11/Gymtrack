@@ -82,23 +82,28 @@ last session's numbers sit next to each set so you know what to beat. A rest
 timer starts on its own when you log a set, keeps time correctly if you lock the
 phone, and notifies you when it's up.
 
-**Warm-ups** — one tap builds a ramp up to your working weight: roughly 40, 60
-and 80% of it, each pulled onto a rung the machine in front of you actually has,
-with the reps coming down as the load goes up. Rungs that land on the same pin,
-or on the working weight itself, are dropped rather than logged twice. Warm-ups
-are numbered W1, W2, W3 in amber and the work stays 1, 2, 3 in green — adding a
-ramp never renumbers the sets you're measured on. They count towards finishing
-the session and they're written to Health as part of the time you spent on the
-exercise, but they're kept out of volume, records, muscle counts and the "last
-time" you're chasing, because a ramp isn't something you're trying to beat. Any
-set can be turned into a warm-up, or back, from the chip while you're on it or
-by holding a row you've already logged.
+**Effort** — while you rest, the timer bar asks how the set felt: **Easy**,
+**Solid**, **Hard** or **All out**, each with what it means in reps written
+underneath it. It's asked there because a rest is the one moment in a workout
+when you're standing still with the phone in your hand, and it never blocks the
+timer or the next set. A set you didn't answer for keeps a *Rate* chip rather
+than losing the question, so you can come back to it whenever. See *Progressive
+overload* for what the answer does next session — and the bullet below for what
+it does immediately. Turn the question off in Settings → Effort and everything
+behaves exactly as it did before.
 
-**Effort** — after a set the logger asks how hard it was, 6 to 10. It's one
-optional tap that never blocks the next set, and it's what tells the app the
-difference between a set that had three reps left in it and one that had none.
-See *Progressive overload* for what it does with the answer. Turn the question
-off in Settings → Effort and everything behaves exactly as it did before.
+**What the answer does now** — say a set felt *easy* after clearing the top of
+its rep range and the card offers the next rung on that machine for the sets you
+have left: "62.5 kg → 65 kg · 3 sets to go", one tap to take it. Say *all out*
+after falling short and it offers to hold the load instead. Nothing moves on its
+own, and anything you do take moves back: taking the offer leaves an **Undo**
+that restores every weight it changed and stands the offer back up, and an
+answer itself is cleared with one obvious button wherever you gave it. A mis-tap
+mid-workout should cost nothing, so none of it is one-way.
+
+**Beating last time** — every logged set shows what it did against the same set
+last session the moment you log it: ▲ 5 kg, or ▲ 2 reps when the load is
+unchanged.
 
 **Machine weights** — gyms aren't uniform, so the app doesn't pretend they are.
 Every exercise knows what its equipment is marked in and what one step is worth:
@@ -167,13 +172,15 @@ bottom of the range. Fall short and it tells you to hold the load or back off.
 The weight it names is always the next rung on that machine, never a number
 between two pins.
 
-Effort ratings sharpen all of that, because reps alone can't tell a set you
-finished with three in the tank from one that nearly buried you. Clear the range
-at RPE 7 and it moves you two rungs instead of one, which is what stops a plain
-double progression crawling back up through weights you already owned. Clear it
-at RPE 10 and it still adds weight, but says to expect a fight. Fall short at
-RPE 7 and it stops suggesting a deload — the load isn't what stopped you, so
-taking weight off would be fixing the wrong thing. Rate nothing and every
+How the sets felt sharpens all of that, because reps alone can't tell a set you
+finished with three in the tank from one that nearly buried you. Each of the four
+answers changes something. Clear the range and call it **easy** and it moves you
+two rungs instead of one, which is what stops a plain double progression crawling
+back up through weights you already owned. Clear it **hard** and it still adds
+weight, but says to expect a fight for the bottom of the range; clear it **all
+out** and it warns you'll sit there a few sessions. Fall short at **easy** or
+**solid** and it stops suggesting a deload — the load isn't what stopped you, so
+taking weight off would be fixing the wrong thing. Answer nothing and every
 suggestion is identical to what it was.
 
 **Personal records** — recognised on estimated 1RM, so heavier-for-fewer and

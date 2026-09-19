@@ -102,7 +102,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Effort")
                 } footer: {
-                    Text("After a set, the logger asks how hard it was on the 6–10 RPE scale. Clearing a rep range at RPE 7 earns two steps up instead of one, and falling short at RPE 7 stops the app suggesting a deload it can tell you don't need. Skipping the question leaves the progression exactly as it is.")
+                    Text("While you rest, the timer bar asks how the set felt — Easy, Solid, Hard or All out. Answer Easy after clearing a rep range and it offers the next rung on that machine there and then, and earns two steps up next session instead of one; answer All out after falling short and it stops suggesting a deload it can tell you don't need. Skipping the question leaves everything exactly as it is.")
                 }
                 .listRowBackground(Theme.surface)
 

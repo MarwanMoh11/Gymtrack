@@ -38,17 +38,9 @@ struct WatchSetSnapshot: Codable, Hashable, Identifiable, Sendable {
     var targetRepsLow: Int
     var targetRepsHigh: Int
     var isCompleted: Bool
-    /// Optional only so a mirror in flight during an app update still decodes —
-    /// read it through `isWarmup`.
-    var warmup: Bool?
-
-    /// Whether this is a rung on the way to the work rather than the work.
-    var isWarmup: Bool { warmup == true }
 
     var targetLabel: String {
-        // A warm-up states the reps it was built with: it has no rep range to
-        // work up, so a range here would be a target that doesn't exist.
-        isWarmup || targetRepsHigh <= 0 || targetRepsLow == targetRepsHigh
+        targetRepsHigh <= 0 || targetRepsLow == targetRepsHigh
             ? "\(max(targetRepsLow, reps))"
             : "\(targetRepsLow)–\(targetRepsHigh)"
     }
