@@ -35,6 +35,8 @@ final class WatchWorkoutRecorder: NSObject {
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
     private var lastMetricsSentAt: Date = .distantPast
+    /// Set synchronously while a start is in flight. See `startIfNeeded`.
+    private var isStarting = false
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack.watchkitapp", category: "Workout")
 
     private override init() { super.init() }
@@ -76,6 +78,15 @@ final class WatchWorkoutRecorder: NSObject {
     /// cleanly if a different one has started.
     func startIfNeeded(for snapshot: WatchSessionSnapshot) async {
         if isRunning, sessionID == snapshot.sessionID { return }
+        // Claimed before the first `await`. @MainActor is re-entrant — the
+        // actor is released at every suspension — so without this flag two
+        // overlapping calls both pass the `isRunning` check above, both build
+        // an HKWorkoutSession, and the second orphans the first while it is
+        // still running and still holding an extended runtime assertion.
+        guard !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
+
         if isRunning { await end(discardingSamples: true) }
         guard HKHealthStore.isHealthDataAvailable() else { return }
         guard await requestAuthorization() else { return }

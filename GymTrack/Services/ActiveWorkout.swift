@@ -238,6 +238,9 @@ final class ActiveWorkout {
         set.rpe = nil
         recentPRs.remove(set.id)
         if lastLoggedSetID == set.id { lastLoggedSetID = nil }
+        // The rest belonged to the set being taken back, so it goes with it.
+        // `complete` is what started it; this is the other half of that.
+        restTimer.stop()
         save()
         Haptics.tick()
     }

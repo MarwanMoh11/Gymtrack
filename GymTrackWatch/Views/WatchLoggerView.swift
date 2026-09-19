@@ -21,7 +21,7 @@ struct WatchLoggerView: View {
     @State private var repsValue: Double = 0
     @State private var secondsValue: Double = 0
     /// The number the crown is currently turning, and its live value.
-    @State private var editing: Field = .weight
+    @State private var editing: Field?
     @State private var crownValue: Double = 0
     @State private var showingExercises = false
     @FocusState private var isCrownFocused: Bool
@@ -55,10 +55,6 @@ struct WatchLoggerView: View {
             }
             .padding(.horizontal, 2)
         }
-        // The crown has to be attached the moment the screen appears — asking
-        // the lifter to tap a number before they can turn anything would be a
-        // tap too many.
-        .defaultFocus($isCrownFocused, true)
         .navigationTitle(session.title)
         .watchScreenTint(phase)
         .sheet(isPresented: $showingExercises) {
@@ -66,12 +62,6 @@ struct WatchLoggerView: View {
         }
         .onAppear { load(set) }
         .onChange(of: set?.id) { _, _ in load(set) }
-        // Claimed a beat after the view lands: focus set during the first
-        // update pass is swallowed.
-        .task {
-            try? await Task.sleep(for: .milliseconds(350))
-            isCrownFocused = true
-        }
     }
 
     // MARK: - Header
@@ -177,7 +167,11 @@ struct WatchLoggerView: View {
         }
         // One crown target for the whole row. Which number it turns is
         // `editing`; the range and the step follow it.
-        .focusable()
+        //
+        // Focusable only once a number has been tapped. While nothing is
+        // selected the crown is left to the ScrollView, so it scrolls the
+        // screen the way it does everywhere else on the watch.
+        .focusable(editing != nil)
         .focused($isCrownFocused)
         .digitalCrownRotation(
             $crownValue,
@@ -191,6 +185,10 @@ struct WatchLoggerView: View {
         .onChange(of: crownValue) { _, turned in
             write(turned)
         }
+        // Claimed after the pass that made the row focusable, not inside
+        // `select` — a focus request made on the tap itself lands a pass too
+        // early and is dropped.
+        .task(id: editing) { isCrownFocused = editing != nil }
     }
 
     /// A number, and whether the crown is on it.
@@ -211,10 +209,13 @@ struct WatchLoggerView: View {
     /// it is invisible to anyone who has never used one, and awkward with a bar
     /// in the other hand. These are the same increment the crown uses, so the
     /// two agree.
+    @ViewBuilder
     private var stepperRow: some View {
-        HStack(spacing: 6) {
-            stepButton(symbol: "minus", delta: -crownStep, verb: "Decrease")
-            stepButton(symbol: "plus", delta: crownStep, verb: "Increase")
+        if editing != nil {
+            HStack(spacing: 6) {
+                stepButton(symbol: "minus", delta: -crownStep, verb: "Decrease")
+                stepButton(symbol: "plus", delta: crownStep, verb: "Increase")
+            }
         }
     }
 
@@ -235,10 +236,12 @@ struct WatchLoggerView: View {
         case .weight: "weight"
         case .reps: "reps"
         case .seconds: "seconds"
+        case nil: "value"
         }
     }
 
     private func step(by delta: Double) {
+        guard let editing else { return }
         let current = currentValue(of: editing)
         let stepped = editing == .weight
             ? scale.step(display: current, by: delta > 0 ? 1 : -1)
@@ -252,17 +255,23 @@ struct WatchLoggerView: View {
         WatchHaptics.tick()
     }
 
-    /// Hands the crown a different number.
+    /// Hands the crown a number — or hands it back.
+    ///
+    /// Tapping the number the crown is already on releases it, so the screen
+    /// scrolls again without having to log the set first.
     private func select(_ field: Field) {
-        guard editing != field else { return }
-        editing = field
-        crownValue = currentValue(of: field)
-        isCrownFocused = true
+        if editing == field {
+            editing = nil
+        } else {
+            editing = field
+            crownValue = currentValue(of: field)
+        }
         WatchHaptics.tick()
     }
 
     /// What the crown writes back to, and the sane bounds for it.
     private func write(_ turned: Double) {
+        guard let editing else { return }
         switch editing {
         // Onto the ladder: the crown is the only way in here — there is no
         // keypad to reach a weight between two pins — so a turn should always
@@ -281,8 +290,12 @@ struct WatchLoggerView: View {
         }
     }
 
+    /// The number the crown is on, or the one it would be on. The rotation's
+    /// bounds have to resolve to something even while nothing is selected.
+    private var crownField: Field { editing ?? .weight }
+
     private var crownRange: ClosedRange<Double> {
-        switch editing {
+        switch crownField {
         case .weight: 0...scale.displayCeiling
         case .reps: 0...50
         case .seconds: 5...600
@@ -290,7 +303,7 @@ struct WatchLoggerView: View {
     }
 
     private var crownStep: Double {
-        switch editing {
+        switch crownField {
         case .weight: scale.increment
         case .reps: 1
         case .seconds: 5
@@ -345,8 +358,17 @@ struct WatchLoggerView: View {
     private var undoButton: some View {
         if let last = lastCompletedSet {
             Button {
-                WatchHaptics.tick()
                 connector.undoSet(last)
+                // The rest belonged to the set being taken back. Stopped here
+                // rather than waiting for the phone to say so — a locally
+                // started rest ignores a contradicting sync for three seconds.
+                // `stop()` carries its own tick, hence the else.
+                if rest.isRunning {
+                    rest.stop()
+                    connector.send(.stopRest)
+                } else {
+                    WatchHaptics.tick()
+                }
             } label: {
                 Label("Undo last set", systemImage: "arrow.uturn.backward")
             }
@@ -370,17 +392,9 @@ struct WatchLoggerView: View {
         weightDisplay = scale.display(set.weightKg)
         repsValue = Double(set.reps > 0 ? set.reps : max(set.targetRepsLow, 1))
         secondsValue = Double(set.seconds > 0 ? set.seconds : 45)
-        editing = defaultField
-        crownValue = currentValue(of: editing)
-    }
-
-    /// Which number the crown should be on for this exercise.
-    private var defaultField: Field {
-        switch exercise?.tracking {
-        case .duration: .seconds
-        case .bodyweightReps: .reps
-        default: .weight
-        }
+        // Nothing is selected until it is tapped: until then the crown
+        // scrolls the screen rather than changing a number.
+        editing = nil
     }
 
     private func trimmed(_ value: Double) -> String { scale.text(value) }
