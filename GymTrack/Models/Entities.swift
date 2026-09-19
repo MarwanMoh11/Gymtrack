@@ -370,6 +370,21 @@ final class CustomExerciseRecord {
         self.createdAt = .now
     }
 
+    /// Applies an edit in place. The ID is deliberately untouched: plans and
+    /// logged sets reference it, and renaming an exercise shouldn't orphan the
+    /// history that was built under the old name.
+    func apply(name: String, muscles: [Muscle], equipment: [String], tracking: TrackingMode) {
+        self.name = name
+        self.muscleRaw = muscles.map(\.name)
+        self.equipment = equipment
+        self.trackingRaw = tracking.rawValue
+    }
+
+    /// The canonical muscles this was saved with, for re-opening the editor.
+    var muscles: [Muscle] { muscleRaw.compactMap(Muscle.match) }
+
+    var tracking: TrackingMode { TrackingMode(rawValue: trackingRaw) ?? .weightReps }
+
     var asCatalogExercise: CatalogExercise {
         CatalogExercise(
             id: id,
@@ -441,5 +456,24 @@ final class ExerciseLoadPreference {
             increment = newValue.increment
             updatedAt = .now
         }
+    }
+}
+
+// MARK: - Hidden exercise
+
+/// One exercise the user has put away.
+///
+/// Stored as a row per hidden exercise rather than as a filtered copy of the
+/// library, so the bundled file stays the single source of what exists and an
+/// app update that adds exercises can't silently resurrect the ones you trimmed.
+@Model
+final class HiddenExerciseRecord {
+    /// The catalog exercise this hides. Unique per exercise.
+    var catalogID: String = ""
+    var hiddenAt: Date = Date()
+
+    init(catalogID: String) {
+        self.catalogID = catalogID
+        self.hiddenAt = .now
     }
 }

@@ -9,6 +9,7 @@ struct RootView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @Query private var customExercises: [CustomExerciseRecord]
+    @Query private var hiddenExercises: [HiddenExerciseRecord]
     @Query private var sessions: [WorkoutSession]
     @Query(sort: \Plan.createdAt) private var plans: [Plan]
 
@@ -35,6 +36,7 @@ struct RootView: View {
         .gtScreenBackground()
         .task {
             syncCustomExercises()
+            syncHiddenExercises()
             resumeUnfinishedSession()
             seedSampleDataIfRequested()
             connectWatch()
@@ -46,6 +48,7 @@ struct RootView: View {
             if done { seedSampleDataIfRequested() }
         }
         .onChange(of: customExercises.count) { _, _ in syncCustomExercises() }
+        .onChange(of: hiddenExercises.count) { _, _ in syncHiddenExercises() }
         // The watch's idle screen is built from the plan and the history, so
         // it has to be restamped whenever either moves.
         .onChange(of: sessions.count) { _, _ in pushWatchIdle(); publishWidgets() }
@@ -374,6 +377,12 @@ struct RootView: View {
     /// app can resolve them by ID like any bundled exercise.
     private func syncCustomExercises() {
         ExerciseCatalog.shared.setCustom(customExercises.map(\.asCatalogExercise))
+    }
+
+    /// Applies the user's trimmed-down view of the library. Hidden exercises
+    /// stay resolvable by ID — this only governs what browsing and search show.
+    private func syncHiddenExercises() {
+        ExerciseVisibility.sync(from: hiddenExercises)
     }
 
     /// Picks up a session left open by a crash or a force-quit.

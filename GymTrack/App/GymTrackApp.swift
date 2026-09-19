@@ -30,7 +30,7 @@ struct GymTrackApp: App {
                 for: Plan.self, PlanDay.self, PlanItem.self,
                 WorkoutSession.self, SetLog.self,
                 CustomExerciseRecord.self, BodyMetric.self,
-                ExerciseLoadPreference.self,
+                ExerciseLoadPreference.self, HiddenExerciseRecord.self,
                 configurations: ModelConfiguration(url: Self.storeURL)
             )
         } catch {
@@ -41,7 +41,7 @@ struct GymTrackApp: App {
                 for: Plan.self, PlanDay.self, PlanItem.self,
                 WorkoutSession.self, SetLog.self,
                 CustomExerciseRecord.self, BodyMetric.self,
-                ExerciseLoadPreference.self,
+                ExerciseLoadPreference.self, HiddenExerciseRecord.self,
                 configurations: config
             )
         }

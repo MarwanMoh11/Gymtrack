@@ -183,10 +183,19 @@ lighter-for-more both count. Celebrated the moment you log the set.
 Upper/Lower, Full Body 3×, Minimalist Strength) or build one from scratch. Every
 day, exercise, set count, rep range and rest interval is editable.
 
-**Library** — 414 exercises, searchable and filterable by muscle and equipment.
+**Library** — 410 exercises, filterable by muscle and equipment, and searched the
+way people actually type: word by word rather than as one literal string, with
+gym shorthand folded in. "lat pull down" finds the Lat Pulldowns, "incline db
+press" finds the Incline Dumbbell Press, "rdl" finds the Romanian Deadlifts.
 Each one shows its full history: a progression chart (est. 1RM, top set or
-volume), your bests, and every session you've done it in. Add your own exercises
-too.
+volume), your bests, and every session you've done it in.
+
+Build your own for whatever the bundled library hasn't got — straight from the
+search box, including mid-workout, where it drops into the session as soon as
+you save it. Custom exercises can be edited and deleted afterwards. Anything
+redundant can be swiped away and restored later from Library ▸ Hidden; hiding
+only governs search and browsing, so a hidden exercise already in a plan or your
+history keeps its name and its numbers.
 
 **Progress** — streaks, volume per day, a body heatmap showing which muscles are
 on target for the week and which are falling behind, a 16-week consistency grid,
@@ -264,4 +273,5 @@ Built with SwiftUI, SwiftData and Swift Charts. No third-party dependencies.
   for design work. It's `#if DEBUG` only; launch with `-GTSeedSampleData`.
 
 This replaces an earlier Next.js/Firebase web version of GymTrack. That code is
-still in the git history if you want it — the 414-exercise library came from it.
+still in the git history if you want it — the bundled exercise library came from
+it.

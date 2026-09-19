@@ -89,55 +89,127 @@ final class ExerciseCatalog: @unchecked Sendable {
     /// Bundled, read-only exercises.
     private(set) var builtIn: [CatalogExercise] = []
     private var index: [String: CatalogExercise] = [:]
+    /// Prepared search text per exercise, rebuilt with the index rather than
+    /// recomputed for 400+ entries on every keystroke.
+    private var searchIndex: [String: ExerciseSearch.Entry] = [:]
 
     /// Custom exercises injected by the store at launch and after edits.
     private var custom: [CatalogExercise] = []
+
+    /// Exercises the user has put away. They stay fully resolvable — a plan or
+    /// a logged set that names one still reads correctly — they just stop
+    /// turning up when browsing or searching.
+    private(set) var hidden: Set<String> = []
+
+    /// Entries in the bundled file that turned out to be the same movement
+    /// written twice, mapped survivor-last.
+    ///
+    /// The losing ID is *redirected* rather than deleted, because sessions and
+    /// plans store whichever ID was picked at the time. Resolving it to the
+    /// survivor keeps that history readable and folds both spellings into one
+    /// progression chart instead of two half-empty ones.
+    static let merges: [String: String] = [
+        "scaption-dumbbell": "scaption",                    // "Dumbbell Scaption Raise"
+        "bicep-curl-band": "banded-bicep-curl",             // "Band Bicep Curl"
+        "single-leg-leg-extension": "unilateral-leg-extension",  // "Single-Leg Extension Machine"
+        "dumbbell-pullover-chest": "dumbbell-pullover",     // "Dumbbell Chest Pullover"
+    ]
 
     private init() {
         builtIn = Self.loadBundled()
         rebuildIndex()
     }
 
+    /// Everything the app knows about, including what the user has hidden.
     var all: [CatalogExercise] { builtIn + custom }
+
+    /// What browsing and searching draw from.
+    var visible: [CatalogExercise] { all.filter { !hidden.contains($0.id) } }
 
     func setCustom(_ exercises: [CatalogExercise]) {
         custom = exercises
         rebuildIndex()
     }
 
-    func exercise(id: String) -> CatalogExercise? { index[id] }
+    func setHidden(_ ids: Set<String>) {
+        hidden = ids
+    }
 
-    /// Full-text-ish search across name, muscles and equipment.
-    func search(_ query: String, muscle: Muscle? = nil, equipment: String? = nil) -> [CatalogExercise] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return all.filter { ex in
-            if let muscle, !ex.muscles.contains(muscle) { return false }
-            if let equipment {
-                let hasEquipment = equipment == "Bodyweight"
-                    ? (ex.equipment.isEmpty || ex.equipment.contains("None"))
-                    : ex.equipment.contains(equipment)
-                if !hasEquipment { return false }
+    func isHidden(_ id: String) -> Bool { hidden.contains(id) }
+
+    /// The exercise for an ID, following a merge if that ID was one of the
+    /// duplicates. Never filters by hidden: an ID that's stored somewhere has
+    /// to keep resolving, or the thing that stored it loses its name.
+    func exercise(id: String) -> CatalogExercise? {
+        index[Self.merges[id] ?? id] ?? index[id]
+    }
+
+    /// The exercises the user has put away, named and sorted, for the screen
+    /// that offers them back.
+    var hiddenExercises: [CatalogExercise] {
+        hidden.compactMap { index[$0] }.sorted { $0.name < $1.name }
+    }
+
+    /// Matches against name, muscles and equipment — see `ExerciseSearch` for
+    /// what counts as a match and how results are ordered.
+    func search(_ query: String,
+                muscle: Muscle? = nil,
+                equipment: String? = nil,
+                includeHidden: Bool = false) -> [CatalogExercise] {
+        let q = ExerciseSearch.Query(query)
+        let pool = includeHidden ? all : visible
+
+        return pool
+            .compactMap { ex -> (CatalogExercise, Int)? in
+                if let muscle, !ex.muscles.contains(muscle) { return nil }
+                if let equipment {
+                    let hasEquipment = equipment == "Bodyweight"
+                        ? (ex.equipment.isEmpty || ex.equipment.contains("None"))
+                        : ex.equipment.contains(equipment)
+                    if !hasEquipment { return nil }
+                }
+                guard let entry = searchIndex[ex.id],
+                      let score = ExerciseSearch.score(entry: entry, query: q)
+                else { return nil }
+                return (ex, score)
             }
-            guard !q.isEmpty else { return true }
-            if ex.name.lowercased().contains(q) { return true }
-            if ex.muscleGroups.contains(where: { $0.lowercased().contains(q) }) { return true }
-            if ex.equipment.contains(where: { $0.lowercased().contains(q) }) { return true }
-            return false
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+                // Among equally good matches the plainer name is the one people
+                // mean — "Seated Cable Row" before "Wide Grip Seated Cable Row".
+                // Only when they're actually searching, though: with no query
+                // every entry scores the same, and ordering the whole library by
+                // name length would just look broken.
+                if !q.isEmpty, lhs.0.name.count != rhs.0.name.count {
+                    return lhs.0.name.count < rhs.0.name.count
+                }
+                return lhs.0.name < rhs.0.name
+            }
+            .map(\.0)
+    }
+
+    /// Whether anything at all answers a query — used to offer building the
+    /// exercise yourself when the library comes up short.
+    func hasMatch(for query: String) -> Bool {
+        let q = ExerciseSearch.Query(query)
+        guard !q.isEmpty else { return true }
+        return visible.contains { ex in
+            searchIndex[ex.id].flatMap { ExerciseSearch.score(entry: $0, query: q) } != nil
         }
-        .sorted { lhs, rhs in
-            // Prefix matches on the name float to the top of a search.
-            guard !q.isEmpty else { return lhs.name < rhs.name }
-            let l = lhs.name.lowercased().hasPrefix(q)
-            let r = rhs.name.lowercased().hasPrefix(q)
-            if l != r { return l }
-            return lhs.name < rhs.name
-        }
+    }
+
+    /// Whether an exercise by this name already exists, so a custom one isn't
+    /// built on top of a library entry the search simply didn't surface.
+    func existing(named name: String, excluding id: String? = nil) -> CatalogExercise? {
+        let target = ExerciseSearch.normalise(name)
+        guard !target.isEmpty else { return nil }
+        return all.first { $0.id != id && ExerciseSearch.normalise($0.name) == target }
     }
 
     /// Equipment filter options, most common first.
     var equipmentOptions: [String] {
         var counts: [String: Int] = [:]
-        for ex in all {
+        for ex in visible {
             for e in ex.equipment {
                 counts[e, default: 0] += 1
             }
@@ -146,7 +218,12 @@ final class ExerciseCatalog: @unchecked Sendable {
     }
 
     private func rebuildIndex() {
-        index = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        let everything = all
+        index = Dictionary(everything.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        searchIndex = Dictionary(
+            everything.map { ($0.id, ExerciseSearch.Entry(exercise: $0)) },
+            uniquingKeysWith: { _, new in new }
+        )
     }
 
     private static func loadBundled() -> [CatalogExercise] {
@@ -158,8 +235,11 @@ final class ExerciseCatalog: @unchecked Sendable {
             return []
         }
 
-        return raw.map { r in
-            CatalogExercise(
+        // A merged duplicate is dropped from the list entirely — `exercise(id:)`
+        // sends its ID to the survivor, so nothing that referenced it breaks.
+        return raw.compactMap { r in
+            guard merges[r.id] == nil else { return nil }
+            return CatalogExercise(
                 id: r.id,
                 name: r.name,
                 category: r.category,

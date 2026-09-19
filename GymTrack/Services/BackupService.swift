@@ -21,6 +21,9 @@ enum BackupService {
         /// the rest — a backup written before this existed still restores, and
         /// every exercise in it falls back to its equipment default.
         var loadScales: [LoadScaleDTO]?
+        /// Which library exercises the user has put away. Optional like the
+        /// rest — an older backup simply restores with nothing hidden.
+        var hiddenExercises: [String]?
     }
 
     struct Settings: Codable {
@@ -126,6 +129,7 @@ enum BackupService {
         let custom = try context.fetch(FetchDescriptor<CustomExerciseRecord>())
         let bodyMetrics = try context.fetch(FetchDescriptor<BodyMetric>())
         let loadScales = try context.fetch(FetchDescriptor<ExerciseLoadPreference>())
+        let hidden = try context.fetch(FetchDescriptor<HiddenExerciseRecord>())
 
         let archive = Archive(
             settings: Settings(
@@ -174,7 +178,8 @@ enum BackupService {
             },
             loadScales: loadScales.map {
                 LoadScaleDTO(catalogID: $0.catalogID, unit: $0.unitRaw, increment: $0.increment)
-            }
+            },
+            hiddenExercises: hidden.map(\.catalogID)
         )
 
         let encoder = JSONEncoder()
@@ -278,12 +283,17 @@ enum BackupService {
             context.insert(ExerciseLoadPreference(catalogID: dto.catalogID, scale: scale))
         }
 
+        for catalogID in archive.hiddenExercises ?? [] {
+            context.insert(HiddenExerciseRecord(catalogID: catalogID))
+        }
+
         AppSettings.shared.weightUnit = WeightUnit(rawValue: archive.settings.weightUnit) ?? .kg
         AppSettings.shared.userName = archive.settings.userName
         AppSettings.shared.defaultRestSeconds = archive.settings.defaultRestSeconds
 
         try context.save()
         LoadScaleBook.shared.reload()
+        ExerciseVisibility.reload(context: context)
     }
 
     /// Deletes every record. Used by restore and by "erase all data".
@@ -304,8 +314,10 @@ enum BackupService {
         for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
         for set in try context.fetch(FetchDescriptor<SetLog>()) { context.delete(set) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
+        for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
 
         try context.save()
         LoadScaleBook.shared.reload()
+        ExerciseVisibility.reload(context: context)
     }
 }
