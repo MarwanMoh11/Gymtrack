@@ -18,6 +18,7 @@
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<!-- Tapping the Live Activity lands straight back in the logger. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -31,12 +32,20 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Exposes the app's Documents folder in Files, so a backup can be saved
+	     into it and restored from it without leaving the device. Paired with
+	     UIFileSharingEnabled below — Xcode sorts these keys, so the two halves
+	     no longer sit together. -->
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- Health. Reading covers heart rate and energy for a session, plus body
+	     weight; writing puts finished sessions in Health as strength workouts. -->
 	<key>NSHealthShareUsageDescription</key>
 	<string>GymTrack reads the heart rate and energy recorded during a workout so your sessions show what they cost you, and your body weight so you don't have to type it twice.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>GymTrack saves finished sessions to Health as strength training workouts — with your sets, reps and volume — and can record a weigh-in you enter here.</string>
+	<!-- The running session shows up on the Lock Screen and in the Dynamic
+	     Island for as long as the workout is open. -->
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
@@ -44,6 +53,8 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 	</dict>
+	<!-- The other half of the Files support described at
+	     LSSupportsOpeningDocumentsInPlace. -->
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>
