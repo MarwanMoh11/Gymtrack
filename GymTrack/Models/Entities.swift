@@ -340,6 +340,19 @@ final class WorkoutSession {
     var hasHealthMetrics: Bool {
         averageHeartRate != nil || maxHeartRate != nil || (activeEnergyKcal ?? 0) >= 1
     }
+
+    /// The set that took the most out of you, by the peak your heart reached
+    /// during it. `nil` until something has been attributed — a session the
+    /// watch sat out has no hardest set, only a hardest set nobody measured.
+    ///
+    /// One line on the summary rather than a number on every logged row: the
+    /// question a per-set heart rate answers is which set was the hard one, and
+    /// forty small numbers down a card answer it worse than naming it does.
+    var hardestSet: SetLog? {
+        completedSets
+            .filter { $0.maxHeartRate != nil }
+            .max { ($0.maxHeartRate ?? 0) < ($1.maxHeartRate ?? 0) }
+    }
 }
 
 struct SessionExerciseGroup: Identifiable {
@@ -397,6 +410,25 @@ final class SetLog {
     /// would turn the one thing that separates rest from work into a number
     /// that looks measured and isn't.
     var startedAt: Date?
+
+    // MARK: Health
+
+    /// Beats per minute across this set, read off the samples an Apple Watch
+    /// recorded while it was happening. `nil` — both of them — wherever the
+    /// watch wasn't there, which is the normal state and has to stay
+    /// indistinguishable from a set logged before any of this existed.
+    ///
+    /// Nothing is asked for. The watch is already recording, the stamps are
+    /// already on the set, and `HealthKitService` puts the two together when
+    /// the session is written to Health.
+    var averageHeartRate: Double?
+    var maxHeartRate: Double?
+    /// Which kind of window those two numbers were read from — a
+    /// `HeartRateWindowSource` raw value. It is written together with them and
+    /// is never absent while they are present, because a heart rate whose
+    /// window nobody can characterise is a number pretending to be a
+    /// measurement.
+    var heartRateWindowRaw: String?
 
     var session: WorkoutSession?
 
@@ -465,6 +497,37 @@ final class SetLog {
     var feel: SetFeel? {
         guard let rpe else { return nil }
         return SetFeel.nearest(to: rpe)
+    }
+
+    // MARK: Heart rate
+
+    /// Where this set's heart rate was read from, as the word rather than the
+    /// raw string. `nil` on a set that has none.
+    var heartRateWindow: HeartRateWindowSource? {
+        guard averageHeartRate != nil || maxHeartRate != nil else { return nil }
+        return heartRateWindowRaw.flatMap(HeartRateWindowSource.init(rawValue:))
+    }
+
+    /// Whether the watch caught anything during this set.
+    var hasHeartRate: Bool { averageHeartRate != nil || maxHeartRate != nil }
+
+    /// Files what was read off the samples. Only ever called with a result the
+    /// attribution actually produced, so there is no path here that writes a
+    /// heart rate of zero onto a set the watch never saw.
+    func apply(_ heartRate: SetHeartRate) {
+        averageHeartRate = heartRate.average
+        maxHeartRate = heartRate.peak
+        heartRateWindowRaw = heartRate.source.rawValue
+    }
+
+    /// Forgets it. Un-logging a set takes its window away — the stamps that
+    /// defined it are being cleared in the same breath — so the beats read
+    /// through that window have to go with them rather than sitting on a set
+    /// that will next be logged at some other time entirely.
+    func clearHeartRate() {
+        averageHeartRate = nil
+        maxHeartRate = nil
+        heartRateWindowRaw = nil
     }
 }
 

@@ -255,21 +255,105 @@ final class HealthKitService {
         )
     }
 
-    /// Fills in whatever a session is missing. Called right after a workout
-    /// ends, and again when its summary is opened — HealthKit can take a
+    /// Fills in whatever a session is missing — the session's own numbers, and
+    /// then a heart rate for each of its sets. Called right after a workout
+    /// ends, and again when its summary is opened, because HealthKit can take a
     /// minute to receive the watch's samples.
+    ///
+    /// Everything written here is written only where there was nothing, so the
+    /// second call fills what the first was too early for and overwrites
+    /// nothing it already got right.
     func backfillVitals(for session: WorkoutSession) async {
         guard AppSettings.shared.healthReadVitals, session.endedAt != nil else { return }
         let vitals = await vitals(from: session.startedAt, to: session.endedAt ?? .now)
-        guard !vitals.isEmpty else { return }
-        if let average = vitals.averageHeartRate, session.averageHeartRate == nil {
-            session.averageHeartRate = average
+        if !vitals.isEmpty {
+            if let average = vitals.averageHeartRate, session.averageHeartRate == nil {
+                session.averageHeartRate = average
+            }
+            if let max = vitals.maxHeartRate, session.maxHeartRate == nil {
+                session.maxHeartRate = max
+            }
+            if let energy = vitals.activeEnergyKcal, energy > 0, session.activeEnergyKcal == nil {
+                session.activeEnergyKcal = energy
+            }
         }
-        if let max = vitals.maxHeartRate, session.maxHeartRate == nil {
-            session.maxHeartRate = max
+        // Not inside that branch. The aggregate query asks for statistics over
+        // the session's window and comes back empty for reasons the individual
+        // samples don't share — a watch that recorded a handful of beats and
+        // no energy at all reads as "nothing here" to the statistics query,
+        // and those beats are exactly what a set wants.
+        await attributeHeartRate(within: session)
+    }
+
+    // MARK: - Heart rate, set by set
+
+    /// Gives each of a session's sets the heart rate recorded during it.
+    ///
+    /// One query for the whole session, partitioned in memory, rather than a
+    /// query per set: a thirty-set session would otherwise mean thirty round
+    /// trips to HealthKit for samples that all arrive in the same fetch, and
+    /// the windows have to be worked out relative to one another anyway — a set
+    /// without an announced start is bounded by the set logged before it.
+    ///
+    /// Every completed set is given a window, including the ones that already
+    /// carry a heart rate, because those are what bound the ones that don't.
+    /// Only the sets missing a reading are written to.
+    private func attributeHeartRate(within session: WorkoutSession) async {
+        let completed = session.completedSets.filter { $0.completedAt != nil }
+        guard completed.contains(where: { !$0.hasHeartRate }) else { return }
+
+        let samples = await heartRateSamples(from: session.startedAt, to: session.endedAt ?? .now)
+        guard !samples.isEmpty else { return }
+
+        let timings = completed.map { set in
+            SetTiming(
+                id: set.id,
+                startedAt: set.startedAt,
+                completedAt: set.completedAt ?? session.startedAt,
+                reps: set.reps,
+                // A duration-tracked set states its own length; a set of reps
+                // has to be estimated. See `SetTiming.assumedDuration`.
+                heldSeconds: set.tracking == .duration ? set.seconds : 0
+            )
         }
-        if let energy = vitals.activeEnergyKcal, energy > 0, session.activeEnergyKcal == nil {
-            session.activeEnergyKcal = energy
+        let attributed = SetHeartRateAttribution.attribute(
+            samples: samples,
+            to: timings,
+            sessionStart: session.startedAt
+        )
+        // A set the attribution had nothing for is left exactly as it was. No
+        // zero, no placeholder: a set the watch wasn't there for has to read
+        // like a set logged before any of this existed, because it is one.
+        for set in completed where !set.hasHeartRate {
+            guard let heartRate = attributed[set.id] else { continue }
+            set.apply(heartRate)
+        }
+    }
+
+    /// Every individual heart-rate reading overlapping a window.
+    ///
+    /// Deliberately without `.strictStartDate`, which the session-level
+    /// statistics use: a reading that began a second before the session and
+    /// ended inside it is a reading from inside the session, and whether it
+    /// belongs to any particular set is a question for the windowing, not for
+    /// the fetch.
+    private func heartRateSamples(from start: Date, to end: Date) async -> [HeartRateSample] {
+        guard isAvailable, end > start,
+              let type = HKQuantityType.quantityType(forIdentifier: .heartRate)
+        else { return [] }
+
+        let beats = HKUnit.count().unitDivided(by: .minute())
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
+        let samples: [HKQuantitySample] = await withCheckedContinuation { continuation in
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+            let query = HKSampleQuery(sampleType: type, predicate: predicate,
+                                      limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, _ in
+                continuation.resume(returning: samples as? [HKQuantitySample] ?? [])
+            }
+            store.execute(query)
+        }
+        return samples.map {
+            HeartRateSample(start: $0.startDate, end: $0.endDate, bpm: $0.quantity.doubleValue(for: beats))
         }
     }
 

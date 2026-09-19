@@ -214,9 +214,12 @@ struct HealthMetricsCard: View {
     let session: WorkoutSession
 
     var body: some View {
-        if session.hasHealthMetrics || session.healthWorkoutID != nil {
+        let hardest = session.hardestSet
+        if session.hasHealthMetrics || session.healthWorkoutID != nil || hardest != nil {
             VStack(spacing: 8) {
                 SectionHeader(session.wasWatchDriven ? "From your watch" : "From Health")
+
+                if let hardest { hardestSetRow(hardest) }
 
                 if session.hasHealthMetrics {
                     HStack(spacing: 10) {
@@ -248,6 +251,75 @@ struct HealthMetricsCard: View {
                     .gtCard(padding: 12)
                 }
             }
+        }
+    }
+
+    /// The one set that cost the most, named. A session average says a workout
+    /// happened; this says which part of it was the work, and it is the whole
+    /// reason per-set heart rate is worth attributing at all.
+    ///
+    /// The caption says which kind of number it is, the way the rest tile does.
+    /// A peak read over the set the lifter announced and a peak read over the
+    /// seconds this app guessed the set occupied are different claims, and a
+    /// row that read the same either way would borrow the credibility of the
+    /// measured one for both.
+    private func hardestSetRow(_ set: SetLog) -> some View {
+        HStack(spacing: 10) {
+            GlyphTile(symbol: "bolt.heart.fill", tint: Theme.negative, size: 30, solid: true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(set.exerciseName), set \(setNumber(of: set))")
+                    .font(Theme.rounded(14, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                Text(set.heartRateWindow == .measured
+                     ? "Peak \(Int((set.maxHeartRate ?? 0).rounded())) bpm, measured over the set"
+                     : "Peak \(Int((set.maxHeartRate ?? 0).rounded())) bpm, over an estimated window")
+                    .font(Theme.rounded(12, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer()
+            Text("HARDEST")
+                .font(Theme.eyebrow)
+                .tracking(0.8)
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .gtCard(padding: 12)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// What the set is called on the card it belongs to — 1, 2, 3 down the
+    /// exercise, not its index in the session.
+    private func setNumber(of set: SetLog) -> String {
+        session.exerciseGroups.first { $0.catalogID == set.catalogID }?.label(for: set) ?? "1"
+    }
+}
+
+/// The heart rate a single set was worked at, small enough to sit in a row of
+/// numbers without becoming one of them.
+///
+/// The peak and not the average, because the peak is the thing a set is asked
+/// about — how hard did this go — and because a peak survives a slightly wrong
+/// window where an average doesn't. A window this app inferred is drawn with a
+/// tilde and spelled out in full for VoiceOver: the number is real, the seconds
+/// it was read over are this app's best guess, and a reader is owed that
+/// distinction whether they're looking or listening.
+struct SetHeartRateBadge: View {
+    let set: SetLog
+
+    var body: some View {
+        if let peak = set.maxHeartRate {
+            let bpm = Int(peak.rounded())
+            let measured = set.heartRateWindow == .measured
+            HStack(spacing: 3) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 8, weight: .bold))
+                Text(measured ? "\(bpm)" : "~\(bpm)")
+                    .font(Theme.number(11, weight: .semibold))
+            }
+            .foregroundStyle(Theme.negative.opacity(0.75))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(measured
+                                ? "Peak \(bpm) beats per minute"
+                                : "Peak about \(bpm) beats per minute, over an estimated window")
         }
     }
 }
@@ -293,6 +365,10 @@ struct SessionDetailView: View {
                                     .font(Theme.rounded(12, weight: .medium))
                                     .foregroundStyle(Theme.textTertiary)
                                 Spacer()
+                                // Before the weight, so the weights stay in one
+                                // hard-right column down the card whether or
+                                // not the watch was on that day.
+                                SetHeartRateBadge(set: set)
                                 Text(set.tracking == .duration
                                      ? "\(set.seconds)s"
                                      : "\(set.weightLabel) × \(set.reps)")

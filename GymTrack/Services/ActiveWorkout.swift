@@ -251,6 +251,11 @@ final class ActiveWorkout {
         // after however long the fixing took — and report a time under tension
         // nobody spent under a bar.
         set.startedAt = nil
+        // And the heart rate read through that window. The beats were real, but
+        // the window they were read through was this set's, and this set is
+        // being taken back — kept, they would sit on whatever gets logged in
+        // its place and describe minutes nobody spent doing it.
+        set.clearHeartRate()
         recentPRs.remove(set.id)
         if lastLoggedSetID == set.id { lastLoggedSetID = nil }
         if pendingNudge?.setID == set.id { pendingNudge = nil }

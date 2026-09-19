@@ -137,6 +137,23 @@ enum BackupService {
         /// and so a set that was never rated round-trips as unrated rather than
         /// as an RPE of zero.
         var rpe: Double?
+        /// What the watch read during this set. Both absent on a set the watch
+        /// wasn't there for, which is most of them — an average of zero would
+        /// tell a coach the set was easy, and a null written as a value would
+        /// tell them it was measured as nothing.
+        ///
+        /// This is the field per-set detail exists for: a session average of
+        /// 132 says a workout happened, while a heavy triple at 168 beside
+        /// accessory work at 110 says which part of it was the work.
+        var averageHeartRate: Double?
+        var maxHeartRate: Double?
+        /// How the window those two were read over was arrived at —
+        /// `measured` where the lifter announced the set's start and the window
+        /// is the set itself, `inferred` where the app worked out the likely
+        /// last seconds before the set was logged. Written whenever there is a
+        /// heart rate and never otherwise, so a reader is never left deciding
+        /// for themselves how much to trust a number this file handed them.
+        var heartRateWindow: String?
     }
 
     struct BodyMetricDTO: Codable {
@@ -243,7 +260,16 @@ enum BackupService {
                                       completedAt: set.completedAt,
                                       startedAt: set.startedAt,
                                       targetRepsLow: set.targetRepsLow, targetRepsHigh: set.targetRepsHigh,
-                                      rpe: set.rpe)
+                                      rpe: set.rpe,
+                                      averageHeartRate: set.averageHeartRate,
+                                      maxHeartRate: set.maxHeartRate,
+                                      // Read through the set rather than off
+                                      // the stored string, so a provenance left
+                                      // behind by a set whose heart rate has
+                                      // since been cleared can't reach the file
+                                      // on its own, describing a window over
+                                      // numbers that aren't there.
+                                      heartRateWindow: set.heartRateWindow?.rawValue)
                            })
             },
             bodyMetrics: bodyMetrics.map {
@@ -415,6 +441,16 @@ enum BackupService {
                 set.completedAt = setDTO.completedAt
                 set.startedAt = setDTO.startedAt
                 set.rpe = setDTO.rpe
+                set.averageHeartRate = setDTO.averageHeartRate
+                set.maxHeartRate = setDTO.maxHeartRate
+                // A window the app doesn't recognise is dropped rather than
+                // stored, the way an unknown note tag is: a provenance nothing
+                // can read would still be written back out on the next export
+                // as though it had been understood. The numbers survive it and
+                // read as a heart rate of unstated provenance, which is the
+                // truth about them once their label is unreadable.
+                set.heartRateWindowRaw = setDTO.heartRateWindow
+                    .flatMap(HeartRateWindowSource.init(rawValue:))?.rawValue
                 set.session = session
                 context.insert(set)
             }
