@@ -206,6 +206,24 @@ final class WorkoutSession {
 
     var completedSets: [SetLog] { sets.filter(\.isCompleted) }
 
+    /// One row per effort: every logged set except the rows that merely
+    /// continued the one above them.
+    ///
+    /// This is the list for anything that counts sets as units of work — how
+    /// many hard sets a muscle got, what beat what. A drop set is one hard set
+    /// taken further, not two or three, and counting its rows would inflate
+    /// weekly volume for a lifter whose only change was stripping a plate.
+    ///
+    /// Not the list for anything that counts the work itself — see
+    /// `totalVolumeKg`.
+    var effortSets: [SetLog] { completedSets.filter { !$0.isContinuation } }
+
+    /// Every kilogram that actually moved, continuations included.
+    ///
+    /// Deliberately not `effortSets`: those reps happened and that weight was
+    /// lifted. A session with a drop set did more work than the same session
+    /// without one, and leaving the back-off rows out would report the opposite
+    /// — the harder session as the lighter one.
     var totalVolumeKg: Double {
         completedSets.reduce(0) { $0 + $1.volumeKg }
     }
@@ -223,14 +241,21 @@ final class WorkoutSession {
     /// those two stamps can say on their own.
     private var gapsWithProvenance: [(seconds: TimeInterval, isRest: Bool)] {
         let logged = completedSets
-            .compactMap { set -> (begun: Date?, logged: Date)? in
+            .compactMap { set -> (begun: Date?, logged: Date, continues: Bool)? in
                 guard let end = set.completedAt else { return nil }
-                return (set.startedAt, end)
+                return (set.startedAt, end, set.isContinuation)
             }
             .sorted { $0.logged < $1.logged }
         guard logged.count > 1 else { return [] }
 
-        return zip(logged, logged.dropFirst()).map { previous, next in
+        // The interval into a continuation is not a rest — not a short one, not
+        // a measured one, not one at all. It is the seconds spent stripping a
+        // plate in the middle of a set the lifter never put down, and it is
+        // there *because* they didn't rest. Counted, a lifter who takes one
+        // drop a session would have their typical rest reported as half what
+        // they actually take, and the number would look measured.
+        return zip(logged, logged.dropFirst()).compactMap { previous, next in
+            guard !next.continues else { return nil }
             // A start is only believed where it falls inside the gap it claims
             // to split. One outside it — a clock moved, a backup restored from
             // a device in another timezone — would report a negative rest, or
@@ -367,12 +392,31 @@ struct SessionExerciseGroup: Identifiable {
     var catalog: CatalogExercise? { ExerciseCatalog.shared.exercise(id: catalogID) }
 
     /// What a set is called on screen — 1, 2, 3 down the card.
-    func label(for set: SetLog) -> String { "\(position(of: set) + 1)" }
+    ///
+    /// Efforts are counted, not rows. A drop taken after set 2 is still set 2,
+    /// so it carries that number and the working set under it is 3 rather than
+    /// 4. Numbering the rows instead would have the card claim a four-set
+    /// exercise the moment somebody stripped a plate, and the number a set is
+    /// called on screen is the number the record and the wrist use too.
+    func label(for set: SetLog) -> String {
+        "\(effortsBefore(set) + (set.isContinuation ? 0 : 1))"
+    }
 
-    /// Position of a set within its exercise, which is also what lines it up
-    /// with the same set last session.
-    func position(of set: SetLog) -> Int {
-        sets.firstIndex { $0.id == set.id } ?? 0
+    /// Which of last session's sets this one is compared against — its position
+    /// among the efforts.
+    ///
+    /// Nothing at all for a row that continues another. Those have no opposite
+    /// number: "was 62.5 × 8" on a back-off row would be comparing a drop
+    /// against a working set, and a drop that moved a row up or down between
+    /// sessions would drag every hint under it out of line with the set it is
+    /// supposed to be about.
+    func pairingPosition(of set: SetLog) -> Int? {
+        set.isContinuation ? nil : effortsBefore(set)
+    }
+
+    /// How many efforts started before this row.
+    private func effortsBefore(_ set: SetLog) -> Int {
+        sets.prefix { $0.id != set.id }.filter { !$0.isContinuation }.count
     }
 }
 
@@ -447,6 +491,26 @@ final class SetLog {
     /// Copying it here would only let the two disagree.
     var loadNudgeOutcomeRaw: String?
     var loadNudgeToKg: Double?
+
+    // MARK: One effort, spread over rows
+
+    /// Set on the rows that were not a set of their own — the second and third
+    /// rows of a drop set, the clusters after a myo-rep activation set. It says
+    /// this row was taken on from the row above it in the same exercise without
+    /// the effort being put down in between.
+    ///
+    /// `nil` on every ordinary set, which is nearly all of them. A `false` here
+    /// would be a fact about 800 rows that don't need one, and a reader would
+    /// have to be told that "not a continuation" is the normal state rather
+    /// than simply not finding the field.
+    ///
+    /// The link is to the row above and is not named: which row that is falls
+    /// out of `setIndex`, which is already the thing that orders a card and
+    /// pairs a set with last week's. A stored parent ID would be a second
+    /// answer to a question the ordering already answers, free to disagree with
+    /// it the moment a set is inserted or removed. An effort is therefore a run
+    /// of rows — one that carries nothing, then however many that do.
+    var continuesPreviousSet: Bool?
 
     var session: WorkoutSession?
 
@@ -572,6 +636,34 @@ final class SetLog {
         loadNudgeToKg = nil
     }
 
+    // MARK: One effort, spread over rows
+
+    /// Whether this row was taken on from the one above it rather than being a
+    /// set of its own.
+    var isContinuation: Bool { continuesPreviousSet == true }
+
+    /// The row it continues: the set of the same exercise immediately above it.
+    ///
+    /// `nil` where there isn't one. That should be impossible — a continuation
+    /// is only ever built on top of a set that has already been logged, and
+    /// `ActiveWorkout.finish` unlinks any row whose set didn't survive to the
+    /// record — but it is checked rather than asserted, so a link with nothing
+    /// on the other end reads as an ordinary set everywhere instead of drawing
+    /// half a drop.
+    var continuedSet: SetLog? {
+        guard isContinuation, let session else { return nil }
+        return session.sets
+            .filter { $0.catalogID == catalogID && $0.setIndex < setIndex }
+            .max { $0.setIndex < $1.setIndex }
+    }
+
+    /// Which kind of continuation this was, read off the two weights rather
+    /// than stored — see `SetContinuation` for why.
+    var continuation: SetContinuation? {
+        guard let above = continuedSet else { return nil }
+        return weightKg < above.weightKg ? .drop : .cluster
+    }
+
     // MARK: Taking it back
 
     /// Puts the set back to never having been logged.
@@ -606,6 +698,14 @@ final class SetLog {
         // answer gone there was never a reading of this set to act on, so what
         // was done about it stops being a fact about anything.
         clearLoadNudge()
+        // `continuesPreviousSet` deliberately stays, along with `setIndex` and
+        // for the same reason: it is not something the set gained by being
+        // logged, it is what the row is. A drop's second row was created as a
+        // continuation and is one whether or not it currently holds a lift.
+        // Clearing it here would turn taking the reps back into silently
+        // promoting a back-off row to an ordinary set sitting mid-exercise at
+        // 40 kg — which is the lie this whole field exists to stop. The undo
+        // for making the row is removing the row, and that is where it lives.
     }
 }
 

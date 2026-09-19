@@ -91,16 +91,20 @@ final class WatchCommandCenter {
             pushMirror(context: context)
 
         case .addSet(let catalogID):
-            guard let session = activeSession(in: context),
-                  let template = session.sets
-                    .filter({ $0.catalogID == catalogID })
-                    .max(by: { $0.setIndex < $1.setIndex })
+            guard let session = activeSession(in: context) else { return }
+            let existing = session.sets.filter { $0.catalogID == catalogID }
+            // Modelled on the last set that was a set, exactly as the logger
+            // does it — the wrist shouldn't add a different kind of set to the
+            // phone just because it was the thing that asked. After a drop the
+            // bottom row of an exercise is the lightest thing the lifter did.
+            guard let template = existing.filter({ !$0.isContinuation }).max(by: { $0.setIndex < $1.setIndex })
+                    ?? existing.max(by: { $0.setIndex < $1.setIndex })
             else { return }
             let set = SetLog(
                 catalogID: template.catalogID,
                 exerciseName: template.exerciseName,
                 exerciseOrder: template.exerciseOrder,
-                setIndex: template.setIndex + 1,
+                setIndex: (existing.map(\.setIndex).max() ?? template.setIndex) + 1,
                 weightKg: template.weightKg,
                 reps: template.reps,
                 seconds: template.seconds,
@@ -167,10 +171,11 @@ final class WatchCommandCenter {
     /// logger does — the watch shouldn't behave differently because the phone
     /// happened to be asleep.
     private func carryLoadForward(from set: SetLog) {
-        guard let session = set.session else { return }
+        guard let session = set.session, !set.isContinuation else { return }
         for other in session.sets
         where other.catalogID == set.catalogID
             && !other.isCompleted
+            && !other.isContinuation
             && other.setIndex > set.setIndex {
             other.weightKg = set.weightKg
             if other.tracking == .duration { other.seconds = set.seconds }

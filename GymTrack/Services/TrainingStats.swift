@@ -52,7 +52,11 @@ enum TrainingStats {
     static func setsPerMuscle(_ sessions: [WorkoutSession]) -> [Muscle: Double] {
         var result: [Muscle: Double] = [:]
         for session in sessions {
-            for set in session.completedSets {
+            // Efforts, not rows: a drop set is one hard set taken further. Its
+            // back-off rows counted here would show as extra weekly volume the
+            // lifter never added, and the heat map would warm up because they
+            // stripped a plate.
+            for set in session.effortSets {
                 guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { continue }
                 for (index, muscle) in exercise.muscles.prefix(2).enumerated() {
                     result[muscle, default: 0] += index == 0 ? 1.0 : 0.5
@@ -111,7 +115,14 @@ enum TrainingStats {
                     sets: sets,
                     topSet: top,
                     volumeKg: sets.reduce(0) { $0 + $1.volumeKg },
-                    bestEstimatedOneRepMax: sets.map(\.estimatedOneRepMax).max() ?? 0,
+                    // Strength estimated off the sets that stood on their own.
+                    // A drop's rows are lifted pre-fatigued, as part of the set
+                    // above them, so a light row taken for a lot of reps says
+                    // nothing about a one-rep max — see `isPersonalRecord`,
+                    // which draws the same line. The volume and the rep count
+                    // above keep them, because those reps happened.
+                    bestEstimatedOneRepMax: sets.filter { !$0.isContinuation }
+                        .map(\.estimatedOneRepMax).max() ?? 0,
                     totalReps: sets.reduce(0) { $0 + $1.reps }
                 )
             }
@@ -119,7 +130,28 @@ enum TrainingStats {
     }
 
     /// The most recent completed sets for an exercise, used to prefill the
-    /// logger and to show "last time" next to each set.
+    /// logger, to show "last time" next to each set, and as the whole input to
+    /// the progression.
+    ///
+    /// Only the sets that were sets. A row that continued the one above it is
+    /// not a working set, and everything downstream of this reads it positionally
+    /// or by weight and would read it wrong:
+    ///
+    /// * The "was 62.5 × 8" hints pair this session's sets against last
+    ///   session's by position. One drop taken last week shifts every set under
+    ///   it down a place, so set 2 would be hinted with set 1's numbers for the
+    ///   rest of the exercise — and the shift moves around from session to
+    ///   session, so it can't even be wrong consistently.
+    /// * `suggestion` takes the heaviest weight, then the worst rep count among
+    ///   the sets at it. A cluster is taken at exactly that weight for three or
+    ///   four reps, which lands in that group and reads as a working set that
+    ///   collapsed — the app would prescribe a deload off the back of the
+    ///   lifter deliberately doing more work. That is the silent wrong answer
+    ///   this filter exists to stop, and it is why the cut is made here, at the
+    ///   one place the progression gets its input, rather than in each reader.
+    ///
+    /// What actually happened is not lost: the session itself still holds every
+    /// row, and that is what the history screen and the export read.
     static func lastPerformance(of catalogID: String,
                                 in sessions: [WorkoutSession],
                                 excluding sessionID: UUID? = nil) -> [SetLog] {
@@ -127,7 +159,7 @@ enum TrainingStats {
             .filter { $0.id != sessionID && !$0.isActive }
             .sorted { $0.startedAt > $1.startedAt }
         for session in candidates {
-            let sets = session.completedSets
+            let sets = session.effortSets
                 .filter { $0.catalogID == catalogID }
                 .sorted { $0.setIndex < $1.setIndex }
             if !sets.isEmpty { return sets }
@@ -151,7 +183,9 @@ enum TrainingStats {
     static func records(in sessions: [WorkoutSession]) -> [PersonalRecord] {
         var byExercise: [String: [SetLog]] = [:]
         for session in sessions where !session.isActive {
-            for set in session.completedSets {
+            // Records are set by sets, not by the rows underneath one. See
+            // `isPersonalRecord` — the same line, for the same reason.
+            for set in session.effortSets {
                 byExercise[set.catalogID, default: []].append(set)
             }
         }
@@ -180,8 +214,16 @@ enum TrainingStats {
     /// The first set of an exercise you've never done is not a record — with no
     /// baseline there's nothing to beat, and celebrating it would fire on every
     /// new movement.
+    ///
+    /// A row that continued the set above it can neither set a record nor stop
+    /// one. It was lifted inside another set, already fatigued, off a load
+    /// chosen to be survivable — twenty reps at 40 kg after eight at 62.5
+    /// estimates a higher one-rep max than the 62.5 did, and it would both
+    /// light up the trophy on a back-off row and raise the bar every real set
+    /// after it has to clear. Both directions are the same mistake: comparing
+    /// a piece of a set against whole ones.
     static func isPersonalRecord(_ set: SetLog, in sessions: [WorkoutSession]) -> Bool {
-        guard set.isCompleted else { return false }
+        guard set.isCompleted, !set.isContinuation else { return false }
 
         let previous = allSets(for: set.catalogID, in: sessions, before: set)
         guard !previous.isEmpty else { return false }
@@ -207,6 +249,7 @@ enum TrainingStats {
         return sessions.flatMap(\.sets).filter {
             $0.catalogID == catalogID
             && $0.isCompleted
+            && !$0.isContinuation
             && $0.id != set.id
             && (($0.completedAt ?? .distantPast) < boundary)
         }
@@ -415,8 +458,11 @@ extension TrainingStats {
 
         func value(of session: WorkoutSession) -> Double {
             switch self {
+            // Volume counts every kilogram moved; sets count efforts. A drop
+            // set adds to the first and not the second, which is exactly the
+            // difference the two charts exist to show.
             case .volume: AppSettings.shared.weightUnit.fromKg(session.totalVolumeKg)
-            case .sets: Double(session.completedSets.count)
+            case .sets: Double(session.effortSets.count)
             case .reps: Double(session.totalReps)
             }
         }
@@ -526,7 +572,10 @@ extension TrainingStats {
                              limit: Int = 3) -> [(name: String, sets: Double)] {
         var tally: [String: Double] = [:]
         for session in sessions {
-            for set in session.completedSets {
+            // Counted the same way `setsPerMuscle` counts, since this is the
+            // breakdown of that number — otherwise the parts wouldn't add up
+            // to the whole they're explaining.
+            for set in session.effortSets {
                 guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { continue }
                 for (index, candidate) in exercise.muscles.prefix(2).enumerated() where candidate == muscle {
                     tally[set.exerciseName, default: 0] += index == 0 ? 1.0 : 0.5

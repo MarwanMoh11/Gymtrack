@@ -386,6 +386,15 @@ private struct ExerciseLogCard: View {
                         onRate: { workout.rate(set, feel: $0) },
                         onClearRating: { workout.clearRating(set) }
                     )
+                    // Long press, and nothing on screen. A lifter who only does
+                    // straight sets has to be able to use this app for a year
+                    // without ever learning that drop sets are in it: a control
+                    // on the row, however quiet, is a control every one of them
+                    // reads past on every set of every session. What the menu
+                    // offers changes with the row, so it is never a list of
+                    // things that don't apply.
+                    .contextMenu { effortMenu(for: set) }
+                    .accessibilityActions { effortMenu(for: set) }
 
                     if let nudge = workout.pendingNudge, nudge.setID == set.id {
                         LoadNudgeRow(nudge: nudge,
@@ -541,10 +550,48 @@ private struct ExerciseLogCard: View {
         Haptics.tick()
     }
 
-    /// Last session's matching set, paired by position within the exercise.
+    // MARK: Taking a set further
+
+    /// What can be done to this row that isn't already a button on it: take the
+    /// set further without resting, or undo having said so.
+    ///
+    /// The offer is only ever on the set at the front of the exercise — the one
+    /// just logged, with nothing logged after it. A continuation slotted in
+    /// behind work already done would claim a drop happened at a point in the
+    /// session where the record says the lifter had moved on.
+    @ViewBuilder
+    private func effortMenu(for set: SetLog) -> some View {
+        if canContinue(set) {
+            Button { workout.continueSet(set) } label: {
+                Label("Continue without resting", systemImage: SetContinuation.symbol)
+            }
+        }
+        if set.isContinuation {
+            if set.isCompleted {
+                Button { workout.separate(set) } label: {
+                    Label("Separate from the set above", systemImage: "scissors")
+                }
+            } else {
+                Button(role: .destructive) { workout.removeContinuation(set) } label: {
+                    Label("Remove this row", systemImage: "minus.circle")
+                }
+            }
+        }
+    }
+
+    /// Whether this is the set an effort could still be carried on from: logged,
+    /// with nothing logged after it.
+    private func canContinue(_ set: SetLog) -> Bool {
+        guard set.isCompleted, let index = group.sets.firstIndex(where: { $0.id == set.id })
+        else { return false }
+        return group.sets[(index + 1)...].allSatisfy { !$0.isCompleted }
+    }
+
+    /// Last session's matching set, paired by position within the exercise —
+    /// and nothing for a row that continued another, which has no opposite
+    /// number in a session that may not have had one there.
     private func previousSet(for set: SetLog) -> SetLog? {
-        let position = group.position(of: set)
-        guard position < lastTime.count else { return nil }
+        guard let position = group.pairingPosition(of: set), position < lastTime.count else { return nil }
         return lastTime[position]
     }
 
@@ -622,6 +669,7 @@ private struct SetRow: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Color.black.opacity(0.15), in: Capsule())
                 }
+                if let continuation = set.continuation { continuationBadge(continuation) }
                 if let gain { gainBadge(gain) }
                 if let underTension = set.timeUnderTension { tensionBadge(underTension) }
                 Spacer()
@@ -723,6 +771,29 @@ private struct SetRow: View {
         .accessibilityHint("Change it")
     }
 
+    /// What this row did to the one above it — the only thing on the card that
+    /// says the two were one effort rather than two sets.
+    ///
+    /// Shaped like the tension badge beside it rather than like the effort
+    /// answer, because it is the same kind of thing: a fact about the set that
+    /// was recorded, not a question that was answered. The word follows the
+    /// weight the moment it changes, which is exactly what it means.
+    private func continuationBadge(_ kind: SetContinuation) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: SetContinuation.symbol)
+                .font(.system(size: 8, weight: .black))
+            Text(kind.label)
+                .font(Theme.rounded(10, weight: .bold))
+        }
+        .foregroundStyle(isPR ? AnyShapeStyle(Color.black.opacity(0.65)) : AnyShapeStyle(Theme.accent.wash))
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background {
+            Capsule().fill(isPR ? AnyShapeStyle(Color.black.opacity(0.12))
+                                : AnyShapeStyle(Theme.accent.opacity(0.14)))
+        }
+        .accessibilityLabel(kind.spoken)
+    }
+
     /// How long the set took, shown only where that was measured. It is the
     /// half of the announcement the lifter gets back for making it — without
     /// it, saying "starting now" feeds a file they never see and the tap has
@@ -812,7 +883,11 @@ private struct SetRow: View {
         VStack(spacing: 12) {
             HStack(spacing: 8) {
                 indexBadge(filled: false)
-                Text("SET \(label)")
+                // A continuation says which one it is as the lifter dials the
+                // weight — leave it where it opened and it reads CLUSTER, take
+                // a plate off and it reads DROP. The word is the weight, so the
+                // screen can say what is being done while it is being done.
+                Text(set.continuation.map { "SET \(label) · \($0.eyebrow)" } ?? "SET \(label)")
                     .font(Theme.eyebrow)
                     .tracking(1.2)
                     .foregroundStyle(Theme.accent.wash)
@@ -889,9 +964,20 @@ private struct SetRow: View {
 
     // MARK: Pieces
 
+    /// The set's number — or, on a row that continues one, the glyph that says
+    /// so. Numbering it again would put a second "2" down the card; the row is
+    /// still set 2, and the badge's job here is to show that it hangs off the
+    /// row above rather than standing beside it.
     private func indexBadge(filled: Bool) -> some View {
-        Text(label)
-            .font(Theme.number(12, weight: .bold))
+        Group {
+            if set.isContinuation {
+                Image(systemName: SetContinuation.symbol)
+                    .font(.system(size: 11, weight: .black))
+            } else {
+                Text(label)
+                    .font(Theme.number(12, weight: .bold))
+            }
+        }
             .foregroundStyle(filled ? (isPR ? Color.black : Theme.accent) : Theme.textTertiary)
             .frame(width: 26, height: 26)
             .background {

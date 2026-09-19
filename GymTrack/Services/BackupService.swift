@@ -160,6 +160,31 @@ enum BackupService {
         /// again wherever an offer was taken and then undone. Optional like the
         /// rest, so a backup written before this existed still restores.
         var loadNudge: LoadNudgeDTO?
+        /// Present only where this row and the one above it were one effort,
+        /// taken without putting the weight down — the second and third rows of
+        /// a drop set, the clusters after a myo-rep activation set.
+        ///
+        /// This is the fact the file was missing. Three rows at 62.5, 50 and 40
+        /// with nothing joining them read as a lifter falling apart across
+        /// three working sets; the same three rows with this key are one
+        /// working set deliberately taken twice further, which is a lifter
+        /// doing well. Identical numbers, opposite conclusions, and nothing
+        /// else here can separate them — a drop leaves the same falling weights
+        /// as a collapse, and the seconds between its rows are the same short
+        /// gap as a lifter who doesn't rest enough.
+        ///
+        /// The key's **presence** is that fact, and it is the only part
+        /// restored. Its **value** — `drop` where the load came down between
+        /// the rows, `cluster` where it didn't — is this app's reading of the
+        /// two weights, written out so the file explains itself instead of
+        /// making a reader fetch the row above to classify this one. It is
+        /// never stored and never read back, so it cannot drift from the
+        /// weights it describes, and a word some later version writes that this
+        /// one has never heard of still says "one effort" simply by being here.
+        ///
+        /// Absent on every ordinary set, which is nearly all of them, and
+        /// optional like the rest so older backups still decode.
+        var continues: String?
     }
 
     /// One load offer and what became of it.
@@ -295,7 +320,11 @@ enum BackupService {
                                       // on its own, describing a window over
                                       // numbers that aren't there.
                                       heartRateWindow: set.heartRateWindow?.rawValue,
-                                      loadNudge: loadNudge(of: set))
+                                      loadNudge: loadNudge(of: set),
+                                      // Read through the set, so a link whose
+                                      // set isn't in this file can't reach a
+                                      // reader as half a drop set.
+                                      continues: set.continuation?.rawValue)
                            })
             },
             bodyMetrics: bodyMetrics.map {
@@ -493,6 +522,17 @@ enum BackupService {
                 // on its own doesn't say whether anybody took it.
                 if let nudge = setDTO.loadNudge, let outcome = LoadNudgeOutcome(rawValue: nudge.outcome) {
                     set.recordLoadNudge(outcome, toKg: nudge.toKg)
+                }
+                // The key being there is the whole of what's restored — which
+                // kind of continuation it was gets read back off the weights,
+                // so an unfamiliar word costs nothing here, unlike an unknown
+                // heart-rate window or a load outcome. What it can't survive is
+                // having nothing above it to continue: the first set of an
+                // exercise continues the end of the exercise before it, or
+                // nothing at all, and a file claiming otherwise would put a
+                // dangling link into the record that no reader could resolve.
+                if setDTO.continues != nil && setDTO.setIndex > 0 {
+                    set.continuesPreviousSet = true
                 }
                 set.session = session
                 context.insert(set)

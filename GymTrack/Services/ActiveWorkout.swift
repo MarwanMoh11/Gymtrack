@@ -237,10 +237,18 @@ final class ActiveWorkout {
 
     /// Mirrors the load just used onto the remaining sets of the same exercise.
     /// Without this you re-dial the weight for every set of every exercise.
+    ///
+    /// A row that continued the set above it carries nothing forward: its
+    /// weight was chosen to be lower, for that row, and pushing it down the
+    /// card would leave the working sets still to come sitting at the drop
+    /// weight — the lifter would take one drop and find the rest of the
+    /// exercise quietly deloaded.
     private func carryLoadForward(from set: SetLog) {
+        guard !set.isContinuation else { return }
         for other in session.sets
         where other.catalogID == set.catalogID
             && !other.isCompleted
+            && !other.isContinuation
             && other.setIndex > set.setIndex {
             other.weightKg = set.weightKg
             if other.tracking == .duration { other.seconds = set.seconds }
@@ -265,6 +273,86 @@ final class ActiveWorkout {
     }
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
+
+    // MARK: - Taking a set further
+
+    /// Adds a row that carries on from `set` without the effort being put down
+    /// — the second half of a drop set, the next cluster of a myo-rep run.
+    ///
+    /// The row goes directly under the set it continues, not on the end, and
+    /// the sets after it move down one. Position is the whole of what the link
+    /// means: an effort is a run of adjacent rows, so a continuation parked at
+    /// the bottom of the card would claim to continue whatever happened to
+    /// precede it there.
+    ///
+    /// It opens at the weight and reps just lifted, so the lifter's only job is
+    /// to dial one of them — and which way they dial the weight is what makes
+    /// this a drop or a cluster. Nothing about the effort is asked; see
+    /// `SetContinuation`.
+    ///
+    /// The rest stops, because this is the definition of the thing: a
+    /// continuation is taken without one. Leaving the countdown running would
+    /// have the app read as resting through the seconds that make this a drop
+    /// rather than two sets — amber header, amber Lock Screen, amber wrist —
+    /// and then fire "Rest over" halfway through the reps.
+    func continueSet(_ set: SetLog) {
+        guard set.isCompleted else { return }
+
+        for other in session.sets
+        where other.catalogID == set.catalogID && other.setIndex > set.setIndex {
+            other.setIndex += 1
+        }
+
+        let next = SetLog(
+            catalogID: set.catalogID,
+            exerciseName: set.exerciseName,
+            exerciseOrder: set.exerciseOrder,
+            setIndex: set.setIndex + 1,
+            weightKg: set.weightKg,
+            reps: set.reps,
+            seconds: set.seconds,
+            // No rep range, because nobody prescribed one. The plan asks for
+            // three sets of 6–10; it has nothing to say about what a lifter
+            // does after the third one on the way back down, and a range copied
+            // off the set above would have the card demand 6 reps of a drop and
+            // the progression read it as a working set that fell short.
+            targetRepsLow: 0,
+            targetRepsHigh: 0
+        )
+        next.continuesPreviousSet = true
+        next.session = session
+        context.insert(next)
+
+        restTimer.stop()
+        save()
+        Haptics.log()
+    }
+
+    /// Takes the row back off, the exact pair of `continueSet` — for a mis-tap,
+    /// or an effort the lifter decided not to take further after all. Only
+    /// while it holds nothing: once there are reps in it, removing it would
+    /// delete a lift, and `separate` is the way out of that instead.
+    func removeContinuation(_ set: SetLog) {
+        guard set.isContinuation, !set.isCompleted else { return }
+        context.delete(set)
+        resequence(set.catalogID)
+        save()
+        Haptics.tick()
+    }
+
+    /// Cuts the link and keeps the reps: the row becomes an ordinary set of its
+    /// own, which is what it would have been had nobody said otherwise.
+    ///
+    /// For the lift that was logged as a continuation and wasn't one. The reps
+    /// happened and the weight moved, so deleting them would be erasing work to
+    /// correct a label — the only thing wrong here is the claim that no rest
+    /// was taken, and that is the only thing that goes.
+    func separate(_ set: SetLog) {
+        guard set.isContinuation else { return }
+        set.continuesPreviousSet = nil
+        save()
+        Haptics.tick()
+    }
 
     // MARK: - Saying you're starting
 
@@ -392,10 +480,17 @@ final class ActiveWorkout {
     /// alone — a suggestion after every single set would be noise, and noise is
     /// what people learn to tap past.
     private func nudge(after set: SetLog) -> LoadNudge? {
+        // Nothing is read off a row that continued the set above it. Its load
+        // was picked to be survivable rather than to be the right load, so
+        // "that felt hard at 40 kg after eight at 62.5" says nothing about what
+        // the next working set should weigh — and the offer would move that
+        // working set on the strength of it.
+        guard !set.isContinuation else { return nil }
         guard let feel = set.feel, set.tracking != .duration, set.weightKg > 0 else { return nil }
 
         let remaining = session.sets.filter {
-            $0.catalogID == set.catalogID && !$0.isCompleted && $0.setIndex > set.setIndex
+            $0.catalogID == set.catalogID && !$0.isCompleted
+                && !$0.isContinuation && $0.setIndex > set.setIndex
         }
         guard !remaining.isEmpty else { return nil }
 
@@ -439,6 +534,9 @@ final class ActiveWorkout {
         for set in session.sets
         where set.catalogID == nudge.catalogID
             && !set.isCompleted
+            // A pending drop row is at the weight the lifter dialled it to. The
+            // offer is about the working sets, and it counted only those.
+            && !set.isContinuation
             && set.setIndex > nudge.fromIndex {
             previous[set.id] = set.weightKg
             set.weightKg = nudge.toKg
@@ -493,7 +591,12 @@ final class ActiveWorkout {
     // MARK: - Structure edits
 
     func addSet(to group: SessionExerciseGroup) {
-        guard let template = group.sets.last else { return }
+        // Modelled on the last set that was a set. Copying a drop row instead
+        // would open the new one at the back-off weight with no rep range —
+        // "Add set" means another working set, and after a drop the last row on
+        // the card is the lightest thing the lifter did all exercise.
+        guard let template = group.sets.last(where: { !$0.isContinuation }) ?? group.sets.last
+        else { return }
         let set = SetLog(
             catalogID: group.catalogID,
             exerciseName: group.name,
@@ -605,6 +708,7 @@ final class ActiveWorkout {
         // Before the unlogged sets go, because which exercises survive is what
         // decides which notes still have something to be about.
         pruneNotes()
+        unlinkOrphanedContinuations()
         for set in session.sets where !set.isCompleted {
             context.delete(set)
         }
@@ -632,6 +736,25 @@ final class ActiveWorkout {
         let trained = Set(session.sets.filter(\.isCompleted).map(\.catalogID))
         for note in session.exerciseNotes where note.isEmpty || !trained.contains(note.catalogID) {
             context.delete(note)
+        }
+    }
+
+    /// Cuts the link on any row left continuing a set that won't be in the
+    /// record.
+    ///
+    /// A continuation is always built on top of a set that has already been
+    /// logged, so this only comes up one way: the lifter takes that set back
+    /// and leaves it taken back. `finish` then deletes it as an unlogged set,
+    /// and the row underneath would survive as the exercise's first set still
+    /// claiming it was taken on without rest from something that, as far as
+    /// the record goes, never happened. It is a set on its own now, and the
+    /// only honest thing left to say about it is nothing.
+    private func unlinkOrphanedContinuations() {
+        for set in session.sets where set.isContinuation {
+            let keepsItsSet = session.sets.contains {
+                $0.catalogID == set.catalogID && $0.setIndex < set.setIndex && $0.isCompleted
+            }
+            if !keepsItsSet { set.continuesPreviousSet = nil }
         }
     }
 
