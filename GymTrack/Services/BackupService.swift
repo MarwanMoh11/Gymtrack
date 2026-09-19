@@ -24,6 +24,13 @@ enum BackupService {
         /// Which library exercises the user has put away. Optional like the
         /// rest — an older backup simply restores with nothing hidden.
         var hiddenExercises: [String]?
+        /// What the bundled library knows about the exercises this file names,
+        /// so the file explains itself to whatever reads it — a backup handed
+        /// to an AI coach otherwise has to guess from "Front Squat" that the
+        /// set was quads and a barbell. Optional like the rest: a backup
+        /// written before this existed still restores, and restore ignores the
+        /// section either way.
+        var exerciseCatalog: [CatalogExerciseDTO]?
     }
 
     struct Settings: Codable {
@@ -123,6 +130,36 @@ enum BackupService {
         var trackingRaw: String
     }
 
+    /// A bundled library exercise that something in this file refers to,
+    /// flattened into the archive. Shaped after `CustomExerciseDTO`, which has
+    /// always carried these same facts about the user's own exercises.
+    ///
+    /// Custom exercises stay out of here even when they were trained, because
+    /// `customExercises` already describes them in full: copying one into both
+    /// sections would give a reader two records for the same exercise with no
+    /// rule for which wins, and would tempt a future restore into inserting it
+    /// twice. Resolving an ID means checking both sections.
+    ///
+    /// Nothing reads this back. The bundled library is the source of truth at
+    /// runtime, and seeding exercises from a backup would let a file written by
+    /// an older build shadow an entry the app has since corrected or merged.
+    struct CatalogExerciseDTO: Codable {
+        /// Spelled as the sets and plan items in this file spell it, which
+        /// isn't always the ID the app resolved it to — a set logged under an
+        /// exercise that has since been merged into another keeps the old ID,
+        /// and that's the one a reader has to be able to look up.
+        var catalogID: String
+        var name: String
+        var category: String
+        /// The library's own wording, which runs to dozens of free-text labels.
+        var muscleRaw: [String]
+        /// The same muscles folded into the canonical groups the app credits
+        /// work to — the list worth counting sets against.
+        var muscles: [String]
+        var equipment: [String]
+        var trackingRaw: String
+    }
+
     // MARK: - Export
 
     static func export(context: ModelContext) throws -> URL {
@@ -132,6 +169,7 @@ enum BackupService {
         let bodyMetrics = try context.fetch(FetchDescriptor<BodyMetric>())
         let loadScales = try context.fetch(FetchDescriptor<ExerciseLoadPreference>())
         let hidden = try context.fetch(FetchDescriptor<HiddenExerciseRecord>())
+        let finished = sessions.filter { !$0.isActive }
 
         let archive = Archive(
             settings: Settings(
@@ -154,7 +192,7 @@ enum BackupService {
                                    })
                         })
             },
-            sessions: sessions.filter { !$0.isActive }.map { session in
+            sessions: finished.map { session in
                 SessionDTO(id: session.id, title: session.title, startedAt: session.startedAt,
                            endedAt: session.endedAt, notes: session.notes, planName: session.planName,
                            averageHeartRate: session.averageHeartRate,
@@ -181,7 +219,8 @@ enum BackupService {
             loadScales: loadScales.map {
                 LoadScaleDTO(catalogID: $0.catalogID, unit: $0.unitRaw, increment: $0.increment)
             },
-            hiddenExercises: hidden.map(\.catalogID)
+            hiddenExercises: hidden.map(\.catalogID),
+            exerciseCatalog: referencedCatalog(plans: plans, sessions: finished)
         )
 
         let encoder = JSONEncoder()
@@ -198,6 +237,46 @@ enum BackupService {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         try data.write(to: url, options: .atomic)
         return url
+    }
+
+    /// The library definitions behind the exercises the archive's plans and
+    /// sessions name, and only those — the bundled library runs to hundreds of
+    /// entries, and a backup is a file the user opens and sends on, not a copy
+    /// of the app's resources.
+    ///
+    /// Load scales and the hidden list are read as settings rather than as
+    /// training, so the IDs in them don't pull an exercise in: hiding is how
+    /// the library gets trimmed down to one gym, and following that list would
+    /// put most of the library back in the file it was kept out of.
+    private static func referencedCatalog(plans: [Plan], sessions: [WorkoutSession]) -> [CatalogExerciseDTO] {
+        var ids: Set<String> = []
+        for plan in plans {
+            for day in plan.days {
+                for item in day.items { ids.insert(item.catalogID) }
+            }
+        }
+        for session in sessions {
+            for set in session.sets { ids.insert(set.catalogID) }
+        }
+
+        // Sorted so two exports of unchanged data are the same bytes, which is
+        // what `.sortedKeys` buys everywhere else in the file.
+        return ids.sorted().compactMap { id in
+            // A custom exercise is left to `customExercises`, and an ID that
+            // resolves to nothing at all — a custom exercise deleted out from
+            // under its own history — has nothing to say. The set still
+            // carries the name it was logged under.
+            guard let exercise = ExerciseCatalog.shared.exercise(id: id), !exercise.isCustom else { return nil }
+            return CatalogExerciseDTO(
+                catalogID: id,
+                name: exercise.name,
+                category: exercise.category,
+                muscleRaw: exercise.muscleGroups,
+                muscles: exercise.muscles.map(\.name),
+                equipment: exercise.equipment,
+                trackingRaw: exercise.tracking.rawValue
+            )
+        }
     }
 
     // MARK: - Import
