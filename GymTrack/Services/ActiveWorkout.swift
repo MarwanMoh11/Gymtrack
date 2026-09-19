@@ -470,13 +470,49 @@ final class ActiveWorkout {
 
     func removeExercise(_ group: SessionExerciseGroup) {
         for set in group.sets { context.delete(set) }
+        // The note was about an exercise that is no longer in this session.
+        // Left behind it would describe work the record says never happened.
+        session.dropNote(about: group.catalogID, in: context)
         save()
+    }
+
+    // MARK: - Notes
+
+    /// What's been written about one exercise so far, if anything.
+    func note(for catalogID: String) -> ExerciseNote? { session.note(for: catalogID) }
+
+    func writeNote(_ text: String, about group: SessionExerciseGroup) {
+        session.writeNote(text, about: group.catalogID, named: group.name, in: context)
+        persistNote()
+    }
+
+    func toggleNoteTag(_ tag: NoteTag, about group: SessionExerciseGroup) {
+        session.toggleNoteTag(tag, about: group.catalogID, named: group.name, in: context)
+        persistNote()
+        Haptics.tick()
+    }
+
+    /// Called when a note's field closes, which is the point at which "I typed
+    /// something and took it back" becomes final.
+    func pruneEmptyNotes() {
+        session.pruneEmptyNotes(in: context)
+        persistNote()
+    }
+
+    /// A note changes nothing the Lock Screen, the widgets or the wrist draw,
+    /// and this runs on every keystroke — the full `save()` would put a
+    /// watch message and a widget reload behind each character typed.
+    private func persistNote() {
+        writeThrough()
     }
 
     // MARK: - Ending
 
     /// Drops any sets left unlogged and stamps the session finished.
     func finish() {
+        // Before the unlogged sets go, because which exercises survive is what
+        // decides which notes still have something to be about.
+        pruneNotes()
         for set in session.sets where !set.isCompleted {
             context.delete(set)
         }
@@ -491,6 +527,20 @@ final class ActiveWorkout {
         WidgetPublisher.updateSession(nil)
         recordToHealth()
         Haptics.success()
+    }
+
+    /// What survives the end of the session: a note that says something, about
+    /// an exercise that ended up in the record.
+    ///
+    /// An exercise you logged nothing for is dropped from the session entirely
+    /// — that's what `finish` does with its sets — so a note left on it would
+    /// be the only trace of an exercise the record says you didn't do, and it
+    /// would have nowhere to be read back. It goes with the sets.
+    private func pruneNotes() {
+        let trained = Set(session.sets.filter(\.isCompleted).map(\.catalogID))
+        for note in session.exerciseNotes where note.isEmpty || !trained.contains(note.catalogID) {
+            context.delete(note)
+        }
     }
 
     func discard() {

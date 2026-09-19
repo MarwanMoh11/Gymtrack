@@ -26,12 +26,18 @@ struct ActiveWorkoutView: View {
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                header
-                content
-            }
-
+        VStack(spacing: 0) {
+            header
+            content
+        }
+        // The bar is an inset rather than something floating in a ZStack, the
+        // same way the dock is. Overlaid, it covered whatever the logger put at
+        // the bottom of the screen — which, once a note could be written, meant
+        // the field the keyboard had just raised: iOS scrolls a focused field
+        // to sit exactly above the keyboard, and the bar floats exactly there.
+        // As an inset the scroll view knows the bottom is spoken for and lands
+        // the field above it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if workout.restTimer.isRunning {
                 RestTimerBar(timer: workout.restTimer,
                              subject: workout.ratingSubject,
@@ -209,31 +215,41 @@ struct ActiveWorkoutView: View {
     // MARK: - Body
 
     private var content: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                progressHeader
+        ScrollViewReader { scroll in
+            ScrollView {
+                VStack(spacing: 14) {
+                    progressHeader
 
-                ForEach(workout.groups) { group in
-                    ExerciseLogCard(workout: workout, group: group)
+                    ForEach(workout.groups) { group in
+                        ExerciseLogCard(workout: workout, group: group, scroll: scroll)
+                            .id(group.catalogID)
+                    }
+
+                    Button {
+                        showingAddExercise = true
+                    } label: {
+                        Label("Add exercise", systemImage: "plus")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .padding(.top, 4)
+
+                    discardFooter
                 }
-
-                Button {
-                    showingAddExercise = true
-                } label: {
-                    Label("Add exercise", systemImage: "plus")
-                }
-                .buttonStyle(SecondaryButtonStyle())
-                .padding(.top, 4)
-
-                discardFooter
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                // No allowance for the rest bar here any more: it insets the
+                // scroll view itself, so the space it needs is whatever height
+                // it actually is rather than a number guessed at once.
+                .padding(.bottom, 30)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, workout.restTimer.isRunning ? 100 : 30)
-            .frame(maxWidth: .infinity)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            // A keyboard raised for a note is put away by the same flick that
+            // goes looking for the next exercise, rather than by finding a
+            // button.
+            .scrollDismissesKeyboard(.interactively)
         }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 
     private var progressHeader: some View {
@@ -297,11 +313,20 @@ struct ActiveWorkoutView: View {
 private struct ExerciseLogCard: View {
     @Bindable var workout: ActiveWorkout
     let group: SessionExerciseGroup
+    /// Used to lift this card clear of the rest bar when its note is being
+    /// typed into — see `noteFocused`.
+    let scroll: ScrollViewProxy
 
     @State private var showingDetail = false
+    /// Whether the note's field is open on this card. Off by default and never
+    /// opened by the app — a note is offered, never asked for.
+    @State private var isWriting = false
+    @State private var noteDraft = ""
+    @FocusState private var noteFocused: Bool
 
     private var lastTime: [SetLog] { workout.lastPerformance(for: group.catalogID) }
     private var planItem: PlanItem? { workout.planItem(for: group.catalogID) }
+    private var note: ExerciseNote? { workout.note(for: group.catalogID) }
 
     /// The first set the user hasn't logged — expanded for immediate input.
     private var activeSetID: UUID? {
@@ -311,6 +336,12 @@ private struct ExerciseLogCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+
+            if isWriting {
+                noteEditor
+            } else if let note, !note.isEmpty {
+                writtenNote(note)
+            }
 
             if let suggestion, !group.isComplete, !lastTime.isEmpty {
                 HStack(alignment: .top, spacing: 7) {
@@ -386,6 +417,20 @@ private struct ExerciseLogCard: View {
             }
             .padding(.top, 2)
         }
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: isWriting)
+        // The keyboard only knows to clear itself, and the rest bar floats over
+        // the bottom of the logger — which is exactly where a field raising the
+        // keyboard ends up. Put the card's top under the header instead, so you
+        // can read what you're typing while a rest is running.
+        .onChange(of: noteFocused) { _, focused in
+            guard focused else { return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(320))
+                withAnimation(.easeOut(duration: 0.25)) {
+                    scroll.scrollTo(group.catalogID, anchor: .top)
+                }
+            }
+        }
         .gtCard(padding: 12, dimmed: group.isComplete)
         .sheet(isPresented: $showingDetail) {
             if let catalog = group.catalog {
@@ -414,6 +459,7 @@ private struct ExerciseLogCard: View {
             Text("\(group.completedCount)/\(group.sets.count)")
                 .font(Theme.number(13, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
+            noteButton
             Button { showingDetail = true } label: {
                 Image(systemName: "info.circle")
                     .font(.system(size: 15))
@@ -421,6 +467,76 @@ private struct ExerciseLogCard: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: Note
+
+    /// The way in, and the only prompting there is: an icon in a header that
+    /// already had room for one. It fills in once something has been written,
+    /// so a card carrying a note says so from across the screen.
+    private var noteButton: some View {
+        let written = !(note?.isEmpty ?? true)
+        return Button { isWriting ? closeNote() : openNote() } label: {
+            Image(systemName: written ? "text.bubble.fill" : "text.bubble")
+                .font(.system(size: 15))
+                .foregroundStyle(written ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.textTertiary))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(written ? "Note on \(group.name)" : "Add a note about \(group.name)")
+        .accessibilityHint(written ? "Change what you wrote" : "Optional")
+    }
+
+    /// Tags and a line of text, inside the card the exercise already owns.
+    /// Nothing about it interrupts the set that's up: the expanded set keeps
+    /// its steppers and its Log button exactly where they were, a few
+    /// millimetres further down the card.
+    private var noteEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("NOTE")
+                    .font(Theme.eyebrow)
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.textTertiary)
+                Spacer()
+                Button("Done") { closeNote() }
+                    .font(Theme.rounded(12, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+            }
+
+            NoteEditor(text: $noteDraft,
+                       tags: note?.tags ?? [],
+                       onToggle: { workout.toggleNoteTag($0, about: group) },
+                       focus: $noteFocused)
+        }
+        .padding(.vertical, 2)
+        .onChange(of: noteDraft) { _, text in workout.writeNote(text, about: group) }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func writtenNote(_ note: ExerciseNote) -> some View {
+        Button { openNote() } label: {
+            NoteReadout(text: note.text, tags: note.tags)
+                .gtWell(vertical: 9, horizontal: 11, radius: 12)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Change this note")
+    }
+
+    /// Opening deliberately doesn't raise the keyboard. Most notes are a tag or
+    /// two, and having the screen jump every time one is tapped would be the
+    /// thing that puts you off tapping it mid-workout.
+    private func openNote() {
+        noteDraft = note?.text ?? ""
+        isWriting = true
+        Haptics.tick()
+    }
+
+    private func closeNote() {
+        noteFocused = false
+        isWriting = false
+        // Typing a word and deleting it again leaves nothing behind.
+        workout.pruneEmptyNotes()
+        Haptics.tick()
     }
 
     /// Last session's matching set, paired by position within the exercise.

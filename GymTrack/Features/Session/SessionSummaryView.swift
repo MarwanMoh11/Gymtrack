@@ -26,6 +26,7 @@ struct SessionSummaryView: View {
                     statGrid
                     HealthMetricsCard(session: session)
                     if !prs.isEmpty { prSection }
+                    SessionNoteCard(session: session)
                     breakdown
                 }
                 .padding(16)
@@ -159,6 +160,10 @@ struct SessionSummaryView: View {
                     Text(group.name)
                         .font(Theme.rounded(14, weight: .bold))
                         .foregroundStyle(Theme.ink)
+                    if let note = session.note(for: group.catalogID), !note.isEmpty {
+                        NoteReadout(text: note.text, tags: note.tags)
+                            .padding(.bottom, 2)
+                    }
                     FlowRow(spacing: 6) {
                         ForEach(group.sets.filter(\.isCompleted)) { set in
                             // A rated set carries a dot in the colour of the
@@ -261,11 +266,21 @@ struct SessionDetailView: View {
 
                 HealthMetricsCard(session: session)
 
+                // Still writable here, because the summary it was offered on is
+                // shown once. What you remember on the way home has somewhere
+                // to go; the per-exercise notes stay as they were written,
+                // which is what keeps this screen a record rather than a draft.
+                SessionNoteCard(session: session)
+
                 ForEach(session.exerciseGroups) { group in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(group.name)
                             .font(Theme.rounded(15, weight: .bold))
                             .foregroundStyle(Theme.ink)
+                        if let note = session.note(for: group.catalogID), !note.isEmpty {
+                            NoteReadout(text: note.text, tags: note.tags)
+                                .padding(.bottom, 2)
+                        }
                         ForEach(Array(group.sets.filter(\.isCompleted).enumerated()), id: \.element.id) { index, set in
                             HStack {
                                 Text("Set \(index + 1)")

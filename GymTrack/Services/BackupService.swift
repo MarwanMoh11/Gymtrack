@@ -77,6 +77,8 @@ enum BackupService {
         var title: String
         var startedAt: Date
         var endedAt: Date?
+        /// What the lifter said about the whole session. Has always been in the
+        /// file; until recently nothing in the app could write to it.
         var notes: String
         var planName: String
         // Optional so backups written before Health support still restore.
@@ -84,7 +86,27 @@ enum BackupService {
         var maxHeartRate: Double?
         var activeEnergyKcal: Double?
         var wasWatchDriven: Bool?
+        /// The session note's tags — `NoteTag` raw values. Optional like the
+        /// rest, and absent rather than empty on a session nobody tagged, so
+        /// the file doesn't carry a line of nothing per session.
+        var noteTags: [String]?
+        /// What was said about individual exercises. Absent when nothing was.
+        var exerciseNotes: [ExerciseNoteDTO]?
         var sets: [SetDTO]
+    }
+
+    /// One exercise's note from one session — the tags and the sentence, which
+    /// are independent of each other and of the sets around them.
+    ///
+    /// Carries the exercise's name as well as its ID, the way `SetDTO` does, so
+    /// a reader can follow the note without resolving anything: a note is the
+    /// part of this file a person wrote on purpose, and it should be legible on
+    /// its own.
+    struct ExerciseNoteDTO: Codable {
+        var catalogID: String
+        var exerciseName: String
+        var text: String
+        var tags: [String]
     }
 
     struct SetDTO: Codable {
@@ -194,11 +216,16 @@ enum BackupService {
             },
             sessions: finished.map { session in
                 SessionDTO(id: session.id, title: session.title, startedAt: session.startedAt,
-                           endedAt: session.endedAt, notes: session.notes, planName: session.planName,
+                           endedAt: session.endedAt,
+                           // Trimmed: a field that was opened and cleared again
+                           // shouldn't reach the file as a note made of spaces.
+                           notes: session.trimmedNotes, planName: session.planName,
                            averageHeartRate: session.averageHeartRate,
                            maxHeartRate: session.maxHeartRate,
                            activeEnergyKcal: session.activeEnergyKcal,
                            wasWatchDriven: session.wasWatchDriven,
+                           noteTags: session.noteTagsRaw.isEmpty ? nil : session.noteTags.map(\.rawValue),
+                           exerciseNotes: exerciseNotes(of: session),
                            sets: session.sets.map { set in
                                SetDTO(catalogID: set.catalogID, exerciseName: set.exerciseName,
                                       exerciseOrder: set.exerciseOrder, setIndex: set.setIndex,
@@ -237,6 +264,22 @@ enum BackupService {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         try data.write(to: url, options: .atomic)
         return url
+    }
+
+    /// The notes kept on individual exercises in one session, in the order they
+    /// were trained. Nothing is written for a session nobody wrote about.
+    ///
+    /// An empty note can't normally survive the end of a session, but the check
+    /// is here too: this file is the one thing that outlives the app, and a
+    /// note that says nothing would read to anything parsing it as a lifter who
+    /// had something to report and didn't say what.
+    private static func exerciseNotes(of session: WorkoutSession) -> [ExerciseNoteDTO]? {
+        let notes = session.orderedExerciseNotes.filter { !$0.isEmpty }
+        guard !notes.isEmpty else { return nil }
+        return notes.map {
+            ExerciseNoteDTO(catalogID: $0.catalogID, exerciseName: $0.exerciseName,
+                            text: $0.trimmedText, tags: $0.tags.map(\.rawValue))
+        }
     }
 
     /// The library definitions behind the exercises the archive's plans and
@@ -336,7 +379,22 @@ enum BackupService {
             session.maxHeartRate = dto.maxHeartRate
             session.activeEnergyKcal = dto.activeEnergyKcal
             session.wasWatchDriven = dto.wasWatchDriven ?? false
+            // Tags the app doesn't know are dropped rather than stored: a value
+            // nothing can draw would sit in the record unreadable and be
+            // written back out as though it had been understood.
+            session.noteTagsRaw = NoteTag.resolve(dto.noteTags ?? []).map(\.rawValue)
             context.insert(session)
+
+            for noteDTO in dto.exerciseNotes ?? [] {
+                let tags = NoteTag.resolve(noteDTO.tags)
+                let text = noteDTO.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty || !tags.isEmpty else { continue }
+                let note = ExerciseNote(catalogID: noteDTO.catalogID, exerciseName: noteDTO.exerciseName)
+                note.text = text
+                note.tags = tags
+                note.session = session
+                context.insert(note)
+            }
 
             for setDTO in dto.sets {
                 let set = SetLog(catalogID: setDTO.catalogID, exerciseName: setDTO.exerciseName,
@@ -393,6 +451,7 @@ enum BackupService {
         for item in try context.fetch(FetchDescriptor<PlanItem>()) { context.delete(item) }
         for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
         for set in try context.fetch(FetchDescriptor<SetLog>()) { context.delete(set) }
+        for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
 

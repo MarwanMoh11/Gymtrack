@@ -156,7 +156,14 @@ final class WorkoutSession {
     var title: String = ""
     var startedAt: Date = Date()
     var endedAt: Date?
+    /// What the lifter had to say about the session as a whole, in their own
+    /// words. Written on the summary and still editable from history — never
+    /// asked for, and empty is the normal state.
     var notes: String = ""
+    /// The same note's tags, as `NoteTag` raw values. Kept beside the sentence
+    /// rather than inside it so a reader can count the flat weeks without
+    /// parsing anybody's prose; either half works with the other missing.
+    var noteTagsRaw: [String] = []
     var planDayID: UUID?
     var planName: String = ""
     /// An exercise being worked out of turn — chosen from the watch, or by
@@ -179,6 +186,11 @@ final class WorkoutSession {
 
     @Relationship(deleteRule: .cascade, inverse: \SetLog.session)
     var sets: [SetLog] = []
+
+    /// What was said about individual exercises today. A row exists only where
+    /// something was actually written — see `ExerciseNote`.
+    @Relationship(deleteRule: .cascade, inverse: \ExerciseNote.session)
+    var exerciseNotes: [ExerciseNote] = []
 
     init(title: String, planDayID: UUID? = nil, planName: String = "", startedAt: Date = .now) {
         self.id = UUID()
@@ -244,6 +256,41 @@ final class WorkoutSession {
 
     var day: String {
         startedAt.formatted(.dateTime.weekday(.wide))
+    }
+
+    // MARK: Notes
+
+    /// The session note's tags, as the words rather than the raw strings.
+    var noteTags: [NoteTag] {
+        get { NoteTag.resolve(noteTagsRaw) }
+        set { noteTagsRaw = newValue.map(\.rawValue) }
+    }
+
+    /// The sentence with the whitespace taken off — what's left is what was
+    /// actually said. A field opened, typed into and cleared again has to read
+    /// as nothing written, not as a note made of spaces.
+    var trimmedNotes: String {
+        notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether anything at all was said about the session as a whole.
+    var hasSessionNote: Bool { !trimmedNotes.isEmpty || !noteTagsRaw.isEmpty }
+
+    /// What was written about one exercise today, if anything was.
+    func note(for catalogID: String) -> ExerciseNote? {
+        exerciseNotes.first { $0.catalogID == catalogID }
+    }
+
+    /// Exercise notes in the order their exercises were trained, so the record
+    /// reads down the session rather than in whatever order the rows come back.
+    var orderedExerciseNotes: [ExerciseNote] {
+        let order = Dictionary(sets.map { ($0.catalogID, $0.exerciseOrder) },
+                               uniquingKeysWith: min)
+        return exerciseNotes.sorted {
+            let left = order[$0.catalogID] ?? .max
+            let right = order[$1.catalogID] ?? .max
+            return left == right ? $0.exerciseName < $1.exerciseName : left < right
+        }
     }
 
     /// Whether there's anything from Health worth showing on the summary. A
@@ -361,6 +408,60 @@ final class SetLog {
         guard let rpe else { return nil }
         return SetFeel.nearest(to: rpe)
     }
+}
+
+// MARK: - Exercise note
+
+/// What the lifter had to say about one exercise on one day — the pinched
+/// shoulder, the machine that was taken, the day it all moved easily.
+///
+/// Its own model because there is nothing else to hang it on:
+/// `SessionExerciseGroup` is computed out of the sets each time it's asked for,
+/// and `PlanItem.notes` is a note on the *prescription* — it says what to do
+/// every time, not what happened once.
+///
+/// A row exists only where something was written. Opening the field, typing and
+/// clearing it again leaves no note at all, the same way an un-answered effort
+/// question leaves no rating: a note that says nothing is indistinguishable
+/// from a mis-tap, and a record whose value is that everything in it happened
+/// can't afford rows that mean maybe.
+@Model
+final class ExerciseNote {
+    var id: UUID = UUID()
+    var catalogID: String = ""
+    /// Denormalised like `SetLog.exerciseName`, so the note still says what
+    /// it's about if a custom exercise is deleted out from under it.
+    var exerciseName: String = ""
+    var text: String = ""
+    /// `NoteTag` raw values. Tags and sentence are independent: either can be
+    /// the whole note.
+    var tagsRaw: [String] = []
+    var updatedAt: Date = Date()
+
+    var session: WorkoutSession?
+
+    init(catalogID: String, exerciseName: String) {
+        self.id = UUID()
+        self.catalogID = catalogID
+        self.exerciseName = exerciseName
+        self.updatedAt = .now
+    }
+
+    var tags: [NoteTag] {
+        get { NoteTag.resolve(tagsRaw) }
+        set {
+            tagsRaw = newValue.map(\.rawValue)
+            updatedAt = .now
+        }
+    }
+
+    var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Nothing left to keep. Checked after every edit — this is what makes the
+    /// row disappear rather than lingering as an empty one.
+    var isEmpty: Bool { trimmedText.isEmpty && tagsRaw.isEmpty }
 }
 
 // MARK: - Custom exercise

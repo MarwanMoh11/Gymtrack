@@ -33,7 +33,7 @@ struct GymTrackApp: App {
             )
             container = try ModelContainer(
                 for: Plan.self, PlanDay.self, PlanItem.self,
-                WorkoutSession.self, SetLog.self,
+                WorkoutSession.self, SetLog.self, ExerciseNote.self,
                 CustomExerciseRecord.self, BodyMetric.self,
                 ExerciseLoadPreference.self, HiddenExerciseRecord.self,
                 configurations: ModelConfiguration(url: Self.storeURL)
@@ -44,7 +44,7 @@ struct GymTrackApp: App {
             let config = ModelConfiguration(isStoredInMemoryOnly: true)
             container = try! ModelContainer(
                 for: Plan.self, PlanDay.self, PlanItem.self,
-                WorkoutSession.self, SetLog.self,
+                WorkoutSession.self, SetLog.self, ExerciseNote.self,
                 CustomExerciseRecord.self, BodyMetric.self,
                 ExerciseLoadPreference.self, HiddenExerciseRecord.self,
                 configurations: config
