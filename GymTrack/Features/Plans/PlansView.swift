@@ -4,9 +4,11 @@ import SwiftData
 struct PlansView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Plan.createdAt) private var plans: [Plan]
+    @Query(filter: #Predicate<WorkoutSession> { $0.endedAt == nil }) private var openSessions: [WorkoutSession]
 
     @State private var showingTemplates = false
     @State private var planPendingDeletion: Plan?
+    @State private var dayPendingDeletion: PlanDay?
 
     private var activePlan: Plan? { plans.first(where: \.isActive) ?? plans.first }
 
@@ -75,7 +77,29 @@ struct PlansView: View {
             } message: {
                 Text("Sessions you've already logged are kept — only the routine is removed.")
             }
+            .confirmationDialog(dayPendingDeletion.map { "Delete \($0.name)?" } ?? "",
+                                isPresented: Binding(get: { dayPendingDeletion != nil },
+                                                     set: { if !$0 { dayPendingDeletion = nil } }),
+                                titleVisibility: .visible) {
+                Button("Delete day", role: .destructive) {
+                    if let day = dayPendingDeletion {
+                        PlanDay.remove(day, in: context)
+                        try? context.save()
+                        Haptics.tick()
+                    }
+                    dayPendingDeletion = nil
+                }
+                Button("Cancel", role: .cancel) { dayPendingDeletion = nil }
+            } message: {
+                Text("Its exercises go with it. Sessions you've already logged from it are kept.")
+            }
         }
+    }
+
+    /// Whether a running session was started from this day — see
+    /// `DayEditorView.isInUse`.
+    private func isInUse(_ day: PlanDay) -> Bool {
+        openSessions.contains { $0.planDayID == day.id }
     }
 
     // MARK: - Active plan
@@ -120,6 +144,13 @@ struct PlansView: View {
                         dayRow(day)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        if !isInUse(day) {
+                            Button(role: .destructive) { dayPendingDeletion = day } label: {
+                                Label("Delete day", systemImage: "trash")
+                            }
+                        }
+                    }
                 }
             }
         }

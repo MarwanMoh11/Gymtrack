@@ -6,9 +6,21 @@ import SwiftData
 struct DayEditorView: View {
     @Bindable var day: PlanDay
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @Query(filter: #Predicate<WorkoutSession> { $0.endedAt == nil }) private var openSessions: [WorkoutSession]
 
     @State private var showingPicker = false
     @State private var editingItem: PlanItem?
+    @State private var confirmingDelete = false
+    /// Set once the lifter has confirmed; the day goes when this screen does.
+    /// Deleting it while the screen is still up would have the title and every
+    /// row below it read a model whose row is gone, which SwiftData traps on.
+    @State private var deleteOnLeave = false
+
+    /// A session from this day is running, and it is reading this day's
+    /// prescriptions for its rests and its suggestions. The day can't go while
+    /// something is standing on it.
+    private var isInUse: Bool { openSessions.contains { $0.planDayID == day.id } }
 
     var body: some View {
         List {
@@ -62,6 +74,22 @@ struct DayEditorView: View {
                     .listRowBackground(Theme.surface)
                 }
             }
+
+            // The way back out of "Add day". Until this existed a day, once
+            // added, was in the routine for good.
+            Section {
+                Button(role: .destructive) { confirmingDelete = true } label: {
+                    Label("Delete this day", systemImage: "trash")
+                        .font(Theme.rounded(15, weight: .semibold))
+                        .foregroundStyle(isInUse ? Theme.textTertiary : Theme.negative)
+                }
+                .disabled(isInUse)
+            } footer: {
+                if isInUse {
+                    Text("A session from this day is running. Finish it, then this day can go.")
+                }
+            }
+            .listRowBackground(Theme.surface)
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -77,7 +105,20 @@ struct DayEditorView: View {
         .sheet(item: $editingItem) { item in
             PlanItemEditor(item: item)
         }
-        .onDisappear { try? context.save() }
+        .confirmationDialog("Delete \(day.name.isEmpty ? "this day" : day.name)?",
+                            isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete day", role: .destructive) {
+                deleteOnLeave = true
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its exercises go with it. Sessions you've already logged from it are kept.")
+        }
+        .onDisappear {
+            if deleteOnLeave { PlanDay.remove(day, in: context) }
+            try? context.save()
+        }
     }
 
     private func itemRow(_ item: PlanItem) -> some View {
@@ -146,6 +187,17 @@ struct DayEditorView: View {
     }
 }
 
+extension PlanDay {
+    /// Takes a day out of its routine and closes the gap it leaves, so the days
+    /// that remain still run 0, 1, 2 — `order` is what lays the week out, and a
+    /// hole in it would have the next day added land beside an existing one.
+    static func remove(_ day: PlanDay, in context: ModelContext) {
+        let remaining = (day.plan?.orderedDays ?? []).filter { $0.id != day.id }
+        context.delete(day)
+        for (index, other) in remaining.enumerated() { other.order = index }
+    }
+}
+
 // MARK: - Item editor
 
 struct PlanItemEditor: View {
@@ -156,6 +208,17 @@ struct PlanItemEditor: View {
 
     /// What this exercise is loaded in — the same ladder the logger will use.
     private var scale: LoadScale { item.loadScale }
+
+    /// The bottom of the range, taking the top up with it. Raised past the top
+    /// on its own it left the plan asking for 15–12, and the progression, which
+    /// reads the top as the point to add weight, then offered more load to
+    /// someone who hadn't reached the bottom yet.
+    private var lowRepsBinding: Binding<Int> {
+        Binding(get: { item.targetRepsLow }, set: { low in
+            item.targetRepsLow = low
+            if item.targetRepsHigh < low { item.targetRepsHigh = low }
+        })
+    }
 
     var body: some View {
         NavigationStack {
@@ -174,7 +237,7 @@ struct PlanItemEditor: View {
                     .listRowBackground(Theme.surface)
                 } else {
                     Section("Rep range") {
-                        Stepper("Low: \(item.targetRepsLow)", value: $item.targetRepsLow, in: 1...50)
+                        Stepper("Low: \(item.targetRepsLow)", value: lowRepsBinding, in: 1...50)
                         Stepper("High: \(item.targetRepsHigh)", value: $item.targetRepsHigh, in: item.targetRepsLow...60)
                     }
                     .listRowBackground(Theme.surface)
