@@ -91,6 +91,20 @@ final class WatchCommandCenter {
             save(context)
             pushMirror(context: context)
 
+        case .rateSet(let rating):
+            guard rating.isValid,
+                  let ratedSession = session(id: rating.sessionID, in: context),
+                  let set = ratedSession.sets.first(where: { $0.id == rating.setID }),
+                  set.isCompleted, rating.matches(set.completedAt) else { return }
+            guard set.rpe != rating.rpe else {
+                pushMirror(context: context)
+                return
+            }
+            set.rpe = rating.rpe
+            if set.loadNudgeOutcome == .declined { set.clearLoadNudge() }
+            save(context)
+            pushMirror(context: context)
+
         case .announceStart(let id, let moment):
             // The same rule `ActiveWorkout.announceStart` applies, and it has
             // to be the same one: this is the path that runs with the phone
@@ -333,7 +347,9 @@ enum WatchSnapshotFactory {
                             targetRepsHigh: set.targetRepsHigh,
                             isCompleted: set.isCompleted,
                             continuation: set.isContinuation,
-                            startedAt: set.startedAt
+                            startedAt: set.startedAt,
+                            completedAt: set.completedAt,
+                            rpe: set.rpe
                         )
                     },
                     lastTimeLabel: lastTimeLabel(group.catalogID),
@@ -347,7 +363,8 @@ enum WatchSnapshotFactory {
             restTotalSeconds: rest.total,
             restAutoStart: AppSettings.shared.restTimerAutoStart,
             volumeKg: session.totalVolumeKg,
-            unit: AppSettings.shared.weightUnit
+            unit: AppSettings.shared.weightUnit,
+            effortEnabled: AppSettings.shared.trackRPE
         )
         // Asked of the snapshot rather than of the session, so this answer and
         // the watch's own — made while a log of its own is still unconfirmed —

@@ -32,6 +32,10 @@ struct WatchLoggerView: View {
     /// The numbers the lifter has dialled themselves on the set that's up.
     /// Cleared when the logger moves to another set — see `adopt`.
     @State private var touched: Set<Field> = []
+    /// Held independently of the next set, which advances as soon as logging succeeds.
+    @State private var effortSetID: UUID?
+    @State private var effortCompletedAt: Date?
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @State private var showingExercises = false
     @FocusState private var isCrownFocused: Bool
 
@@ -53,6 +57,49 @@ struct WatchLoggerView: View {
     private var phase: SessionPhase { session.phase(resting: rest.isRunning) }
 
     var body: some View {
+        Group {
+            if let subject = effortSet, let owner = effortExercise {
+                ScrollView {
+                    WatchSetFeelView(
+                        exerciseName: owner.name, setNumber: subject.index + 1,
+                        current: subject.rpe.map(SetFeel.nearest(to:)),
+                        onPick: { feel in
+                            connector.rateSet(subject, rpe: subject.rpe == feel.rawValue ? nil : feel.rawValue)
+                            WatchHaptics.tick()
+                            dismissEffort()
+                        },
+                        onSkip: { dismissEffort() },
+                        onUndo: { undo(subject) }
+                    )
+                    .padding(.horizontal, 2)
+                }
+            } else {
+                logger
+            }
+        }
+        .navigationTitle(effortSet == nil ? session.title : "Set logged")
+        .watchScreenTint(effortSet == nil ? phase : .working)
+        .sheet(isPresented: $showingExercises) {
+            WatchExerciseListView(session: session, connector: connector)
+        }
+        .onAppear { load(set) }
+        .onChange(of: set) { was, now in
+            if was?.id == now?.id { adopt(now) } else { load(now) }
+        }
+        .onChange(of: session.sessionID) { _, _ in dismissEffort() }
+        .onChange(of: session.effortEnabled) { _, enabled in
+            if enabled != true { dismissEffort() }
+        }
+        .task(id: effortSetID) {
+            guard effortSetID != nil, !voiceOverEnabled else { return }
+            // Ignoring the question never requires a dismissal. VoiceOver
+            // readers keep control of the pace instead of racing a timeout.
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            dismissEffort()
+        }
+    }
+
+    private var logger: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 8) {
@@ -78,6 +125,7 @@ struct WatchLoggerView: View {
                     } else {
                         allDone
                     }
+                    effortButton
                     undoButton
                 }
                 .padding(.horizontal, 2)
@@ -95,18 +143,23 @@ struct WatchLoggerView: View {
                 }
             }
         }
-        .navigationTitle(session.title)
-        .watchScreenTint(phase)
-        .sheet(isPresented: $showingExercises) {
-            WatchExerciseListView(session: session, connector: connector)
+    }
+
+    private var effortSet: WatchSetSnapshot? {
+        session.allSets.first {
+            guard $0.id == effortSetID, $0.isCompleted,
+                  let actual = $0.completedAt, let expected = effortCompletedAt else { return false }
+            return abs(actual.timeIntervalSince(expected)) < 0.001
         }
-        .onAppear { load(set) }
-        .onChange(of: set) { was, now in
-            // A different set starts the dials over. The same set coming back
-            // changed is the phone revising what you are about to lift, which
-            // is worth following rather than ignoring.
-            if was?.id == now?.id { adopt(now) } else { load(now) }
-        }
+    }
+
+    private var effortExercise: WatchExerciseSnapshot? {
+        session.exercises.first { $0.sets.contains { $0.id == effortSetID } }
+    }
+
+    private func dismissEffort() {
+        effortSetID = nil
+        effortCompletedAt = nil
     }
 
     // MARK: - Header
@@ -532,12 +585,18 @@ struct WatchLoggerView: View {
 
     private func log(set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) {
         WatchHaptics.log()
-        connector.logSet(
+        let moment = connector.logSet(
             set,
             weightKg: scale.kilograms(weightDisplay),
             reps: Int(repsValue),
             seconds: Int(secondsValue)
         )
+        editing = nil
+        isCrownFocused = false
+        if session.effortEnabled == true {
+            effortCompletedAt = moment
+            effortSetID = set.id
+        }
         // Start the rest here rather than waiting for the phone to say so —
         // the phone may be in a locker, and the countdown is the reason the
         // watch is on your wrist.
@@ -565,17 +624,7 @@ struct WatchLoggerView: View {
     private var undoButton: some View {
         if let last = lastCompletedSet {
             Button {
-                connector.undoSet(last)
-                // The rest belonged to the set being taken back. Stopped here
-                // rather than waiting for the phone to say so — a locally
-                // started rest ignores a contradicting sync for three seconds.
-                // `stop()` carries its own tick, hence the else.
-                if rest.isRunning {
-                    rest.stop()
-                    connector.send(.stopRest)
-                } else {
-                    WatchHaptics.tick()
-                }
+                undo(last)
             } label: {
                 Label("Undo last set", systemImage: "arrow.uturn.backward")
             }
@@ -583,11 +632,46 @@ struct WatchLoggerView: View {
         }
     }
 
-    /// The most recently logged set — the one an undo should take back.
+    /// A skipped answer stays available during the rest, and a mis-tap can be
+    /// corrected without undoing the set. Picking the same answer clears it.
+    @ViewBuilder
+    private var effortButton: some View {
+        if session.effortEnabled == true, let last = lastCompletedSet, let moment = last.completedAt {
+            Button {
+                effortCompletedAt = moment
+                effortSetID = last.id
+                editing = nil
+                isCrownFocused = false
+            } label: {
+                if let rpe = last.rpe {
+                    Text("Last set: \(SetFeel.nearest(to: rpe).label)")
+                } else {
+                    Text("Rate last set")
+                }
+            }
+            .buttonStyle(WatchQuietButtonStyle(tint: Theme.accent, size: 12))
+            .accessibilityHint("Change difficulty. Tap the selected answer to clear it")
+        }
+    }
+
+    private func undo(_ set: WatchSetSnapshot) {
+        dismissEffort()
+        connector.undoSet(set)
+        if rest.isRunning {
+            rest.stop()
+            connector.send(.stopRest)
+        } else {
+            WatchHaptics.tick()
+        }
+    }
+
+    /// Completion order matters when the lifter works through exercises out of order.
     private var lastCompletedSet: WatchSetSnapshot? {
-        session.exercises
-            .flatMap(\.sets)
-            .last { $0.isCompleted }
+        let completed = session.allSets.filter(\.isCompleted)
+        let stamped = completed.filter { $0.completedAt != nil }
+        return stamped.max {
+            ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast)
+        } ?? completed.last
     }
 
     // MARK: - State

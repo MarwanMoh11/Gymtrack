@@ -50,6 +50,10 @@ struct WatchSetSnapshot: Codable, Hashable, Identifiable, Sendable {
     /// Absent means nobody announced anything, which is the ordinary case and
     /// has to stay distinguishable from a set that began at some unknown time.
     var startedAt: Date?
+    /// Identifies the completion an effort answer belongs to, including an undo and re-log.
+    var completedAt: Date?
+    /// Absent until the lifter explicitly answers; never inferred from the load or reps.
+    var rpe: Double?
 
     /// A continuation's weight was chosen for that row alone, so it neither
     /// carries forward onto the sets still to come nor accepts a load carried
@@ -120,6 +124,8 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
     var restAutoStart: Bool
     var volumeKg: Double
     var unit: WeightUnit
+    /// Optional for older mirrors. Only a phone that supports answers offers the question.
+    var effortEnabled: Bool?
     /// True while the phone thinks a rest is running.
     var isResting: Bool { restEndsAt != nil }
 
@@ -266,6 +272,7 @@ enum WatchCommand: Codable, Hashable, Sendable {
     /// still decodes; see `loggedMoment` for what a command without one gets.
     case logSet(id: UUID, weightKg: Double, reps: Int, seconds: Int, at: Date?)
     case undoSet(id: UUID)
+    case rateSet(WatchSetRating)
     /// "I'm starting this set, now." The moment travels with the command
     /// rather than being stamped on arrival: out of range this sits in the
     /// `transferUserInfo` queue until the phone is nearby again, and a phone

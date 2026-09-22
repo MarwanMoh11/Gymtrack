@@ -79,6 +79,9 @@ struct RootView: View {
         // off a change the view has already settled, rather than at each of the
         // six call sites that start or end a session.
         .onChange(of: activeWorkout?.session.id) { _, _ in publishWidgets() }
+        .onChange(of: AppSettings.shared.trackRPE) { _, _ in
+            activeWorkout?.pushToWatch()
+        }
         // Restamp the card on the way out — that's the moment it becomes the
         // thing the user is looking at — and on the way back in, since the rest
         // timer can't tick while the app is suspended.

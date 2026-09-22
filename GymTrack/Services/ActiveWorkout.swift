@@ -920,6 +920,24 @@ final class ActiveWorkout {
                      at: WatchCommand.loggedMoment(loggedAt))
             return true
 
+        case .rateSet(let rating):
+            guard rating.sessionID == session.id else { return false }
+            guard rating.isValid,
+                  let set = session.sets.first(where: { $0.id == rating.setID }),
+                  set.isCompleted, rating.matches(set.completedAt) else { return true }
+            // Delivery may repeat. The phone's tap gesture toggles an answer,
+            // but a repeated message must leave the explicit answer intact.
+            guard set.rpe != rating.rpe else {
+                pushToWatch()
+                return true
+            }
+            if let rpe = rating.rpe, let feel = SetFeel(rawValue: rpe) {
+                rate(set, feel: feel)
+            } else {
+                clearRating(set)
+            }
+            return true
+
         case .undoSet(let id):
             guard let set = session.sets.first(where: { $0.id == id }) else { return true }
             uncomplete(set)

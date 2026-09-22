@@ -4,7 +4,7 @@ import os
 
 /// The watch's end of the link.
 ///
-/// The watch keeps no database. It draws the last mirror the phone sent and
+/// The watch keeps no workout database. It draws the last mirror the phone sent and
 /// sends back a command for anything the user does — which means a set logged
 /// here goes through the phone's own logging path, with the same personal
 /// record check and load carry-forward, and comes back in the next mirror.
@@ -31,6 +31,14 @@ final class WatchConnector: NSObject {
     /// at the weight the lifter had just moved away from.
     private var pendingCompletions: [UUID: PendingLog] = [:]
     private var pendingUndos: Set<UUID> = []
+    private static let ratingsKey = "watch.pendingSetRatings"
+    private var ratings = WatchRatingOutbox() {
+        didSet {
+            if let data = try? JSONEncoder().encode(ratings) {
+                UserDefaults.standard.set(data, forKey: Self.ratingsKey)
+            }
+        }
+    }
     /// Starts announced here that the phone hasn't confirmed yet, and the
     /// moment each was announced. The moment is kept rather than recomputed
     /// because it is the measurement: out of range the command waits in the
@@ -50,11 +58,18 @@ final class WatchConnector: NSObject {
         var weightKg: Double
         var reps: Int
         var seconds: Int
+        var completedAt: Date
     }
 
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack.watchkitapp", category: "Connector")
 
-    private override init() { super.init() }
+    private override init() {
+        super.init()
+        if let data = UserDefaults.standard.data(forKey: Self.ratingsKey),
+           let saved = try? JSONDecoder().decode(WatchRatingOutbox.self, from: data) {
+            ratings = saved
+        }
+    }
 
     // MARK: - Lifecycle
 
@@ -106,9 +121,18 @@ final class WatchConnector: NSObject {
                 set.isCompleted = true
                 set.weightKg = pending.weightKg
                 set.reps = pending.reps
+                set.completedAt = pending.completedAt
+                set.rpe = nil
                 if exercise.tracking == .duration { set.seconds = pending.seconds }
             }
-            if pendingUndos.contains(set.id) { set.isCompleted = false }
+            if let entry = ratings.entries[set.id], entry.rating.matches(set.completedAt), set.isCompleted {
+                set.rpe = entry.rating.rpe
+            }
+            if pendingUndos.contains(set.id) {
+                set.isCompleted = false
+                set.completedAt = nil
+                set.rpe = nil
+            }
             if let started = pendingStarts[set.id] { set.startedAt = started }
             if pendingCancels.contains(set.id) { set.startedAt = nil }
             return set
@@ -137,7 +161,9 @@ final class WatchConnector: NSObject {
     /// has only moved between exercises has nothing to lose by walking away,
     /// and the only way an unsent start is lost is walking away without logging
     /// the set it belongs to — which makes it a set nobody did.
-    var hasUnsyncedWork: Bool { !pendingCompletions.isEmpty || !pendingUndos.isEmpty }
+    var hasUnsyncedWork: Bool {
+        !pendingCompletions.isEmpty || !pendingUndos.isEmpty || !ratings.entries.isEmpty
+    }
 
     /// Whether anything at all here still has to be drawn over the mirror.
     private var hasPendingChanges: Bool {
@@ -169,13 +195,30 @@ final class WatchConnector: NSObject {
     /// locker or left at home, in which case this command waits in the delivery
     /// queue and the phone's own clock on arrival describes the walk back
     /// rather than the set.
-    func logSet(_ set: WatchSetSnapshot, weightKg: Double, reps: Int, seconds: Int) {
+    @discardableResult
+    func logSet(_ set: WatchSetSnapshot, weightKg: Double, reps: Int, seconds: Int) -> Date {
+        let moment = Date()
         pendingUndos.remove(set.id)
-        pendingCompletions[set.id] = PendingLog(weightKg: weightKg, reps: reps, seconds: seconds)
-        send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds, at: Date()))
+        ratings.remove(set.id)
+        pendingCompletions[set.id] = PendingLog(weightKg: weightKg, reps: reps, seconds: seconds,
+                                               completedAt: moment)
+        send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds, at: moment))
+        return moment
+    }
+
+    func rateSet(_ set: WatchSetSnapshot, rpe: Double?) {
+        guard let session, set.isCompleted, let moment = set.completedAt else { return }
+        let rating = WatchSetRating(sessionID: session.sessionID, setID: set.id, completedAt: moment, rpe: rpe)
+        guard rating.isValid else { return }
+        let confirmed = mirror.session?.allSets.contains {
+            $0.id == set.id && $0.isCompleted && rating.matches($0.completedAt)
+        } == true
+        ratings.record(rating, confirmed: confirmed)
+        send(.rateSet(rating))
     }
 
     func undoSet(_ set: WatchSetSnapshot) {
+        ratings.remove(set.id)
         pendingCompletions.removeValue(forKey: set.id)
         pendingUndos.insert(set.id)
         // Whatever the phone knows about this set's start goes with it — that
@@ -232,6 +275,11 @@ final class WatchConnector: NSObject {
     /// Drops the optimistic overlay for anything the phone has now agreed with.
     private func reconcile(with session: WatchSessionSnapshot?) {
         guard let session else {
+            // The session can end before its final answer is echoed. The phone
+            // accepts ratings for finished sessions too, so hand delivery to
+            // WatchConnectivity before retiring the local overlay.
+            for entry in ratings.entries.values { send(.rateSet(entry.rating)) }
+            ratings = WatchRatingOutbox()
             pendingCompletions.removeAll()
             pendingUndos.removeAll()
             pendingStarts.removeAll()
@@ -240,7 +288,15 @@ final class WatchConnector: NSObject {
             return
         }
         let sets = Dictionary(session.allSets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        pendingCompletions = pendingCompletions.filter { sets[$0.key]?.isCompleted == false }
+        for rating in ratings.reconcile(with: session) { send(.rateSet(rating)) }
+        pendingCompletions = pendingCompletions.filter { id, pending in
+            guard let set = sets[id] else { return false }
+            guard set.isCompleted else { return true }
+            guard let moment = set.completedAt else { return false }
+            // A mirror of the completion before an undo must not acknowledge
+            // a new log of that same row and replace its fresh timestamp.
+            return abs(moment.timeIntervalSince(pending.completedAt)) >= 0.001
+        }
         pendingUndos = pendingUndos.filter { sets[$0]?.isCompleted == true }
         pendingStarts = pendingStarts.filter { sets[$0.key]?.startedAt == nil }
         pendingCancels = pendingCancels.filter { sets[$0]?.startedAt != nil }
@@ -269,7 +325,10 @@ extension WatchConnector: WCSessionDelegate {
             if !session.receivedApplicationContext.isEmpty {
                 self.receive(session.receivedApplicationContext)
             }
-            if state == .activated { self.requestMirror() }
+            if state == .activated {
+                for entry in self.ratings.entries.values { self.send(.rateSet(entry.rating)) }
+                self.requestMirror()
+            }
         }
     }
 

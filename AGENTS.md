@@ -51,7 +51,7 @@ negotiable:
   `WorkoutSession`, `SetLog`, `ExerciseNote`, and the derived `SessionExerciseGroup`.
 - `Models/CatalogExercise.swift` — `ExerciseCatalog.shared`, ~414 bundled
   exercises from a JSON resource, plus the user's custom ones.
-- `Models/SetFeel.swift` — the four effort answers. Stored as the 6–10 number the
+- `GymTrackShared/SetFeel.swift` — the four effort answers. Stored as the 6–10 number the
   progression has always read; shown as Easy / Solid / Hard / All out.
 - `Services/ActiveWorkout.swift` — drives an in-progress session. Objects are
   written as you go, so a force-quit mid-workout loses nothing.
