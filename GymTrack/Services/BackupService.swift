@@ -582,6 +582,12 @@ enum BackupService {
         try context.save()
         LoadScaleBook.shared.reload()
         ExerciseVisibility.reload(context: context)
+        // Told directly rather than left to the root view, which only
+        // re-reads the user's exercises when their count changes. A backup
+        // from another phone with as many custom exercises as this one left
+        // the library listing the ones just wiped and missing the ones just
+        // restored, and their sets resolving to nothing, until a relaunch.
+        context.refreshCustomExercises()
     }
 
     /// Deletes every record. Used by restore and by "erase all data".
@@ -608,5 +614,6 @@ enum BackupService {
         try context.save()
         LoadScaleBook.shared.reload()
         ExerciseVisibility.reload(context: context)
+        context.refreshCustomExercises()
     }
 }
