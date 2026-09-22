@@ -206,7 +206,16 @@ final class ActiveWorkout {
         lastPerformances[catalogID] ?? []
     }
 
-    func planItem(for catalogID: String) -> PlanItem? { prescriptions[catalogID] }
+    /// The prescription behind an exercise, while the plan still has it.
+    ///
+    /// The cache is filled once, so an exercise taken out of the day mid-session
+    /// stays in it as a deleted model — and the logger went on reading its rest
+    /// and rep range, which SwiftData is free to trap on. Once it's gone from the
+    /// plan the session treats it like an exercise added on the day.
+    func planItem(for catalogID: String) -> PlanItem? {
+        guard let item = prescriptions[catalogID], !item.isDeleted, item.modelContext != nil else { return nil }
+        return item
+    }
 
     // MARK: - Logging
 
