@@ -264,13 +264,8 @@ enum WatchSnapshotFactory {
                          restSeconds: (String) -> Int,
                          lastTimeLabel: (String) -> String?) -> WatchSessionSnapshot {
         let groups = session.exerciseGroups
-        // Whatever the lifter picked out of turn, else whatever comes next.
-        let preferred = session.preferredExerciseID.flatMap { id in
-            groups.first { $0.catalogID == id && !$0.isComplete }
-        }
-        let nextSet = (preferred ?? groups.first { !$0.isComplete })?.sets.first { !$0.isCompleted }
 
-        return WatchSessionSnapshot(
+        var snapshot = WatchSessionSnapshot(
             sessionID: session.id,
             title: session.title,
             planName: session.planName,
@@ -299,7 +294,8 @@ enum WatchSnapshotFactory {
                     scale: LoadScaleBook.shared.scale(for: group.catalogID)
                 )
             },
-            currentSetID: currentSetID ?? nextSet?.id,
+            preferredExerciseID: session.preferredExerciseID,
+            currentSetID: currentSetID,
             restEndsAt: rest.endsAt,
             restStartedAt: rest.startedAt,
             restTotalSeconds: rest.total,
@@ -307,6 +303,14 @@ enum WatchSnapshotFactory {
             volumeKg: session.totalVolumeKg,
             unit: AppSettings.shared.weightUnit
         )
+        // Asked of the snapshot rather than of the session, so this answer and
+        // the watch's own — made while a log of its own is still unconfirmed —
+        // come out of the same lines. The two of them saying it separately is
+        // what dragged the logger off the exercise the lifter had picked.
+        if snapshot.currentSetID == nil {
+            snapshot.currentSetID = snapshot.focusedExercise?.sets.first { !$0.isCompleted }?.id
+        }
+        return snapshot
     }
 
     /// "60 × 8" — last time's best set, for the hint under the exercise name.

@@ -420,7 +420,7 @@ struct WatchExerciseListView: View {
             ForEach(session.exercises) { exercise in
                 Button {
                     WatchHaptics.tick()
-                    connector.send(.focusExercise(catalogID: exercise.id))
+                    connector.focus(on: exercise.id)
                     dismiss()
                 } label: {
                     HStack(spacing: 9) {

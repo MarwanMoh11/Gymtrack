@@ -27,6 +27,12 @@ final class WatchConnector: NSObject {
     /// Sets logged here that the phone hasn't confirmed yet.
     private var pendingCompletions: Set<UUID> = []
     private var pendingUndos: Set<UUID> = []
+    /// An exercise picked here that the phone hasn't confirmed yet, held for
+    /// the same reason a logged set is drawn as done straight away: the pick
+    /// has to take under the thumb that made it. Out of range the command sits
+    /// in the queue for as long as the phone stays in the locker, and until it
+    /// lands this is the only record that the lifter moved.
+    private var pendingFocus: String?
 
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack.watchkitapp", category: "Connector")
 
@@ -46,7 +52,10 @@ final class WatchConnector: NSObject {
     /// The mirror's session with this watch's unconfirmed changes folded in.
     var session: WatchSessionSnapshot? {
         guard var session = mirror.session else { return nil }
-        guard !pendingCompletions.isEmpty || !pendingUndos.isEmpty else { return session }
+        // The pick goes on first: everything below asks which exercise the
+        // logger is on, and while this is set the answer is this one.
+        if let pendingFocus { session.preferredExerciseID = pendingFocus }
+        guard hasPendingChanges else { return session }
 
         session.exercises = session.exercises.map { exercise in
             var exercise = exercise
@@ -59,20 +68,27 @@ final class WatchConnector: NSObject {
             return exercise
         }
         // The current set moves on as soon as the last one is logged, rather
-        // than when the phone says so.
-        if let next = session.exercises.first(where: { !$0.isComplete })?.sets.first(where: { !$0.isCompleted }) {
-            session.currentSetID = next.id
-        } else {
-            session.currentSetID = nil
-        }
+        // than when the phone says so — and it has to move to the set the phone
+        // is about to name, which is the one on the exercise the lifter chose.
+        // Reading the first unfinished exercise off the top instead threw that
+        // choice away: log a set on the third exercise and the logger snapped
+        // back to the first, and stayed there for as long as the phone took to
+        // answer.
+        session.currentSetID = session.focusedExercise?.sets.first { !$0.isCompleted }?.id
         return session
     }
 
     var idle: WatchIdleSnapshot { mirror.idle }
     var unit: WeightUnit { mirror.session?.unit ?? mirror.idle.unit }
 
-    /// True while there's something the phone hasn't acknowledged.
+    /// True while there's something the phone hasn't acknowledged. A pick is
+    /// left out on purpose: the footer this drives warns that *sets* are
+    /// waiting, and a lifter who has only moved between exercises has nothing
+    /// to lose by walking away.
     var hasUnsyncedWork: Bool { !pendingCompletions.isEmpty || !pendingUndos.isEmpty }
+
+    /// Whether anything at all here still has to be drawn over the mirror.
+    private var hasPendingChanges: Bool { hasUnsyncedWork || pendingFocus != nil }
 
     // MARK: - Sending
 
@@ -106,6 +122,14 @@ final class WatchConnector: NSObject {
         send(.undoSet(id: set.id))
     }
 
+    /// Moves the logger onto another exercise — a superset, or a machine that
+    /// was taken when its turn came round. Taken here immediately, confirmed by
+    /// the phone.
+    func focus(on catalogID: String) {
+        pendingFocus = catalogID
+        send(.focusExercise(catalogID: catalogID))
+    }
+
     func requestMirror() { send(.requestMirror) }
 
     // MARK: - Receiving
@@ -129,11 +153,20 @@ final class WatchConnector: NSObject {
         guard let session else {
             pendingCompletions.removeAll()
             pendingUndos.removeAll()
+            pendingFocus = nil
             return
         }
         let sets = Dictionary(session.allSets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         pendingCompletions = pendingCompletions.filter { sets[$0]?.isCompleted == false }
         pendingUndos = pendingUndos.filter { sets[$0]?.isCompleted == true }
+        // The pick is the phone's own once it names the same exercise — or once
+        // that exercise is no longer in the session, which is the one way the
+        // phone turns a pick down. Without the second half the watch would go
+        // on insisting on an exercise that had been deleted underneath it.
+        if let pending = pendingFocus,
+           pending == session.preferredExerciseID || !session.exercises.contains(where: { $0.id == pending }) {
+            pendingFocus = nil
+        }
     }
 }
 

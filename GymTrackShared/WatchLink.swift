@@ -86,6 +86,11 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
     var planName: String
     var startedAt: Date
     var exercises: [WatchExerciseSnapshot]
+    /// The exercise the lifter picked to work out of turn — a superset, or a
+    /// machine that was taken when its turn came round. `nil` means "whatever
+    /// comes next", which is also what a mirror from a build that predates this
+    /// decodes to.
+    var preferredExerciseID: String?
     /// The set the logger is sitting on — what the watch opens to.
     var currentSetID: UUID?
     var restEndsAt: Date?
@@ -104,11 +109,28 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
     var totalSets: Int { allSets.count }
     var progress: Double { totalSets > 0 ? Double(completedSets) / Double(totalSets) : 0 }
 
+    /// The exercise the logger belongs on — `ActiveWorkout.currentGroup` said
+    /// again in the shared types, so both sides can reach it. The phone answers
+    /// the question here when it builds a mirror; the watch asks it again while
+    /// it is drawing work the phone hasn't confirmed yet, and the two have to
+    /// come back with the same exercise or the logger jumps when the mirror
+    /// lands.
+    ///
+    /// Whatever the lifter picked, as long as there is still something left on
+    /// it, else whatever comes next.
+    var focusedExercise: WatchExerciseSnapshot? {
+        if let preferredExerciseID,
+           let picked = exercises.first(where: { $0.id == preferredExerciseID && !$0.isComplete }) {
+            return picked
+        }
+        return exercises.first { !$0.isComplete } ?? exercises.last
+    }
+
     var currentExercise: WatchExerciseSnapshot? {
         if let currentSetID, let match = exercises.first(where: { $0.sets.contains { $0.id == currentSetID } }) {
             return match
         }
-        return exercises.first { !$0.isComplete } ?? exercises.last
+        return focusedExercise
     }
 
     var currentSet: WatchSetSnapshot? {
