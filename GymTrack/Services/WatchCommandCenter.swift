@@ -167,8 +167,11 @@ final class WatchCommandCenter {
 
         case .finish(let metrics):
             guard let session = activeSession(in: context) else { return }
-            for set in session.sets where !set.isCompleted { context.delete(set) }
-            session.endedAt = .now
+            // The whole close, not just the unlogged sets. This path runs with
+            // the phone asleep, and it used to stop at deleting those — so the
+            // notes and drop rows the phone's own Finish tidies away reached
+            // the record from here describing work that didn't happen.
+            session.close(in: context)
             apply(metrics, to: session)
             save(context)
             WorkoutLiveActivity.shared.end(with: nil)

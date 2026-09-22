@@ -432,7 +432,10 @@ struct RootView: View {
             if open.completedSets.isEmpty {
                 context.delete(open)
             } else {
-                open.endedAt = open.completedSets.compactMap(\.completedAt).max() ?? open.startedAt
+                // Closed properly, not just stamped: the sets nobody lifted go,
+                // and so does anything written about them.
+                let lastLogged = open.completedSets.compactMap(\.completedAt).max() ?? open.startedAt
+                open.close(at: lastLogged, in: context)
             }
             try? context.save()
             WorkoutLiveActivity.shared.endAll()

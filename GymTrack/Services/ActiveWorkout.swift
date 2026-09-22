@@ -745,16 +745,10 @@ final class ActiveWorkout {
 
     // MARK: - Ending
 
-    /// Drops any sets left unlogged and stamps the session finished.
+    /// Drops any sets left unlogged and stamps the session finished — see
+    /// `WorkoutSession.close`, which the wrist's headless finish runs too.
     func finish() {
-        // Before the unlogged sets go, because which exercises survive is what
-        // decides which notes still have something to be about.
-        pruneNotes()
-        unlinkOrphanedContinuations()
-        for set in session.sets where !set.isCompleted {
-            context.delete(set)
-        }
-        session.endedAt = .now
+        session.close(in: context)
         adoptWatchMetrics()
         restTimer.onChange = nil
         restTimer.stop()
@@ -765,39 +759,6 @@ final class ActiveWorkout {
         WidgetPublisher.updateSession(nil)
         recordToHealth()
         Haptics.success()
-    }
-
-    /// What survives the end of the session: a note that says something, about
-    /// an exercise that ended up in the record.
-    ///
-    /// An exercise you logged nothing for is dropped from the session entirely
-    /// — that's what `finish` does with its sets — so a note left on it would
-    /// be the only trace of an exercise the record says you didn't do, and it
-    /// would have nowhere to be read back. It goes with the sets.
-    private func pruneNotes() {
-        let trained = Set(session.sets.filter(\.isCompleted).map(\.catalogID))
-        for note in session.exerciseNotes where note.isEmpty || !trained.contains(note.catalogID) {
-            context.delete(note)
-        }
-    }
-
-    /// Cuts the link on any row left continuing a set that won't be in the
-    /// record.
-    ///
-    /// A continuation is always built on top of a set that has already been
-    /// logged, so this only comes up one way: the lifter takes that set back
-    /// and leaves it taken back. `finish` then deletes it as an unlogged set,
-    /// and the row underneath would survive as the exercise's first set still
-    /// claiming it was taken on without rest from something that, as far as
-    /// the record goes, never happened. It is a set on its own now, and the
-    /// only honest thing left to say about it is nothing.
-    private func unlinkOrphanedContinuations() {
-        for set in session.sets where set.isContinuation {
-            let keepsItsSet = session.sets.contains {
-                $0.catalogID == set.catalogID && $0.setIndex < set.setIndex && $0.isCompleted
-            }
-            if !keepsItsSet { set.continuesPreviousSet = nil }
-        }
     }
 
     func discard() {

@@ -646,7 +646,7 @@ final class SetLog {
     ///
     /// `nil` where there isn't one. That should be impossible — a continuation
     /// is only ever built on top of a set that has already been logged, and
-    /// `ActiveWorkout.finish` unlinks any row whose set didn't survive to the
+    /// `WorkoutSession.close` unlinks any row whose set didn't survive to the
     /// record — but it is checked rather than asserted, so a link with nothing
     /// on the other end reads as an ordinary set everywhere instead of drawing
     /// half a drop.
