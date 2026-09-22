@@ -69,9 +69,13 @@ final class WatchRestTimer {
         startTicker()
     }
 
-    func stop() {
+    /// - Parameter silently: true for a caller that is already playing a tap of
+    ///   its own. Starting a set ends the rest and plays the start haptic, and
+    ///   two taps a frame apart read as a stutter rather than as two things
+    ///   having happened.
+    func stop(silently: Bool = false) {
         clear()
-        WatchHaptics.tick()
+        if !silently { WatchHaptics.tick() }
     }
 
     func add(seconds: Int) {

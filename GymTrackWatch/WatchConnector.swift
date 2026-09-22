@@ -31,6 +31,13 @@ final class WatchConnector: NSObject {
     /// at the weight the lifter had just moved away from.
     private var pendingCompletions: [UUID: PendingLog] = [:]
     private var pendingUndos: Set<UUID> = []
+    /// Starts announced here that the phone hasn't confirmed yet, and the
+    /// moment each was announced. The moment is kept rather than recomputed
+    /// because it is the measurement: out of range the command waits in the
+    /// queue, and the clock on the wrist has to count from when the lifter
+    /// actually went, not from when the phone finally heard about it.
+    private var pendingStarts: [UUID: Date] = [:]
+    private var pendingCancels: Set<UUID> = []
     /// An exercise picked here that the phone hasn't confirmed yet, held for
     /// the same reason a logged set is drawn as done straight away: the pick
     /// has to take under the thumb that made it. Out of range the command sits
@@ -102,6 +109,8 @@ final class WatchConnector: NSObject {
                 if exercise.tracking == .duration { set.seconds = pending.seconds }
             }
             if pendingUndos.contains(set.id) { set.isCompleted = false }
+            if let started = pendingStarts[set.id] { set.startedAt = started }
+            if pendingCancels.contains(set.id) { set.startedAt = nil }
             return set
         }
         // A continuation carries nothing forward: its weight was chosen to be
@@ -122,14 +131,18 @@ final class WatchConnector: NSObject {
     var idle: WatchIdleSnapshot { mirror.idle }
     var unit: WeightUnit { mirror.session?.unit ?? mirror.idle.unit }
 
-    /// True while there's something the phone hasn't acknowledged. A pick is
-    /// left out on purpose: the footer this drives warns that *sets* are
-    /// waiting, and a lifter who has only moved between exercises has nothing
-    /// to lose by walking away.
+    /// True while there's something the phone hasn't acknowledged. A pick and
+    /// an announced start are both left out on purpose: the footer this drives
+    /// warns that *sets* are waiting, and neither of those is one. A lifter who
+    /// has only moved between exercises has nothing to lose by walking away,
+    /// and the only way an unsent start is lost is walking away without logging
+    /// the set it belongs to — which makes it a set nobody did.
     var hasUnsyncedWork: Bool { !pendingCompletions.isEmpty || !pendingUndos.isEmpty }
 
     /// Whether anything at all here still has to be drawn over the mirror.
-    private var hasPendingChanges: Bool { hasUnsyncedWork || pendingFocus != nil }
+    private var hasPendingChanges: Bool {
+        hasUnsyncedWork || pendingFocus != nil || !pendingStarts.isEmpty || !pendingCancels.isEmpty
+    }
 
     // MARK: - Sending
 
@@ -160,7 +173,29 @@ final class WatchConnector: NSObject {
     func undoSet(_ set: WatchSetSnapshot) {
         pendingCompletions.removeValue(forKey: set.id)
         pendingUndos.insert(set.id)
+        // Whatever the phone knows about this set's start goes with it — that
+        // is what `SetLog.unlog` does over there, and the wrist drawing a clock
+        // still running on a set it has just taken back would be the two
+        // screens disagreeing about whether the lifter is under a bar.
+        pendingStarts.removeValue(forKey: set.id)
+        pendingCancels.insert(set.id)
         send(.undoSet(id: set.id))
+    }
+
+    /// Says the set is beginning, now. Drawn here immediately and stamped here
+    /// too — see `pendingStarts`.
+    func announceStart(_ set: WatchSetSnapshot) {
+        let moment = Date()
+        pendingCancels.remove(set.id)
+        pendingStarts[set.id] = moment
+        send(.announceStart(id: set.id, at: moment))
+    }
+
+    /// Un-says it. A mis-tap on a 41mm screen has to cost nothing at all.
+    func cancelStart(_ set: WatchSetSnapshot) {
+        pendingStarts.removeValue(forKey: set.id)
+        pendingCancels.insert(set.id)
+        send(.cancelStart(id: set.id))
     }
 
     /// Moves the logger onto another exercise — a superset, or a machine that
@@ -194,12 +229,16 @@ final class WatchConnector: NSObject {
         guard let session else {
             pendingCompletions.removeAll()
             pendingUndos.removeAll()
+            pendingStarts.removeAll()
+            pendingCancels.removeAll()
             pendingFocus = nil
             return
         }
         let sets = Dictionary(session.allSets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         pendingCompletions = pendingCompletions.filter { sets[$0.key]?.isCompleted == false }
         pendingUndos = pendingUndos.filter { sets[$0]?.isCompleted == true }
+        pendingStarts = pendingStarts.filter { sets[$0.key]?.startedAt == nil }
+        pendingCancels = pendingCancels.filter { sets[$0]?.startedAt != nil }
         // The pick is the phone's own once it names the same exercise — or once
         // that exercise is no longer in the session, which is the one way the
         // phone turns a pick down. Without the second half the watch would go

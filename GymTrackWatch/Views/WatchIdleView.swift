@@ -6,15 +6,29 @@ struct WatchIdleView: View {
     var connector: WatchConnector
 
     private var idle: WatchIdleSnapshot { connector.idle }
+
+    /// Whether the mirror still describes the day it is being read on.
+    ///
+    /// The phone restamps it when something wakes it, and nothing wakes it at
+    /// midnight. So a wrist raised the morning after a session is routinely
+    /// holding yesterday's answer — and since every line below says "today",
+    /// the watch was presenting yesterday's training day as today's. On a rest
+    /// day that is the app inventing a workout, which is the one thing it is
+    /// not allowed to do. It asks for a fresh mirror on the way in; until one
+    /// lands it says plainly that it doesn't know yet.
+    private var isStale: Bool { !idle.describesToday }
+
     /// Nothing is running, so the screen wears the colour a session would be
-    /// started in — except on a rest day, which has earned the calm green.
-    private var phase: SessionPhase { idle.todayTitle == nil ? .done : .working }
+    /// started in — except on a rest day, which has earned the calm green. A
+    /// mirror that has gone out of date can't claim either, and a green screen
+    /// is a claim that today is a rest day.
+    private var phase: SessionPhase { idle.todayTitle == nil && !isStale ? .done : .working }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 if connector.hasEverReceivedMirror {
-                    todayCard
+                    if isStale { stalePlanCard } else { todayCard }
                     startButtons
                     footer
                 } else {
@@ -65,18 +79,64 @@ struct WatchIdleView: View {
         .watchCard(phase: phase)
     }
 
+    /// A card for a mirror the watch can no longer read as "today".
+    ///
+    /// It names the day the plan it holds belongs to rather than showing a
+    /// spinner: "waiting" with nothing behind it reads as something that has
+    /// hung, and the lifter can't tell whether to keep looking at their wrist
+    /// or go and get their phone.
+    private var stalePlanCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                WatchGlyphTile(symbol: "arrow.clockwise", tint: phase.tint, size: 24)
+                Text("NOT TODAY YET")
+                    .font(Theme.eyebrow)
+                    .tracking(1.2)
+                    .foregroundStyle(phase.tint.opacity(0.9))
+                Spacer(minLength: 0)
+            }
+
+            Text("Waiting for today")
+                .font(Theme.rounded(19, weight: .heavy))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+
+            Text(staleDetail)
+                .font(Theme.rounded(11, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(4)
+        }
+        .watchCard(phase: phase)
+    }
+
+    private var staleDetail: String {
+        guard let day = idle.day else { return "Your phone hasn't sent today's plan yet." }
+        let weekday = day.formatted(.dateTime.weekday(.wide))
+        return "The last plan your phone sent was \(weekday)'s. Start anyway and your phone picks today's."
+    }
+
+    /// Whether the start button is offering a freestyle session rather than a
+    /// prescribed one.
+    ///
+    /// `.startToday` is right whenever there might be something scheduled — the
+    /// phone resolves it against the real today and falls back to freestyle
+    /// when there is nothing — so it is also the right thing to send while the
+    /// watch doesn't yet know what today is.
+    private var startsFreestyle: Bool { idle.todayTitle == nil && !isStale }
+
     private var startButtons: some View {
         VStack(spacing: 6) {
             Button {
                 WatchHaptics.log()
-                connector.send(idle.todayTitle == nil ? .startFreestyle : .startToday)
+                connector.send(startsFreestyle ? .startFreestyle : .startToday)
             } label: {
-                Label(idle.todayTitle == nil ? "Start freestyle" : "Start workout",
+                Label(startsFreestyle ? "Start freestyle" : "Start workout",
                       systemImage: "figure.strengthtraining.traditional")
             }
             .buttonStyle(WatchProminentButtonStyle(phase: .working))
 
-            if idle.todayTitle != nil {
+            if !startsFreestyle {
                 Button {
                     WatchHaptics.tick()
                     connector.send(.startFreestyle)
@@ -90,20 +150,13 @@ struct WatchIdleView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.warning.wash)
-                    .shadow(color: Theme.warning.opacity(idle.streak > 0 ? 0.5 : 0), radius: 4)
-                Text(idle.streak > 0 ? "\(idle.streak) day streak" : "No streak yet")
-                    .font(Theme.rounded(12, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                Text("· \(idle.sessionsThisWeek) this week")
-                    .font(Theme.rounded(12, weight: .medium))
-                    .foregroundStyle(Theme.textTertiary)
+            // The streak was counted on the day this mirror was built and can
+            // have broken since, which is a number that would be wrong rather
+            // than merely old. The last session's date is relative to now and
+            // stays true however stale the rest of this is, so it stays.
+            if !isStale {
+                streakRow
             }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
 
             if let title = idle.lastSessionTitle, let date = idle.lastSessionDate {
                 Text("Last: \(title), \(date.formatted(.relative(presentation: .numeric)))")
@@ -114,6 +167,23 @@ struct WatchIdleView: View {
         }
         .padding(.horizontal, 4)
         .padding(.top, 2)
+    }
+
+    private var streakRow: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Theme.warning.wash)
+                .shadow(color: Theme.warning.opacity(idle.streak > 0 ? 0.5 : 0), radius: 4)
+            Text(idle.streak > 0 ? "\(idle.streak) day streak" : "No streak yet")
+                .font(Theme.rounded(12, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+            Text("· \(idle.sessionsThisWeek) this week")
+                .font(Theme.rounded(12, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
     }
 
     // MARK: - Before the first mirror

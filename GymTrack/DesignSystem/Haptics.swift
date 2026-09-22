@@ -24,6 +24,20 @@ enum Haptics {
         medium.impactOccurred()
     }
 
+    /// Saying a set is beginning.
+    ///
+    /// Rigid rather than the small tick this used to share with the steppers.
+    /// The tick was a seventy-percent light impact and, with a phone on a bench
+    /// and a bar in your hands, essentially unfeelable — the one control in the
+    /// logger that has to confirm itself without being looked at was the
+    /// quietest thing in it. Rigid is sharp and short where `log` is a heavier
+    /// thud, so the two are still told apart by feel alone: a click going in,
+    /// a knock coming out.
+    static func start() {
+        guard isEnabled else { return }
+        rigid.impactOccurred(intensity: 1.0)
+    }
+
     /// Rest timer finished, session finished.
     static func success() {
         guard isEnabled else { return }

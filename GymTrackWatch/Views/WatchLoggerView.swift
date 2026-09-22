@@ -7,6 +7,12 @@ import SwiftUI
 /// says which one you're turning. That's the whole interaction, because it has
 /// to work with one hand, chalked up, between sets.
 ///
+/// The screen has two faces and swaps between them, because between sets and
+/// during one you are doing different things. Resting, you are standing at a
+/// rack you have not loaded yet: the clock and the weight to put on the bar are
+/// the whole screen, big enough to read at arm's length without stopping to
+/// look. Working, the dials are the screen and the clock is gone.
+///
 /// The crown is attached to exactly one view and stays there. watchOS will not
 /// reliably move focus between two crown targets on a tap — it is handed out
 /// by the focus system, not by us — so the *selection* is plain state, and the
@@ -31,6 +37,10 @@ struct WatchLoggerView: View {
 
     private enum Field: Hashable { case weight, reps, seconds }
 
+    /// Anchors the top of the list so a rest starting can bring it back into
+    /// view — see the scroll in `body`.
+    private static let topID = "logger.top"
+
     private var exercise: WatchExerciseSnapshot? { session.currentExercise }
     private var set: WatchSetSnapshot? { session.currentSet }
     /// What the exercise in front of you is marked in, and what one click of
@@ -43,20 +53,47 @@ struct WatchLoggerView: View {
     private var phase: SessionPhase { session.phase(resting: rest.isRunning) }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                header
-                if rest.isRunning { restStrip }
-                if let set, let exercise {
-                    values(for: set, exercise: exercise)
-                    stepperRow
-                    logButton(set: set, exercise: exercise)
-                } else {
-                    allDone
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 8) {
+                    // One or the other, never both. Two headers' worth of
+                    // exercise name and set count above a countdown left the
+                    // countdown at the bottom of a 41mm screen, which is the
+                    // one thing on it nobody should have to scroll to.
+                    Group {
+                        if rest.isRunning {
+                            restCentrepiece
+                        } else {
+                            header
+                        }
+                    }
+                    .id(Self.topID)
+
+                    if let set, let exercise {
+                        values(for: set, exercise: exercise)
+                        targetLine(set, exercise: exercise)
+                        stepperRow
+                        startStrip(for: set)
+                        logButton(set: set, exercise: exercise)
+                    } else {
+                        allDone
+                    }
+                    undoButton
                 }
-                undoButton
+                .padding(.horizontal, 2)
             }
-            .padding(.horizontal, 2)
+            // A rest begins with the lifter's thumb still on *Log set*, which
+            // is at the bottom of the list — so the countdown that has just
+            // appeared at the top is off screen, and the one screen in this app
+            // designed to be read without stopping had to be scrolled to first.
+            // Only on the way in: a lifter who has scrolled somewhere during a
+            // rest put themselves there.
+            .onChange(of: rest.isRunning) { _, resting in
+                guard resting else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(Self.topID, anchor: .top)
+                }
+            }
         }
         .navigationTitle(session.title)
         .watchScreenTint(phase)
@@ -117,35 +154,101 @@ struct WatchLoggerView: View {
 
     // MARK: - Rest
 
-    /// The rest, when there is one. Amber and ringed — the same rest the Lock
-    /// Screen is showing, wearing the same colour.
-    private var restStrip: some View {
-        HStack(spacing: 8) {
-            WatchRestRing(progress: rest.progress, phase: .resting, size: 28)
+    /// What the wrist is for.
+    ///
+    /// A rest is the one moment in a workout with nothing in your hands, and
+    /// the two things worth knowing are how long is left and what to put on the
+    /// bar. Both are set in type you can read from the rack without stopping,
+    /// on the same amber the Lock Screen and the Live Activity wear.
+    ///
+    /// This used to be a 28-point ring and an 18-point number in a strip above
+    /// the dials, which is a caption. You had to stop and look at your wrist to
+    /// read it, and then look again to find the weight.
+    private var restCentrepiece: some View {
+        VStack(spacing: 7) {
+            Text(rest.label)
+                .font(Theme.number(46, weight: .heavy))
+                .foregroundStyle(SessionPhase.resting.gradient)
+                .shadow(color: SessionPhase.resting.glow, radius: 10)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .accessibilityLabel("\(Int(max(0, rest.remaining))) seconds of rest left")
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text(rest.label)
-                    .font(Theme.number(18, weight: .bold))
-                    .foregroundStyle(SessionPhase.resting.tint)
-                    .shadow(color: SessionPhase.resting.glow, radius: 5)
-                Text("REST")
-                    .font(Theme.microCaps)
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.textTertiary)
+            WatchRestProgressBar(progress: rest.progress)
+
+            HStack(spacing: 6) {
+                Text("RESTING")
+                    .font(Theme.eyebrow)
+                    .tracking(1.1)
+                    .foregroundStyle(SessionPhase.resting.tint.opacity(0.9))
+
+                Spacer(minLength: 0)
+
+                Button {
+                    rest.stop()
+                    connector.send(.stopRest)
+                } label: {
+                    Text("Skip")
+                }
+                .buttonStyle(WatchQuietButtonStyle(tint: Theme.textPrimary, size: 11, compact: true))
+                .fixedSize()
             }
 
-            Spacer(minLength: 0)
-
-            Button {
-                rest.stop()
-                connector.send(.stopRest)
-            } label: {
-                Text("Skip")
+            if let set, let exercise {
+                Divider().overlay(Theme.hairline)
+                upNext(set: set, exercise: exercise)
             }
-            .buttonStyle(WatchQuietButtonStyle(tint: Theme.textPrimary, size: 12, compact: true))
-            .fixedSize()
         }
-        .watchCard(padding: 8, radius: 12, phase: .resting)
+        .watchCard(padding: 9, phase: .resting)
+    }
+
+    /// The load to walk up to, and the exercise it belongs to.
+    ///
+    /// Tapping it opens the exercise list, which is the same thing tapping the
+    /// header does when there is no rest running — during a rest the header is
+    /// not on screen, and losing the only way to work out of order because you
+    /// happened to be between sets would be a strange thing for the app to do.
+    private func upNext(set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) -> some View {
+        Button {
+            WatchHaptics.tick()
+            showingExercises = true
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("UP NEXT")
+                    .font(Theme.microCaps)
+                    .tracking(0.9)
+                    .foregroundStyle(Theme.textTertiary)
+
+                Text(upNextLoad(set: set, exercise: exercise))
+                    .font(Theme.number(23, weight: .heavy))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+
+                Text("\(exercise.name) · Set \(session.currentSetNumber)/\(exercise.sets.count)")
+                    .font(Theme.rounded(11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the session's exercises")
+    }
+
+    /// "80 kg × 8–10" — the one line that saves a trip back to the phone.
+    ///
+    /// The weight is whatever the dials currently hold, because a weight the
+    /// lifter has just dialled up is the weight they are about to load. The
+    /// reps are the *target* rather than the dialled number: what goes in the
+    /// rep field is what you did, and that is not known yet.
+    private func upNextLoad(set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) -> String {
+        if exercise.tracking == .duration { return "\(Int(secondsValue))s" }
+        let reps = set.hasRepTarget ? set.targetLabel : "\(Int(repsValue))"
+        guard exercise.tracking.logsWeight || set.weightKg > 0 else { return "\(reps) reps" }
+        return "\(scale.text(weightDisplay)) \(scale.unit.short) × \(reps)"
     }
 
     // MARK: - The numbers
@@ -161,7 +264,7 @@ struct WatchLoggerView: View {
                     if exercise.tracking.logsWeight || set.weightKg > 0 {
                         tile(title: scale.unit.short, value: trimmed(weightDisplay), field: .weight)
                     }
-                    tile(title: "reps", value: "\(Int(repsValue))", field: .reps, caption: set.targetLabel)
+                    tile(title: "reps", value: "\(Int(repsValue))", field: .reps)
                 }
             }
         }
@@ -191,11 +294,32 @@ struct WatchLoggerView: View {
         .task(id: editing) { isCrownFocused = editing != nil }
     }
 
+    /// What the exercise asks for, on a line of its own.
+    ///
+    /// It used to be the caption inside the reps tile, sharing one line with
+    /// the word REPS at ten points and shrinking from there — so on any range
+    /// wider than a single digit, on the small watch, the thing the lifter
+    /// needed was the thing that got scaled away. Nothing else competes for
+    /// this line, so nothing shrinks.
+    @ViewBuilder
+    private func targetLine(_ set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) -> some View {
+        if exercise.tracking.logsReps, set.hasRepTarget {
+            WatchChip(tint: Theme.textSecondary) {
+                Image(systemName: "target")
+                    .font(.system(size: 9, weight: .bold))
+                Text("Target \(set.targetLabel) reps")
+                    .font(Theme.rounded(12, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .accessibilityLabel("Target \(set.targetLabel) reps")
+        }
+    }
+
     /// A number, and whether the crown is on it.
-    private func tile(title: String, value: String, field: Field, caption: String? = nil) -> some View {
+    private func tile(title: String, value: String, field: Field) -> some View {
         let isEditing = editing == field
-        return WatchValueTile(title: title, value: value, caption: caption,
-                              isEditing: isEditing, phase: phase)
+        return WatchValueTile(title: title, value: value, isEditing: isEditing, phase: phase)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onTapGesture { select(field) }
             .accessibilityLabel("\(title) \(value)")
@@ -322,6 +446,75 @@ struct WatchLoggerView: View {
         case .reps: 1
         case .seconds: 5
         }
+    }
+
+    // MARK: - Saying you're starting
+
+    /// The wrist's half of the announcement — the same one tap the phone
+    /// offers, on the device that is already in your hand when you walk up to
+    /// the bar.
+    ///
+    /// It was the phone's alone until now, which meant the set that got timed
+    /// was the set you happened to be holding your phone for. Sitting directly
+    /// above *Log set*, in the order the two things happen, it is hard to walk
+    /// past — and it still costs nothing to ignore, because logging is the
+    /// button underneath and is unchanged.
+    @ViewBuilder
+    private func startStrip(for set: WatchSetSnapshot) -> some View {
+        if let startedAt = set.startedAt, !set.isCompleted {
+            working(since: startedAt, set: set)
+        } else {
+            Button {
+                WatchHaptics.start()
+                connector.announceStart(set)
+                // The rest is over the moment you say you're going — that is
+                // what it was counting down to. Silently, because the tap above
+                // has already been felt and two a frame apart read as one
+                // stutter rather than as two things.
+                if rest.isRunning {
+                    rest.stop(silently: true)
+                    connector.send(.stopRest)
+                }
+            } label: {
+                Label("Start set", systemImage: "play.fill")
+            }
+            .buttonStyle(WatchQuietButtonStyle(tint: Theme.accent, weight: .heavy, size: 14))
+            .accessibilityHint("Optional. Records the moment this set begins")
+        }
+    }
+
+    /// The clock the announcement became. Off a `TimelineView` rather than a
+    /// ticker of its own — the view already knows when the set began.
+    private func working(since start: Date, set: WatchSetSnapshot) -> some View {
+        HStack(spacing: 7) {
+            WatchGlyphTile(symbol: "stopwatch.fill", tint: Theme.accent, size: 24)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("WORKING")
+                    .font(Theme.microCaps)
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.accent.wash)
+                TimelineView(.periodic(from: start, by: 1)) { context in
+                    Text(max(0, context.date.timeIntervalSince(start)).clockString)
+                        .font(Theme.number(17, weight: .bold))
+                        .foregroundStyle(Theme.ink)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                WatchHaptics.tick()
+                connector.cancelStart(set)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .black))
+            }
+            .buttonStyle(WatchQuietButtonStyle(tint: Theme.textTertiary, size: 11, compact: true))
+            .fixedSize()
+            .accessibilityLabel("Cancel — this set hasn't started")
+        }
+        .watchCard(padding: 7, radius: 12, phase: .working)
     }
 
     // MARK: - Logging

@@ -43,6 +43,13 @@ struct WatchSetSnapshot: Codable, Hashable, Identifiable, Sendable {
     /// Optional only so a mirror in flight during an app update still decodes;
     /// read it through `isContinuation`.
     var continuation: Bool?
+    /// When the lifter said this set was beginning, on either device. The wrist
+    /// needs it to draw the clock it started, and to know not to offer to start
+    /// a set that is already under way.
+    ///
+    /// Absent means nobody announced anything, which is the ordinary case and
+    /// has to stay distinguishable from a set that began at some unknown time.
+    var startedAt: Date?
 
     /// A continuation's weight was chosen for that row alone, so it neither
     /// carries forward onto the sets still to come nor accepts a load carried
@@ -50,6 +57,14 @@ struct WatchSetSnapshot: Codable, Hashable, Identifiable, Sendable {
     /// prediction of the phone's answer quietly deloads the rest of the
     /// exercise — see `WatchConnector.session`.
     var isContinuation: Bool { continuation == true }
+
+    /// Whether anybody prescribed a rep count for this set.
+    ///
+    /// `targetLabel` falls back to the reps already dialled when there is no
+    /// target, which is the right thing for a line that has to print something
+    /// — but a screen offering to show the lifter "their target" must not show
+    /// them a number they typed themselves a moment ago and call it one.
+    var hasRepTarget: Bool { targetRepsLow > 0 || targetRepsHigh > 0 }
 
     var targetLabel: String {
         targetRepsHigh <= 0 || targetRepsLow == targetRepsHigh
@@ -159,6 +174,18 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
 
 /// What the watch shows when nothing is running.
 struct WatchIdleSnapshot: Codable, Hashable, Sendable {
+    /// Midnight of the day this was built for.
+    ///
+    /// Everything below answers "today", and the watch may be holding the
+    /// answer for a day that has since ended — the phone only restamps the
+    /// mirror when it is woken, and nothing wakes it at midnight. Without the
+    /// stamp the wrist presented yesterday's training day as today's, which on
+    /// a rest day is the app inventing a workout.
+    ///
+    /// Optional only so a mirror in flight during an app update still decodes.
+    /// A mirror that doesn't carry one is taken at its word, exactly as it was
+    /// before this existed.
+    var day: Date?
     var todayTitle: String?
     var todayExerciseCount: Int
     var todaySetCount: Int
@@ -169,8 +196,15 @@ struct WatchIdleSnapshot: Codable, Hashable, Sendable {
     var lastSessionDate: Date?
     var unit: WeightUnit
 
+    /// Whether this still describes today. A snapshot from an older build
+    /// carries no day and is believed — it is the only thing the watch has.
+    var describesToday: Bool {
+        guard let day else { return true }
+        return Calendar.current.isDateInToday(day)
+    }
+
     static let empty = WatchIdleSnapshot(
-        todayTitle: nil, todayExerciseCount: 0, todaySetCount: 0, todayMuscles: [],
+        day: nil, todayTitle: nil, todayExerciseCount: 0, todaySetCount: 0, todayMuscles: [],
         streak: 0, sessionsThisWeek: 0, lastSessionTitle: nil, lastSessionDate: nil, unit: .kg
     )
 }
@@ -220,6 +254,14 @@ enum WatchCommand: Codable, Hashable, Sendable {
     case startFreestyle
     case logSet(id: UUID, weightKg: Double, reps: Int, seconds: Int)
     case undoSet(id: UUID)
+    /// "I'm starting this set, now." The moment travels with the command
+    /// rather than being stamped on arrival: out of range this sits in the
+    /// `transferUserInfo` queue until the phone is nearby again, and a phone
+    /// that stamped its own clock would write a set that began when the lifter
+    /// walked back to their locker.
+    case announceStart(id: UUID, at: Date)
+    /// Takes the announcement back, all the way to never having tapped.
+    case cancelStart(id: UUID)
     /// Jump the logger to a different exercise.
     case focusExercise(catalogID: String)
     case addSet(catalogID: String)
@@ -231,6 +273,26 @@ enum WatchCommand: Codable, Hashable, Sendable {
     /// Heart rate and energy as they change, so the phone's logger and Live
     /// Activity can show what the watch is reading.
     case metrics(WatchWorkoutMetrics)
+}
+
+extension WatchCommand {
+    /// How long an announced start may spend in the delivery queue and still
+    /// be worth writing down.
+    ///
+    /// A set's length is `completedAt - startedAt`, and only the start travels
+    /// with a timestamp of its own — the log is stamped when the phone applies
+    /// it. In range those two are the same instant to within milliseconds, so
+    /// the pair is true. Out of range both commands wait in the queue and land
+    /// together when the lifter is back: the start would keep the moment they
+    /// actually went, the log would take the moment the phone finally heard
+    /// about it, and the export would show a set held for as long as the walk
+    /// back to the locker room took.
+    ///
+    /// So a start that has been waiting is dropped rather than written. The
+    /// announcement is optional in the strongest sense; a set with no start on
+    /// it is the ordinary case and reads correctly. A set claiming eleven
+    /// minutes under a bar does not, and would be believed.
+    static let announcementShelfLife: TimeInterval = 30
 }
 
 // MARK: - Wire format

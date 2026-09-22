@@ -230,6 +230,11 @@ enum WatchMirrorBuilder {
         let last = finished.max { $0.startedAt < $1.startedAt }
 
         return WatchIdleSnapshot(
+            // What the rest of this describes. The watch compares it with its
+            // own clock, because nothing wakes the phone at midnight to say the
+            // training day is over and a wrist raised on a rest day was being
+            // shown yesterday's session as today's.
+            day: calendar.startOfDay(for: .now),
             todayTitle: today?.name,
             todayExerciseCount: today?.items.count ?? 0,
             todaySetCount: today?.totalSets ?? 0,

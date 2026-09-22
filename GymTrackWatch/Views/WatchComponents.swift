@@ -164,6 +164,40 @@ struct WatchRestRing: View {
     }
 }
 
+/// How much of the rest has run, as one continuous bar.
+///
+/// `PhaseProgressBar` counts sets, which are discrete and worth drawing as
+/// ticks. A rest is a duration, and a duration drawn as ticks reads as a
+/// number of things rather than as time going by.
+struct WatchRestProgressBar: View {
+    let progress: Double
+    var phase: SessionPhase = .resting
+    var height: CGFloat = 5
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.13))
+                Capsule()
+                    .fill(phase.bar)
+                    .frame(width: filledWidth(in: geo.size.width))
+                    .shadow(color: phase.glow, radius: 4, y: 1)
+            }
+        }
+        .frame(height: height)
+    }
+
+    /// Never narrower than it is tall: a capsule thinner than its own radius
+    /// draws as a sliver that reads as a rendering fault rather than as a bar
+    /// that has only just started.
+    private func filledWidth(in width: CGFloat) -> CGFloat {
+        guard width.isFinite, width > 0 else { return 0 }
+        let fraction = min(1, max(0, progress))
+        guard fraction > 0 else { return 0 }
+        return min(width, max(height, width * fraction))
+    }
+}
+
 /// A small translucent capsule for a number that isn't the headline.
 struct WatchChip<Content: View>: View {
     var tint: Color = Theme.textSecondary
@@ -188,7 +222,6 @@ struct WatchChip<Content: View>: View {
 struct WatchValueTile: View {
     let title: String
     let value: String
-    var caption: String?
     let isEditing: Bool
     var phase: SessionPhase = .working
 
@@ -200,18 +233,11 @@ struct WatchValueTile: View {
                 .shadow(color: isEditing ? phase.glow : .clear, radius: 6)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-            HStack(spacing: 3) {
-                Text(title.uppercased())
-                    .font(Theme.eyebrow)
-                    .foregroundStyle(isEditing ? phase.tint : Theme.textTertiary)
-                if let caption {
-                    Text("· \(caption)")
-                        .font(Theme.rounded(10, weight: .semibold))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            Text(title.uppercased())
+                .font(Theme.eyebrow)
+                .foregroundStyle(isEditing ? phase.tint : Theme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)

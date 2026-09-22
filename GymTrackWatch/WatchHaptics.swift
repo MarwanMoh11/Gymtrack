@@ -5,6 +5,11 @@ import WatchKit
 /// tap: logging a set, finishing a rest, and finishing a workout.
 enum WatchHaptics {
     static func tick() { WKInterfaceDevice.current().play(.click) }
+    /// Saying a set is beginning. `.start` is the system's own word for it and
+    /// is a rising tap rather than the click every other control here uses, so
+    /// the one thing on this screen that gets confirmed without being looked at
+    /// is the one thing that feels different.
+    static func start() { WKInterfaceDevice.current().play(.start) }
     static func log() { WKInterfaceDevice.current().play(.success) }
     static func restOver() { WKInterfaceDevice.current().play(.notification) }
     static func finish() { WKInterfaceDevice.current().play(.stop) }

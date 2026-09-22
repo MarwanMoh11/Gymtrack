@@ -50,6 +50,12 @@ final class WatchCommandCenter {
         switch command {
         case .requestMirror:
             pushMirror(context: context)
+            // Forced, not left to whether anything changed. A watch only asks
+            // when it suspects it is behind — it has just launched, just come
+            // back into range, or is holding a mirror built on a day that has
+            // since ended — and answering "nothing changed" with silence leaves
+            // it exactly as wrong as it was.
+            WatchBridge.shared.resend()
 
         case .startToday, .startFreestyle:
             guard activeSession(in: context) == nil else { return }
@@ -75,6 +81,27 @@ final class WatchCommandCenter {
             set.isCompleted = true
             set.completedAt = .now
             carryLoadForward(from: set)
+            save(context)
+            pushMirror(context: context)
+
+        case .announceStart(let id, let moment):
+            // The same rule `ActiveWorkout.announceStart` applies, and it has
+            // to be the same one: this is the path that runs with the phone
+            // asleep in a locker, which is exactly where a stale announcement
+            // comes from. See `WatchCommand.announcementShelfLife`.
+            guard let set = setLog(id: id, in: context), !set.isCompleted, set.startedAt == nil,
+                  abs(moment.timeIntervalSinceNow) <= WatchCommand.announcementShelfLife
+            else { return }
+            set.startedAt = moment
+            save(context)
+            pushMirror(context: context)
+
+        case .cancelStart(let id):
+            guard let set = setLog(id: id, in: context) else { return }
+            // Nothing else goes with it. The announcement is the only thing
+            // this tap ever wrote, and the rest it cut short is a countdown on
+            // a screen — the phone is asleep here, so there is none to restore.
+            set.startedAt = nil
             save(context)
             pushMirror(context: context)
 
@@ -297,7 +324,8 @@ enum WatchSnapshotFactory {
                             targetRepsLow: set.targetRepsLow,
                             targetRepsHigh: set.targetRepsHigh,
                             isCompleted: set.isCompleted,
-                            continuation: set.isContinuation
+                            continuation: set.isContinuation,
+                            startedAt: set.startedAt
                         )
                     },
                     lastTimeLabel: lastTimeLabel(group.catalogID),

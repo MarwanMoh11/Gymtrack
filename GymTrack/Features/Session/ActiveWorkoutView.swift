@@ -658,9 +658,7 @@ private struct ExerciseLogCard: View {
             onStart: { workout.announceStart(set) },
             onCancelStart: { workout.cancelStart(set) },
             isLastLogged: workout.lastLoggedSetID == set.id,
-            // The rest bar is already holding the question up at thumb height;
-            // two copies of it would be one too many.
-            asksInline: !workout.restTimer.isRunning,
+            isResting: workout.restTimer.isRunning,
             onRate: { workout.rate(set, feel: $0) },
             onClearRating: { workout.clearRating(set) },
             onEdit: { workout.numbersChanged() }
@@ -882,8 +880,12 @@ private struct SetRow: View {
     /// Whether this is the set that was logged most recently — the only one
     /// that volunteers the effort question.
     let isLastLogged: Bool
-    /// False while the rest bar is up and asking the question itself.
-    let asksInline: Bool
+    /// Whether a rest is counting down. Two things here turn on it: the start
+    /// control says that starting will end the rest, rather than letting a
+    /// countdown the lifter was watching vanish under their thumb — and the
+    /// effort question stays off this row, because the rest bar is already
+    /// holding it up at thumb height and two copies would be one too many.
+    let isResting: Bool
     let onRate: (SetFeel) -> Void
     let onClearRating: () -> Void
     /// A number on this row was changed by hand. The row writes it to the set
@@ -988,7 +990,7 @@ private struct SetRow: View {
     /// the final set of the session. An unanswered set now keeps a way back in.
     private var showsEffortStrip: Bool {
         guard AppSettings.shared.trackRPE, set.isCompleted else { return false }
-        return editingEffort || (isLastLogged && set.rpe == nil && asksInline)
+        return editingEffort || (isLastLogged && set.rpe == nil && !isResting)
     }
 
     /// The quiet way back to a question that was never answered.
@@ -1178,15 +1180,21 @@ private struct SetRow: View {
             }
             .frame(maxWidth: .infinity)
 
-            HStack(spacing: 10) {
-                SetStartStrip(startedAt: set.startedAt, onStart: onStart, onCancel: onCancelStart)
-                    .frame(width: 112)
+            // Stacked, in the order the two things happen, rather than side
+            // by side. Beside a full-strength lime button the start was a grey
+            // 112-point well that read as disabled, and the eye went past it to
+            // the one control that looked pressable — which is how a set gets
+            // logged with nobody having said when it began. Given the full
+            // width and its own line it is unmissable, and it still costs
+            // nothing to ignore: *Log set* is underneath it, unchanged, one tap
+            // away exactly as before.
+            SetStartStrip(startedAt: set.startedAt, isResting: isResting,
+                          onStart: onStart, onCancel: onCancelStart)
 
-                Button(action: onLog) {
-                    Label("Log set", systemImage: "checkmark")
-                }
-                .buttonStyle(PrimaryButtonStyle())
+            Button(action: onLog) {
+                Label("Log set", systemImage: "checkmark")
             }
+            .buttonStyle(PrimaryButtonStyle())
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.86), value: set.startedAt)
         .padding(14)
@@ -1304,14 +1312,22 @@ private struct SetRow: View {
 /// The announcement, and the clock it becomes: one tap to say the set is
 /// beginning now, and a running readout of how long you've been under the bar.
 ///
-/// It lives beside *Log set*, because both actions happen with the same thumb:
-/// start before the effort if timing matters, then log when it is done.
+/// It sits between the numbers and *Log set*, which is the order the two things
+/// happen in — dial the weight, say you're going, log what you did — and it
+/// runs the full width of the card so the eye meets it on the way down rather
+/// than having to find it.
 ///
-/// Deliberately not a step you have to take. It is quieter and narrower than
-/// the full-strength Log button, and a set logged without it is logged exactly
-/// as it always was.
+/// Deliberately not a step you have to take. The ground stays dark where *Log
+/// set* is filled, so which of the two is the session's real button is never in
+/// question, and a set logged without ever touching this is logged exactly as
+/// it always was.
 private struct SetStartStrip: View {
     let startedAt: Date?
+    /// Whether a rest is counting down. Starting a set stops it — that is the
+    /// thing the countdown was counting down to — and the strip says so, since
+    /// a clock the lifter was watching disappearing under their own thumb with
+    /// no explanation reads as a bug.
+    let isResting: Bool
     let onStart: () -> Void
     let onCancel: () -> Void
 
@@ -1325,22 +1341,32 @@ private struct SetStartStrip: View {
 
     private var invitation: some View {
         Button(action: onStart) {
-            HStack(spacing: 6) {
+            HStack(spacing: 12) {
                 Image(systemName: "play.fill")
-                    .font(.system(size: 11, weight: .black))
-                Text("Start")
-                    .font(Theme.rounded(13, weight: .bold))
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(.black)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(SessionPhase.working.gradient))
+                    .shadow(color: Theme.accent.opacity(0.4), radius: 7)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Start set")
+                        .font(Theme.rounded(16, weight: .bold))
+                        .foregroundStyle(Theme.ink)
+                    Text(isResting ? "Ends the rest and times this set" : "Times this set")
+                        .font(Theme.rounded(11, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+
+                Spacer(minLength: 0)
             }
-            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, 13)
             .frame(maxWidth: .infinity)
-            .frame(height: 54)
-            .background(Theme.well, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Theme.edge, lineWidth: 1)
-            }
+            .frame(height: 58)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StartSetButtonStyle())
         .accessibilityLabel("Start set")
         .accessibilityHint("Optional. Records the moment this set begins, so the rest before it and the set itself are separate numbers")
         .transition(.opacity)
@@ -1351,45 +1377,81 @@ private struct SetStartStrip: View {
     /// per expanded row — there is one on every unfinished exercise — would be
     /// several timers running to draw one number each.
     private func working(since start: Date) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 12) {
+            Image(systemName: "stopwatch.fill")
+                .font(.system(size: 13, weight: .black))
+                .foregroundStyle(.black)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(SessionPhase.working.gradient))
+                .shadow(color: Theme.accent.opacity(0.4), radius: 7)
+
             VStack(alignment: .leading, spacing: 0) {
                 Text("WORKING")
                     .font(Theme.microCaps)
-                    .tracking(0.8)
+                    .tracking(0.9)
                     .foregroundStyle(Theme.accent.wash)
                 TimelineView(.periodic(from: start, by: 1)) { context in
                     Text(max(0, context.date.timeIntervalSince(start)).clockString)
-                        .font(Theme.number(14, weight: .semibold))
+                        .font(Theme.number(19, weight: .bold))
                         .foregroundStyle(Theme.ink)
                         .monospacedDigit()
                 }
             }
+
             Spacer(minLength: 0)
+
             Button(action: onCancel) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .black))
+                    .font(.system(size: 11, weight: .black))
                     .foregroundStyle(Theme.textTertiary)
-                    .frame(width: 28, height: 40)
+                    .frame(width: 34, height: 34)
                     .background(Color.white.opacity(0.07), in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Cancel — this set hasn't started")
         }
-        .padding(.leading, 11)
-        .padding(.trailing, 5)
+        .padding(.leading, 13)
+        .padding(.trailing, 8)
         .frame(maxWidth: .infinity)
-        .frame(height: 54)
+        .frame(height: 58)
         .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(LinearGradient(colors: [Theme.accent.opacity(0.18), Theme.accent.opacity(0.05)],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Theme.accent.opacity(0.28), lineWidth: 1)
-                }
+            let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+            ZStack {
+                Theme.well
+                LinearGradient(colors: [Theme.accent.opacity(0.2), Theme.accent.opacity(0.05)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(Theme.accent.opacity(0.42), lineWidth: 1.5) }
         }
         .accessibilityElement(children: .contain)
         .transition(.opacity)
+    }
+}
+
+/// A control with the accent's full attention that still isn't the primary one.
+///
+/// The ground is the same well the queued rows are pressed into, so it reads as
+/// part of the card rather than as a second filled button competing with *Log
+/// set* — but it carries the accent on its edge and its glyph, and it presses.
+/// The old start button borrowed `textSecondary` on a plain well and looked,
+/// accurately, like something that had been disabled.
+private struct StartSetButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return configuration.label
+            .background {
+                ZStack {
+                    Theme.well
+                    LinearGradient(colors: [Theme.accent.opacity(0.14), Theme.accent.opacity(0.02)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
+                .clipShape(shape)
+                .overlay { shape.strokeBorder(Theme.accent.opacity(0.38), lineWidth: 1.5) }
+            }
+            .shadow(color: Theme.accent.opacity(configuration.isPressed ? 0.1 : 0.2), radius: 10, y: 4)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 

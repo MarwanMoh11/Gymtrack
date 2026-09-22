@@ -49,10 +49,24 @@ struct RootView: View {
         }
         .onChange(of: customExercises.count) { _, _ in syncCustomExercises() }
         .onChange(of: hiddenExercises.count) { _, _ in syncHiddenExercises() }
-        // The watch's idle screen is built from the plan and the history, so
-        // it has to be restamped whenever either moves.
-        .onChange(of: sessions.count) { _, _ in pushWatchIdle(); publishWidgets() }
-        .onChange(of: plans.count) { _, _ in pushWatchIdle(); publishWidgets() }
+        // Watched as the whole snapshot rather than as two counts.
+        //
+        // The counts moved only when a plan or a session was created or
+        // deleted, and almost nothing that changes what the wrist should say
+        // does that: marking today as a rest day, renaming it, moving it to
+        // another weekday, swapping an exercise or changing its sets all leave
+        // both counts exactly where they were. So the watch went on offering a
+        // session that was no longer scheduled — a workout on a rest day, which
+        // is the app inventing training — until something unrelated happened to
+        // restamp the mirror.
+        //
+        // Comparing what is about to be sent is also the only version of this
+        // that stays correct when a field is added to the snapshot, rather than
+        // needing a new trigger alongside it.
+        .onChange(of: watchIdle) { _, snapshot in
+            WatchBridge.shared.update(idle: snapshot)
+            publishWidgets()
+        }
         // Derived rather than set at each call site — the session can be put
         // away or brought back from the logger, the dock, the Today card and a
         // Live Activity tap, and every one of them has to agree.
@@ -267,8 +281,15 @@ struct RootView: View {
         activeWorkout?.pushToWatch()
     }
 
+    /// What the watch's idle screen is built from — today's prescription, the
+    /// streak and the last thing trained. Computed rather than stored so the
+    /// comparison above is made against the same lines that get sent.
+    private var watchIdle: WatchIdleSnapshot {
+        WatchMirrorBuilder.idle(plans: plans, sessions: sessions)
+    }
+
     private func pushWatchIdle() {
-        WatchBridge.shared.update(idle: WatchMirrorBuilder.idle(plans: plans, sessions: sessions))
+        WatchBridge.shared.update(idle: watchIdle)
     }
 
     /// Anything the running session knows how to do, it does. What's left is
@@ -319,6 +340,11 @@ struct RootView: View {
         case .requestMirror:
             pushWatchIdle()
             activeWorkout?.pushToWatch()
+            // Both of those only push when something changed, and a watch asks
+            // precisely when it suspects it is holding something stale — a
+            // mirror built yesterday says the same thing today and would be
+            // answered with silence.
+            WatchBridge.shared.resend()
             return true
 
         default:

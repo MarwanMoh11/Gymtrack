@@ -11,6 +11,8 @@ struct WatchRootView: View {
     var connector: WatchConnector
     var recorder: WatchWorkoutRecorder
 
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var rest = WatchRestTimer()
     @State private var page: Page = .log
     @State private var isEnding = false
@@ -63,6 +65,14 @@ struct WatchRootView: View {
             // Land on the logger for a new session rather than wherever the
             // last one was left.
             if id != nil { page = .log }
+        }
+        // A raised wrist is the moment the watch is most likely to be holding
+        // something out of date — the app can sit on one screen for a day, and
+        // the idle screen's every line answers "today". The idle view asks on
+        // the way in, which covers a launch but not a wrist coming back up to
+        // a view that never went away.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { connector.requestMirror() }
         }
     }
 

@@ -380,9 +380,21 @@ final class ActiveWorkout {
     /// Optional in the strongest sense — nothing here is required for a set to
     /// be logged, and a session where it's never touched behaves exactly as it
     /// did before this existed.
-    func announceStart(_ set: SetLog) {
+    ///
+    /// - Parameter moment: when the set began. Defaults to now, which is right
+    ///   for a tap on the phone. The wrist passes its own timestamp, because a
+    ///   command sent out of range waits in a queue until the phone is nearby
+    ///   again and stamping it on arrival would report a set that started in
+    ///   the locker room.
+    func announceStart(_ set: SetLog, at moment: Date = .now) {
         guard !set.isCompleted, set.startedAt == nil else { return }
-        set.startedAt = .now
+        // An announcement that has been sitting in the watch's delivery queue
+        // is no longer something this set can be measured against — see
+        // `WatchCommand.announcementShelfLife`. Ahead of the clock is the same
+        // question from the other side: the two devices agree to within
+        // milliseconds, and anything further is not a moment worth keeping.
+        guard abs(moment.timeIntervalSinceNow) <= WatchCommand.announcementShelfLife else { return }
+        set.startedAt = moment
 
         // The rest is over the moment you say you're starting — that is the
         // thing the countdown was counting down to. Left running it would tick
@@ -397,9 +409,11 @@ final class ActiveWorkout {
         }
 
         save()
-        // Deliberately the small tick and not `log()`: the heavier buzz means
-        // "that's in the record", and it stays unique to a set being logged.
-        Haptics.tick()
+        // Its own feel, not the stepper's tick and not `log()`: the heavier
+        // thud means "that's in the record" and stays unique to a set being
+        // logged, while the tick was too faint to confirm anything to somebody
+        // who is looking at a bar rather than at the screen.
+        Haptics.start()
     }
 
     /// Un-says it, all the way back to never having tapped. The stamp goes, and
@@ -891,6 +905,16 @@ final class ActiveWorkout {
         case .undoSet(let id):
             guard let set = session.sets.first(where: { $0.id == id }) else { return true }
             uncomplete(set)
+            return true
+
+        case .announceStart(let id, let moment):
+            guard let set = session.sets.first(where: { $0.id == id }) else { return true }
+            announceStart(set, at: moment)
+            return true
+
+        case .cancelStart(let id):
+            guard let set = session.sets.first(where: { $0.id == id }) else { return true }
+            cancelStart(set)
             return true
 
         case .focusExercise(let catalogID):
