@@ -26,7 +26,11 @@ final class Plan {
     /// Days in display order.
     var orderedDays: [PlanDay] { days.sorted { $0.order < $1.order } }
 
-    var trainingDayCount: Int { days.filter { !$0.isRest }.count }
+    /// Days that are actually trained. A day with nothing in it yet is a
+    /// placeholder — "Add day" makes one — and counting it had the routine claim
+    /// a session a week it has no exercises for, and Today measure the week
+    /// against it.
+    var trainingDayCount: Int { days.filter { !$0.isRest && !$0.items.isEmpty }.count }
 
     /// The day scheduled for a given date, if any.
     func day(for date: Date) -> PlanDay? {
