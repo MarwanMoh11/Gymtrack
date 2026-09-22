@@ -93,10 +93,19 @@ watch and the widgets, and breaking them is easy to miss.
 If every build suddenly exits 69, Xcode's licence needs re-accepting after a
 major upgrade (`sudo xcodebuild -license accept`). Only the user can run that.
 
-## Verifying on the simulator
+## Testing
 
-Drive the real UI with `mcp__Claude_Code_iOS_Simulator__control` rather than
-asserting from code. Find a booted device with `xcrun simctl list devices booted`.
+The user tests changes on the simulator themselves. Don't drive the simulator to
+verify your own work, not even as a spot check, unless the user asks for it. The
+check that is yours is the big one: all three schemes build (see above). Say
+plainly that nothing was UI-tested, and end with a short list of what the user
+should try.
+
+## Driving the simulator, when asked
+
+When the user does ask for a simulator check, drive the real UI with
+`mcp__Claude_Code_iOS_Simulator__control` rather than asserting from code. Find a
+booted device with `xcrun simctl list devices booted`.
 
 Things that will cost you an hour if you rediscover them:
 
