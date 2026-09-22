@@ -117,7 +117,18 @@ Things that will cost you an hour if you rediscover them:
   accepts taps on its toggles but ignores its own Allow button, and
   `simctl privacy` has no health service. Anything behind Health read access can
   only be proven on a real phone — say so plainly rather than implying otherwise.
-- **The watch simulator is not granted for touch automation** on this machine.
+- **The watch simulator takes taps too.** Value tiles, the steppers and Log set
+  all drive fine; this note used to say otherwise and cost an afternoon of
+  working around it. Its coordinate space is 208x248 pt against a 416x496 px
+  screenshot, so scale by exactly 0.5.
+- **Bringing the link up takes both sims in the right order.** Boot the phone
+  first and the watch second — `simctl list pairs` has to read
+  `active, connected`, not `disconnected`. Then install the phone `.app` and
+  install `GymTrack.app/Watch/GymTrackWatch.app` *from inside that bundle*: a
+  separately built watch app leaves `WCSession` reporting `appInstalled: NO` and
+  the phone refusing every push with `WCErrorCodeWatchAppNotInstalled`.
+  Reinstalling the phone app does not resurrect the running session, so start a
+  fresh workout rather than concluding the session was lost.
 - **`simctl launch` drops app arguments unless they follow `--`**:
   `launch --terminate-running-process <udid> <bundle> -- -GTSeedSampleData`.
   That flag seeds ~9 weeks of history, but only when an active plan already
