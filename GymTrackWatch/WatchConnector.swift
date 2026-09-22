@@ -164,10 +164,15 @@ final class WatchConnector: NSObject {
     }
 
     /// Logs a set: drawn as done here immediately, confirmed by the phone.
+    ///
+    /// Stamped here too, exactly like an announced start. The phone may be in a
+    /// locker or left at home, in which case this command waits in the delivery
+    /// queue and the phone's own clock on arrival describes the walk back
+    /// rather than the set.
     func logSet(_ set: WatchSetSnapshot, weightKg: Double, reps: Int, seconds: Int) {
         pendingUndos.remove(set.id)
         pendingCompletions[set.id] = PendingLog(weightKg: weightKg, reps: reps, seconds: seconds)
-        send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds))
+        send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds, at: Date()))
     }
 
     func undoSet(_ set: WatchSetSnapshot) {

@@ -201,9 +201,15 @@ final class ActiveWorkout {
     // MARK: - Logging
 
     /// Marks a set done, checks for a PR, and kicks off the rest timer.
-    func complete(_ set: SetLog, restSeconds: Int?) {
+    ///
+    /// - Parameter moment: when the set was logged. Defaults to now, which is
+    ///   right for a tap on the phone. The wrist passes its own timestamp,
+    ///   because a log sent out of range waits in a queue until the phone is
+    ///   nearby again and stamping it on arrival would report a set that
+    ///   finished on the walk back rather than under the bar.
+    func complete(_ set: SetLog, restSeconds: Int?, at moment: Date = .now) {
         set.isCompleted = true
-        set.completedAt = .now
+        set.completedAt = moment
         lastLoggedSetID = set.id
         // Whatever the last answer offered belonged to the set before this one.
         // Logging another set is an answer of its own — you took the weight you
@@ -231,7 +237,16 @@ final class ActiveWorkout {
 
         if AppSettings.shared.restTimerAutoStart {
             let seconds = restSeconds ?? AppSettings.shared.defaultRestSeconds
-            restTimer.start(seconds: seconds)
+            // The rest began when the set was logged, and for a set logged on
+            // the wrist out of range that is not this moment. Starting a fresh
+            // countdown for one of those would put the whole app back into
+            // resting — amber header, amber Lock Screen, a "Rest over"
+            // notification — for a set the lifter finished in another room and
+            // has long since rested through. So the rest is picked up where it
+            // actually is: still running, and the two screens agree on how much
+            // of it is left; already over, and there is nothing to start.
+            restTimer.restore(endingAt: moment.addingTimeInterval(TimeInterval(seconds)),
+                              totalSeconds: seconds)
         }
     }
 
@@ -388,12 +403,13 @@ final class ActiveWorkout {
     ///   the locker room.
     func announceStart(_ set: SetLog, at moment: Date = .now) {
         guard !set.isCompleted, set.startedAt == nil else { return }
-        // An announcement that has been sitting in the watch's delivery queue
-        // is no longer something this set can be measured against — see
-        // `WatchCommand.announcementShelfLife`. Ahead of the clock is the same
-        // question from the other side: the two devices agree to within
-        // milliseconds, and anything further is not a moment worth keeping.
-        guard abs(moment.timeIntervalSinceNow) <= WatchCommand.announcementShelfLife else { return }
+        // A start that has been sitting in the watch's delivery queue is kept:
+        // the log that closes the set carries the wrist's clock too, so the
+        // pair is true however long the two of them waited together. Only a
+        // start from ahead of this clock is refused, and that one is the two
+        // devices disagreeing about the time rather than a moment — see
+        // `WatchCommand.clockSkewTolerance`.
+        guard moment.timeIntervalSinceNow <= WatchCommand.clockSkewTolerance else { return }
         set.startedAt = moment
 
         // The rest is over the moment you say you're starting — that is the
@@ -894,12 +910,14 @@ final class ActiveWorkout {
     @discardableResult
     func apply(_ command: WatchCommand) -> Bool {
         switch command {
-        case .logSet(let id, let weightKg, let reps, let seconds):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
             guard let set = session.sets.first(where: { $0.id == id }) else { return true }
             set.weightKg = weightKg
             set.reps = reps
             if set.tracking == .duration { set.seconds = seconds }
-            complete(set, restSeconds: planItem(for: set.catalogID)?.resolvedRestSeconds)
+            complete(set,
+                     restSeconds: planItem(for: set.catalogID)?.resolvedRestSeconds,
+                     at: WatchCommand.loggedMoment(loggedAt))
             return true
 
         case .undoSet(let id):

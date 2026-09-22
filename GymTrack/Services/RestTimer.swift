@@ -53,16 +53,25 @@ final class RestTimer {
         Haptics.tick()
     }
 
-    /// Puts a cancelled rest back exactly where it was, rather than starting a
-    /// fresh one from now.
+    /// Puts a rest back where it actually is, rather than starting a fresh one
+    /// from now.
     ///
-    /// The only caller is a start announced by mis-tap being taken back: that
-    /// tap stopped a rest, and undoing it has to leave the screen reading as it
-    /// did a second earlier — a countdown that resumes at 1:12 when it was
-    /// stopped at 1:12, not one that begins again at 1:30. A rest whose end has
-    /// already gone past is simply over, and there is nothing to put back.
+    /// Two callers, and both of them know when the rest began better than this
+    /// clock does. A start announced by mis-tap and taken back has to leave the
+    /// screen reading as it did a second earlier — a countdown that resumes at
+    /// 1:12 when it was stopped at 1:12, not one that begins again at 1:30. And
+    /// a set logged on the wrist out of range began its rest when it was
+    /// logged, which may have been minutes before the phone heard about it. A
+    /// rest whose end has already gone past is simply over, and there is
+    /// nothing to put back.
     func restore(endingAt end: Date, totalSeconds total: Int) {
         guard total > 0, end > .now else { return }
+        // Asked here as well as in `start`, because a rest that begins with a
+        // set logged on the wrist reaches the countdown through this door and
+        // never through that one. Without it a lifter who rests by way of the
+        // watch would never be asked, and "Rest over" would silently never
+        // arrive.
+        Self.requestNotificationPermissionIfNeeded()
         totalSeconds = total
         startedAt = end.addingTimeInterval(-TimeInterval(total))
         endsAt = end

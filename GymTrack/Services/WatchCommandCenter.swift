@@ -73,13 +73,20 @@ final class WatchCommandCenter {
             save(context)
             pushMirror(context: context)
 
-        case .logSet(let id, let weightKg, let reps, let seconds):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
             guard let set = setLog(id: id, in: context) else { return }
             set.weightKg = weightKg
             set.reps = reps
             if set.tracking == .duration { set.seconds = seconds }
             set.isCompleted = true
-            set.completedAt = .now
+            // The wrist's clock rather than this one, and this is the path
+            // where the two come apart: it runs with the phone asleep in a
+            // locker or out of range entirely, so the moment it was handed the
+            // command is the moment the lifter came back, not the moment they
+            // racked the bar. No rest is started to go with it — there is no
+            // screen here to count one down on, and the wrist has been running
+            // the one that matters since the set was logged.
+            set.completedAt = WatchCommand.loggedMoment(loggedAt)
             carryLoadForward(from: set)
             save(context)
             pushMirror(context: context)
@@ -87,10 +94,11 @@ final class WatchCommandCenter {
         case .announceStart(let id, let moment):
             // The same rule `ActiveWorkout.announceStart` applies, and it has
             // to be the same one: this is the path that runs with the phone
-            // asleep in a locker, which is exactly where a stale announcement
-            // comes from. See `WatchCommand.announcementShelfLife`.
+            // asleep in a locker, which is exactly where a start that waited in
+            // the queue comes from — and waiting is no longer a reason to
+            // refuse one. See `WatchCommand.clockSkewTolerance`.
             guard let set = setLog(id: id, in: context), !set.isCompleted, set.startedAt == nil,
-                  abs(moment.timeIntervalSinceNow) <= WatchCommand.announcementShelfLife
+                  moment.timeIntervalSinceNow <= WatchCommand.clockSkewTolerance
             else { return }
             set.startedAt = moment
             save(context)

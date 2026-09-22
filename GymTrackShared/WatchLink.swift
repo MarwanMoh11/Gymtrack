@@ -252,7 +252,19 @@ enum WatchCommand: Codable, Hashable, Sendable {
     case requestMirror
     case startToday
     case startFreestyle
-    case logSet(id: UUID, weightKg: Double, reps: Int, seconds: Int)
+    /// A set the lifter logged on the wrist, and the moment they logged it.
+    ///
+    /// The moment travels with the command for the same reason `announceStart`
+    /// carries one: out of range this waits in the `transferUserInfo` queue
+    /// until the phone is nearby again, and a phone stamping its own clock on
+    /// arrival would record the set as having finished when the lifter walked
+    /// back rather than when they put the bar down. Three things read that
+    /// stamp and would all be wrong together — the session's end, the rest in
+    /// front of the next set, and the window a set's heart rate is read from.
+    ///
+    /// Optional only so a command already queued when the apps are updated
+    /// still decodes; see `loggedMoment` for what a command without one gets.
+    case logSet(id: UUID, weightKg: Double, reps: Int, seconds: Int, at: Date?)
     case undoSet(id: UUID)
     /// "I'm starting this set, now." The moment travels with the command
     /// rather than being stamped on arrival: out of range this sits in the
@@ -276,23 +288,44 @@ enum WatchCommand: Codable, Hashable, Sendable {
 }
 
 extension WatchCommand {
-    /// How long an announced start may spend in the delivery queue and still
-    /// be worth writing down.
+    /// How far ahead of this device's clock a moment stamped on the wrist may
+    /// be and still be worth writing down.
     ///
-    /// A set's length is `completedAt - startedAt`, and only the start travels
-    /// with a timestamp of its own — the log is stamped when the phone applies
-    /// it. In range those two are the same instant to within milliseconds, so
-    /// the pair is true. Out of range both commands wait in the queue and land
-    /// together when the lifter is back: the start would keep the moment they
-    /// actually went, the log would take the moment the phone finally heard
-    /// about it, and the export would show a set held for as long as the walk
-    /// back to the locker room took.
+    /// This used to be a shelf life, and the difference is worth stating. A
+    /// set's length is `completedAt - startedAt`, and there was a time when
+    /// only the start travelled with a timestamp of its own — the log was
+    /// stamped when the phone applied it. Out of range both commands waited in
+    /// the queue and landed together when the lifter was back: the start kept
+    /// the moment they actually went, the log took the moment the phone
+    /// finally heard about it, and the export showed a set held for as long as
+    /// the walk back to the locker room took. Dropping a start that had been
+    /// waiting was the lesser of those two wrongs.
     ///
-    /// So a start that has been waiting is dropped rather than written. The
-    /// announcement is optional in the strongest sense; a set with no start on
-    /// it is the ordinary case and reads correctly. A set claiming eleven
-    /// minutes under a bar does not, and would be believed.
-    static let announcementShelfLife: TimeInterval = 30
+    /// Both ends carry the wrist's own clock now, so a pair that waited eleven
+    /// minutes in the queue is as true as one that arrived instantly, and
+    /// refusing it would be throwing away the only honest record of the set
+    /// there is. Waiting is no longer a reason to disbelieve anything.
+    ///
+    /// What waiting cannot explain is a stamp from the *future*. That is the
+    /// two devices disagreeing about what time it is, and a set that began
+    /// after it ended has no length, no rest in front of it and no heart-rate
+    /// window — every screen drawing it would count backwards. A watch keeps
+    /// time with the phone it is paired to, so thirty seconds is already far
+    /// more drift than there is; past it, what arrived is somebody's clock
+    /// being wrong rather than a moment.
+    static let clockSkewTolerance: TimeInterval = 30
+
+    /// When to record a set as having been logged, given whatever the wrist
+    /// sent with it.
+    ///
+    /// A command from a build that predates the stamp carries none, and falls
+    /// back to the moment the phone applies it — exactly what every set did
+    /// before this, so a log already sitting in the queue when the apps were
+    /// updated lands no worse off than it would have.
+    static func loggedMoment(_ stamp: Date?) -> Date {
+        guard let stamp, stamp.timeIntervalSinceNow <= clockSkewTolerance else { return .now }
+        return stamp
+    }
 }
 
 // MARK: - Wire format
