@@ -53,6 +53,8 @@ struct ExerciseEditorView: View {
     /// keystroke in the name field.
     @State private var usage = Usage(plans: 0, sets: 0)
     @State private var didLoad = false
+    @State private var hasSets = false
+    @State private var operationError: String?
 
     private var record: CustomExerciseRecord? {
         if case .existing(let record) = subject { return record }
@@ -94,7 +96,7 @@ struct ExerciseEditorView: View {
                 }
                 .listRowBackground(Theme.surface)
 
-                Section("How is it measured?") {
+                Section {
                     Picker("Tracking", selection: $tracking) {
                         ForEach(TrackingMode.allCases, id: \.self) { mode in
                             Text(mode.label).tag(mode)
@@ -102,6 +104,13 @@ struct ExerciseEditorView: View {
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
+                    .disabled(hasSets)
+                } header: {
+                    Text("How is it measured?")
+                } footer: {
+                    if hasSets {
+                        Text("Tracking stays fixed once this exercise has sets. Create a new exercise to measure it a different way; the old numbers keep their meaning.")
+                    }
                 }
                 .listRowBackground(Theme.surface)
 
@@ -171,6 +180,14 @@ struct ExerciseEditorView: View {
             } message: {
                 Text(deleteMessage)
             }
+            .alert("Couldn't update exercise", isPresented: Binding(
+                get: { operationError != nil },
+                set: { if !$0 { operationError = nil } }
+            )) {
+                Button("OK") { operationError = nil }
+            } message: {
+                Text(operationError ?? "Please try again.")
+            }
             .task {
                 // Once only: re-running on every redraw would fight the fields
                 // while they're being typed into.
@@ -227,25 +244,47 @@ struct ExerciseEditorView: View {
             muscles = record.muscles.filter { seen.insert($0).inserted }
             equipment = record.equipment
             tracking = record.tracking
+            let id = record.id
+            // A failed count locks the choice instead of risking a change to
+            // what old sets mean. Save checks again before writing.
+            hasSets = ((try? context.fetchCount(FetchDescriptor<SetLog>(
+                predicate: #Predicate { $0.catalogID == id }))) ?? 1) > 0
         }
     }
 
     private func save() {
         let saved: CustomExerciseRecord
-        if let record {
-            record.apply(name: trimmedName,
-                         muscles: muscles,
-                         equipment: equipment,
-                         tracking: tracking)
-            saved = record
-        } else {
-            saved = CustomExerciseRecord(name: trimmedName,
-                                         muscles: muscles,
-                                         equipment: equipment,
-                                         tracking: tracking)
-            context.insert(saved)
+        do {
+            if let record {
+                if record.tracking != tracking {
+                    let id = record.id
+                    let count = try context.fetchCount(FetchDescriptor<SetLog>(
+                        predicate: #Predicate { $0.catalogID == id }))
+                    guard count == 0 else {
+                        hasSets = true
+                        tracking = record.tracking
+                        operationError = "This exercise now has sets. Its tracking can't change without changing what those sets mean."
+                        return
+                    }
+                }
+                record.apply(name: trimmedName,
+                             muscles: muscles,
+                             equipment: equipment,
+                             tracking: tracking)
+                saved = record
+            } else {
+                saved = CustomExerciseRecord(name: trimmedName,
+                                             muscles: muscles,
+                                             equipment: equipment,
+                                             tracking: tracking)
+                context.insert(saved)
+            }
+            try context.save()
+        } catch {
+            context.rollback()
+            operationError = error.localizedDescription
+            return
         }
-        try? context.save()
         context.refreshCustomExercises()
         Haptics.success()
         onSave?(saved.asCatalogExercise)
@@ -284,8 +323,27 @@ struct ExerciseEditorView: View {
 
     private func delete() {
         guard let record else { return }
-        context.delete(record)
-        try? context.save()
+        do {
+            let id = record.id
+            let sets = try context.fetch(FetchDescriptor<SetLog>(
+                predicate: #Predicate { $0.catalogID == id }))
+            // Rows from older app versions have no snapshot. Give them the
+            // current measurement before their catalog entry disappears.
+            for set in sets where set.trackingRaw == nil {
+                set.trackingRaw = record.tracking.rawValue
+            }
+            let items = try context.fetch(FetchDescriptor<PlanItem>(
+                predicate: #Predicate { $0.catalogID == id }))
+            for item in items where item.trackingRaw == nil {
+                item.trackingRaw = record.tracking.rawValue
+            }
+            context.delete(record)
+            try context.save()
+        } catch {
+            context.rollback()
+            operationError = error.localizedDescription
+            return
+        }
         context.refreshCustomExercises()
         Haptics.warn()
         dismiss()

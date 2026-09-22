@@ -11,6 +11,7 @@ struct OnboardingView: View {
     @State private var name = ""
     @State private var unit: WeightUnit = .kg
     @State private var selectedTemplate: PlanTemplate.ID = PlanTemplate.upperLower.id
+    @State private var saveError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +32,14 @@ struct OnboardingView: View {
                 .padding(.bottom, 12)
         }
         .gtScreenBackground()
+        .alert("Couldn't start routine", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK") { saveError = nil }
+        } message: {
+            Text(saveError ?? "Your routine couldn't be saved. Please try again.")
+        }
     }
 
     private var progressDots: some View {
@@ -77,6 +86,7 @@ struct OnboardingView: View {
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.edge, lineWidth: 1))
                     .submitLabel(.next)
                     .autocorrectionDisabled()
+                    .onSubmit { withAnimation { step = 1 } }
             }
             .padding(.top, 12)
 
@@ -210,13 +220,18 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        AppSettings.shared.userName = name.trimmingCharacters(in: .whitespaces)
-        AppSettings.shared.weightUnit = unit
-
         let template = PlanTemplate.all.first { $0.id == selectedTemplate } ?? PlanTemplate.upperLower
         template.materialise(in: context, makeActive: true)
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            saveError = error.localizedDescription
+            return
+        }
 
+        AppSettings.shared.userName = name.trimmingCharacters(in: .whitespaces)
+        AppSettings.shared.weightUnit = unit
         Haptics.success()
         onFinish()
     }

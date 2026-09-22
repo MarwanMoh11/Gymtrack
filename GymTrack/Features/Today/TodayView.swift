@@ -381,18 +381,22 @@ struct TodayView: View {
     private var restDayCard: some View {
         VStack(spacing: 14) {
             GlyphTile(symbol: "moon.zzz.fill", tint: SessionPhase.done.tint, size: 62)
-            Text("Rest day")
+            Text(activePlan?.trainingDayCount == 0 ? "Build your routine" : "Rest day")
                 .font(Theme.rounded(22, weight: .heavy))
                 .foregroundStyle(Theme.ink)
-            Text("Nothing scheduled. Recovery is part of the plan — but the gym is still open if you want it.")
+            Text(activePlan?.trainingDayCount == 0
+                 ? "Add exercises to a day in Plan, or start a freestyle workout now."
+                 : "Nothing scheduled. Recovery is part of the plan — but the gym is still open if you want it.")
                 .font(Theme.rounded(14, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 8) {
-                Button("Pick a session") { showingDayPicker = true }
-                    .buttonStyle(PrimaryButtonStyle(phase: .done))
+                if activePlan?.trainingDayCount ?? 0 > 0 {
+                    Button("Pick a session") { showingDayPicker = true }
+                        .buttonStyle(PrimaryButtonStyle(phase: .done))
+                }
                 Button("Freestyle workout", action: startFreestyle)
                     .buttonStyle(SecondaryButtonStyle())
             }
@@ -547,7 +551,7 @@ struct DayPickerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 10) {
-                    ForEach(plan?.orderedDays.filter { !$0.isRest } ?? []) { day in
+                    ForEach(plan?.orderedDays.filter { !$0.isRest && !$0.items.isEmpty } ?? []) { day in
                         Button { onPick(day) } label: {
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 3) {

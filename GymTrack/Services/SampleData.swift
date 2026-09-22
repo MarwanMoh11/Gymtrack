@@ -62,7 +62,8 @@ enum SampleData {
                             reps: reps,
                             seconds: item.tracking == .duration ? item.targetSeconds + Int.random(in: -5...10) : 0,
                             targetRepsLow: item.targetRepsLow,
-                            targetRepsHigh: item.targetRepsHigh
+                            targetRepsHigh: item.targetRepsHigh,
+                            tracking: item.tracking
                         )
                         set.isCompleted = true
                         set.completedAt = start.addingTimeInterval(Double(exerciseIndex * 480 + setIndex * 130))

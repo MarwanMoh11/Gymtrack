@@ -36,10 +36,14 @@ struct ProgressDashboardView: View {
         return NavigationStack {
             ScrollView {
                 if figures.sessions.isEmpty {
-                    EmptyStateView(icon: "chart.xyaxis.line",
-                                   title: "Nothing to chart yet",
-                                   message: "Finish your first workout and this screen fills up with streaks, volume and records.")
-                        .padding(.top, 60)
+                    VStack(spacing: 16) {
+                        EmptyStateView(icon: "chart.xyaxis.line",
+                                       title: "Nothing to chart yet",
+                                       message: "Finish your first workout and this screen fills up with streaks, volume and records.")
+                            .padding(.top, 60)
+                        BodyWeightCard()
+                    }
+                    .padding(.horizontal, 16)
                 } else {
                     VStack(spacing: 16) {
                         heroCard(figures).riseIn(0)

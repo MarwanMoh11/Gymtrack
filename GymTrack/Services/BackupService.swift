@@ -67,6 +67,9 @@ enum BackupService {
         var targetRepsHigh: Int
         var targetWeightKg: Double
         var targetSeconds: Int
+        /// Kept for a plan slot whose custom exercise was deleted. Older
+        /// backups use the exercise catalog when this is absent.
+        var tracking: String?
         /// Absent/null means the exercise follows the app-wide default rest.
         var restSeconds: Int?
         var notes: String
@@ -117,6 +120,9 @@ enum BackupService {
         var weightKg: Double
         var reps: Int
         var seconds: Int
+        /// How this set was measured when logged. Absent on older backups;
+        /// the exercise catalog remains their best available description.
+        var tracking: String?
         var isCompleted: Bool
         /// Written by versions that had a warm-up flag. Decoded so those
         /// backups still restore, and ignored — a set is a set now.
@@ -285,7 +291,8 @@ enum BackupService {
                                        ItemDTO(catalogID: item.catalogID, name: item.name, order: item.order,
                                                targetSets: item.targetSets, targetRepsLow: item.targetRepsLow,
                                                targetRepsHigh: item.targetRepsHigh, targetWeightKg: item.targetWeightKg,
-                                               targetSeconds: item.targetSeconds, restSeconds: item.restSeconds,
+                                               targetSeconds: item.targetSeconds, tracking: item.trackingRaw,
+                                               restSeconds: item.restSeconds,
                                                notes: item.notes)
                                    })
                         })
@@ -306,6 +313,7 @@ enum BackupService {
                                SetDTO(catalogID: set.catalogID, exerciseName: set.exerciseName,
                                       exerciseOrder: set.exerciseOrder, setIndex: set.setIndex,
                                       weightKg: set.weightKg, reps: set.reps, seconds: set.seconds,
+                                      tracking: set.trackingRaw,
                                       isCompleted: set.isCompleted,
                                       completedAt: set.completedAt,
                                       startedAt: set.startedAt,
@@ -436,6 +444,17 @@ enum BackupService {
         }
     }
 
+    enum WipeError: LocalizedError {
+        case workoutInProgress
+
+        var errorDescription: String? {
+            switch self {
+            case .workoutInProgress:
+                "Finish or discard the workout that's running first. Erasing now would remove it from under the logger and the watch."
+            }
+        }
+    }
+
     /// Replaces everything currently stored with the archive's contents.
     ///
     /// Refused while a workout is open. Export leaves the running session out,
@@ -485,6 +504,7 @@ enum BackupService {
                                         targetRepsHigh: itemDTO.targetRepsHigh, targetWeightKg: itemDTO.targetWeightKg,
                                         targetSeconds: itemDTO.targetSeconds, restSeconds: itemDTO.restSeconds)
                     item.notes = itemDTO.notes
+                    item.trackingRaw = itemDTO.tracking.flatMap(TrackingMode.init(rawValue:))?.rawValue
                     item.day = day
                     context.insert(item)
                 }
@@ -521,7 +541,8 @@ enum BackupService {
                 let set = SetLog(catalogID: setDTO.catalogID, exerciseName: setDTO.exerciseName,
                                  exerciseOrder: setDTO.exerciseOrder, setIndex: setDTO.setIndex,
                                  weightKg: setDTO.weightKg, reps: setDTO.reps, seconds: setDTO.seconds,
-                                 targetRepsLow: setDTO.targetRepsLow, targetRepsHigh: setDTO.targetRepsHigh)
+                                 targetRepsLow: setDTO.targetRepsLow, targetRepsHigh: setDTO.targetRepsHigh,
+                                 tracking: setDTO.tracking.flatMap(TrackingMode.init(rawValue:)))
                 set.isCompleted = setDTO.isCompleted
                 set.completedAt = setDTO.completedAt
                 set.startedAt = setDTO.startedAt
@@ -597,11 +618,14 @@ enum BackupService {
     /// `PlanDay` and fails with a constraint trigger violation. Removing the
     /// roots lets the cascade rules do the work.
     static func wipe(context: ModelContext) throws {
+        let open = try context.fetchCount(FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { $0.endedAt == nil }))
+        guard open == 0 else { throw WipeError.workoutInProgress }
+
         for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
         for session in try context.fetch(FetchDescriptor<WorkoutSession>()) { context.delete(session) }
         for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
-        for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
 
         // Sweep anything the cascade missed (orphans from an interrupted write).
         for item in try context.fetch(FetchDescriptor<PlanItem>()) { context.delete(item) }

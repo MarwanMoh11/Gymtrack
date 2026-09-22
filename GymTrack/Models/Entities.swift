@@ -39,7 +39,7 @@ final class Plan {
 
     /// The day scheduled on a weekday, 1 = Sunday, if any.
     func day(onWeekday weekday: Int) -> PlanDay? {
-        orderedDays.first { $0.weekday == weekday && !$0.isRest }
+        orderedDays.first { $0.weekday == weekday && !$0.isRest && !$0.items.isEmpty }
     }
 }
 
@@ -115,6 +115,9 @@ final class PlanItem {
     var targetWeightKg: Double = 0
     /// Target hold/work time for duration-tracked exercises.
     var targetSeconds: Int = 45
+    /// Kept when a custom exercise is deleted. Its plan slot still has a name
+    /// and targets, and must still know whether those targets are reps or time.
+    var trackingRaw: String?
     /// Per-exercise rest override. `nil` means "follow the app-wide default",
     /// so changing that setting reaches every exercise that hasn't been tuned.
     var restSeconds: Int?
@@ -144,7 +147,9 @@ final class PlanItem {
     }
 
     var catalog: CatalogExercise? { ExerciseCatalog.shared.exercise(id: catalogID) }
-    var tracking: TrackingMode { catalog?.tracking ?? .weightReps }
+    var tracking: TrackingMode {
+        catalog?.tracking ?? trackingRaw.flatMap(TrackingMode.init(rawValue:)) ?? .weightReps
+    }
 
     /// The rest actually used for this exercise — its own override, or the
     /// app-wide default when it has none.
@@ -454,6 +459,10 @@ final class SetLog {
     var weightKg: Double = 0
     var reps: Int = 0
     var seconds: Int = 0
+    /// How this exercise was measured when the set was made. The catalog can
+    /// change or lose a custom exercise later; neither should rewrite history.
+    /// Nil only on rows from before this was recorded.
+    var trackingRaw: String?
     /// How hard the set was, on the 6–10 scale. Stored as the number it always
     /// was so the progression reads what it always read; asked for, and shown,
     /// as one of four words — see `feel`.
@@ -540,7 +549,8 @@ final class SetLog {
          reps: Int = 0,
          seconds: Int = 0,
          targetRepsLow: Int = 0,
-         targetRepsHigh: Int = 0) {
+         targetRepsHigh: Int = 0,
+         tracking: TrackingMode? = nil) {
         self.id = UUID()
         self.catalogID = catalogID
         self.exerciseName = exerciseName
@@ -551,10 +561,13 @@ final class SetLog {
         self.seconds = seconds
         self.targetRepsLow = targetRepsLow
         self.targetRepsHigh = targetRepsHigh
+        self.trackingRaw = tracking?.rawValue
     }
 
     var catalog: CatalogExercise? { ExerciseCatalog.shared.exercise(id: catalogID) }
-    var tracking: TrackingMode { catalog?.tracking ?? .weightReps }
+    var tracking: TrackingMode {
+        trackingRaw.flatMap(TrackingMode.init(rawValue:)) ?? catalog?.tracking ?? .weightReps
+    }
 
     /// Volume load. Bodyweight work counts reps only so it can't silently
     /// vanish from the totals.

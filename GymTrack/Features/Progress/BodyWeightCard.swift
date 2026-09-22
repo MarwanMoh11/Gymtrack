@@ -11,6 +11,7 @@ struct BodyWeightCard: View {
     @Query(sort: \BodyMetric.date, order: .reverse) private var metrics: [BodyMetric]
 
     @State private var isLogging = false
+    @State private var isImporting = false
     @State private var settings = AppSettings.shared
 
     private var unit: WeightUnit { settings.weightUnit }
@@ -24,32 +25,33 @@ struct BodyWeightCard: View {
     }
 
     /// Change across the window, in the display unit.
-    private var change: Double? {
+    private func change(in series: [BodyMetric]) -> Double? {
         guard let first = series.first, let last = series.last, series.count > 1 else { return nil }
         return unit.fromKg(last.weightKg - first.weightKg)
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        let series = self.series
+        return VStack(spacing: 8) {
             SectionHeader("Body weight")
 
             VStack(alignment: .leading, spacing: 12) {
-                header
-                if series.count > 1 { chart }
+                header(change: change(in: series))
+                if series.count > 1 { chart(series: series) }
                 actions
             }
             .gtCard()
         }
         .sheet(isPresented: $isLogging) {
             LogWeightSheet(startingKg: latest?.weightKg ?? unit.toKg(unit == .kg ? 75 : 165)) { kg, date in
-                record(kg: kg, on: date)
+                try record(kg: kg, on: date)
             }
         }
     }
 
     // MARK: - Pieces
 
-    private var header: some View {
+    private func header(change: Double?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if let latest {
                 Text(unit.format(latest.weightKg, showUnit: false))
@@ -63,7 +65,7 @@ struct BodyWeightCard: View {
                     if let change {
                         Text("\(change >= 0 ? "+" : "")\(String(format: "%.1f", change)) \(unit.short)")
                             .font(Theme.number(13, weight: .bold))
-                            .foregroundStyle(change >= 0 ? Theme.warning : Theme.positive)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                     Text(latest.date.formatted(.relative(presentation: .numeric)))
                         .font(Theme.rounded(11, weight: .medium))
@@ -87,19 +89,23 @@ struct BodyWeightCard: View {
 
     /// A plain line over the window — the shape is the whole point, so it
     /// carries no axes.
-    private var chart: some View {
+    private func chart(series: [BodyMetric]) -> some View {
         GeometryReader { geo in
             let values = series.map { unit.fromKg($0.weightKg) }
             let low = values.min() ?? 0
             let high = values.max() ?? 1
             let span = max(high - low, 0.5)
+            let base = low - (span - (high - low)) / 2
+            let inset: CGFloat = 4
+            let plotWidth = max(geo.size.width - inset * 2, 1)
+            let plotHeight = max(geo.size.height - inset * 2, 1)
 
             ZStack {
                 Path { path in
                     for (index, value) in values.enumerated() {
                         let x = values.count == 1 ? geo.size.width / 2
-                            : geo.size.width * CGFloat(index) / CGFloat(values.count - 1)
-                        let y = geo.size.height * (1 - CGFloat((value - low) / span))
+                            : inset + plotWidth * CGFloat(index) / CGFloat(values.count - 1)
+                        let y = inset + plotHeight * (1 - CGFloat((value - base) / span))
                         index == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
                     }
                 }
@@ -110,8 +116,8 @@ struct BodyWeightCard: View {
                         .fill(Theme.accent)
                         .frame(width: 6, height: 6)
                         .position(
-                            x: geo.size.width,
-                            y: geo.size.height * (1 - CGFloat((last - low) / span))
+                            x: inset + plotWidth,
+                            y: inset + plotHeight * (1 - CGFloat((last - base) / span))
                         )
                 }
             }
@@ -134,18 +140,27 @@ struct BodyWeightCard: View {
 
             if settings.healthBodyWeight {
                 Button {
+                    isImporting = true
                     Task {
                         let added = await HealthKitService.shared.importBodyMass(into: context)
+                        isImporting = false
                         if added > 0 { Haptics.success() }
                     }
                 } label: {
-                    Image(systemName: "heart.text.square")
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(width: 38)
-                        .padding(.vertical, 9)
+                    Group {
+                        if isImporting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "heart.text.square")
+                                .font(.system(size: 14, weight: .bold))
+                        }
+                    }
+                    .frame(width: 38)
+                    .padding(.vertical, 9)
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .accessibilityLabel("Import weigh-ins from Health")
+                .disabled(isImporting)
             }
         }
     }
@@ -154,7 +169,7 @@ struct BodyWeightCard: View {
 
     /// One entry per day: a second weigh-in on the same day replaces the first
     /// rather than stacking up.
-    private func record(kg: Double, on date: Date) {
+    private func record(kg: Double, on date: Date) throws {
         let day = Calendar.current.startOfDay(for: date)
         if let existing = metrics.first(where: { Calendar.current.isDate($0.date, inSameDayAs: day) }) {
             existing.weightKg = kg
@@ -163,7 +178,12 @@ struct BodyWeightCard: View {
         } else {
             context.insert(BodyMetric(date: date, weightKg: kg))
         }
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
         Haptics.success()
         Task { await HealthKitService.shared.saveBodyMass(kg: kg, date: date) }
     }
@@ -175,14 +195,15 @@ struct BodyWeightCard: View {
 /// people stop logging it.
 private struct LogWeightSheet: View {
     let startingKg: Double
-    let onSave: (Double, Date) -> Void
+    let onSave: (Double, Date) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var value: Double
     @State private var date: Date = .now
     @State private var settings = AppSettings.shared
+    @State private var saveError: String?
 
-    init(startingKg: Double, onSave: @escaping (Double, Date) -> Void) {
+    init(startingKg: Double, onSave: @escaping (Double, Date) throws -> Void) {
         self.startingKg = startingKg
         self.onSave = onSave
         _value = State(initialValue: AppSettings.shared.weightUnit.snap(AppSettings.shared.weightUnit.fromKg(startingKg)))
@@ -208,16 +229,24 @@ private struct LogWeightSheet: View {
                     .tint(Theme.accent)
 
                 if settings.healthBodyWeight {
-                    Label("Also saved to Health", systemImage: "heart.text.square.fill")
+                    Label(HealthKitService.shared.canWriteBodyMass
+                          ? "Can also save to Health"
+                          : "Health write access is off; this stays here",
+                          systemImage: "heart.text.square.fill")
                         .font(Theme.rounded(12, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                 }
 
                 Button("Save") {
-                    onSave(unit.toKg(value), date)
-                    dismiss()
+                    do {
+                        try onSave(unit.toKg(value), date)
+                        dismiss()
+                    } catch {
+                        saveError = error.localizedDescription
+                    }
                 }
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(isEnabled: value > 0 && value.isFinite))
+                .disabled(value <= 0 || !value.isFinite)
 
                 Spacer()
             }
@@ -234,5 +263,13 @@ private struct LogWeightSheet: View {
         }
         .presentationDetents([.medium])
         .gtSheetBackground()
+        .alert("Couldn't save weigh-in", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK") { saveError = nil }
+        } message: {
+            Text(saveError ?? "Please try again.")
+        }
     }
 }

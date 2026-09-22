@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Query(filter: #Predicate<WorkoutSession> { $0.endedAt == nil }) private var openSessions: [WorkoutSession]
 
     @AppStorage(SettingsKey.hasOnboarded) private var hasOnboarded = true
 
@@ -162,6 +163,12 @@ struct SettingsView: View {
                         showingWipeConfirm = true
                     } label: {
                         Label("Erase all data", systemImage: "trash")
+                            .foregroundStyle(Theme.negative)
+                    }
+                    .disabled(!openSessions.isEmpty)
+                } footer: {
+                    if !openSessions.isEmpty {
+                        Text("Finish or discard the workout that's running before erasing data.")
                     }
                 }
                 .listRowBackground(Theme.surface)

@@ -35,7 +35,8 @@ enum SessionFactory {
                     reps: previous?.reps ?? item.targetRepsLow,
                     seconds: item.targetSeconds,
                     targetRepsLow: item.targetRepsLow,
-                    targetRepsHigh: item.targetRepsHigh
+                    targetRepsHigh: item.targetRepsHigh,
+                    tracking: item.tracking
                 )
                 set.session = session
                 context.insert(set)
@@ -395,7 +396,8 @@ final class ActiveWorkout {
             // off the set above would have the card demand 6 reps of a drop and
             // the progression read it as a working set that fell short.
             targetRepsLow: 0,
-            targetRepsHigh: 0
+            targetRepsHigh: 0,
+            tracking: set.tracking
         )
         next.continuesPreviousSet = true
         next.session = session
@@ -699,7 +701,8 @@ final class ActiveWorkout {
             reps: template.reps,
             seconds: template.seconds,
             targetRepsLow: template.targetRepsLow,
-            targetRepsHigh: template.targetRepsHigh
+            targetRepsHigh: template.targetRepsHigh,
+            tracking: template.tracking
         )
         set.session = session
         context.insert(set)
@@ -747,7 +750,8 @@ final class ActiveWorkout {
                 reps: previous?.reps ?? 10,
                 seconds: previous?.seconds ?? 45,
                 targetRepsLow: 8,
-                targetRepsHigh: 12
+                targetRepsHigh: 12,
+                tracking: exercise.tracking
             )
             set.session = session
             context.insert(set)

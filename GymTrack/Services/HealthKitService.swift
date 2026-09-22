@@ -38,6 +38,10 @@ final class HealthKitService {
     /// Last error worth showing a user, e.g. the Health sheet failing to open.
     var lastErrorMessage: String?
 
+    /// Shared by launch, Settings and the body-weight card so two Health
+    /// queries cannot both decide that the same day is missing.
+    @ObservationIgnored private var bodyMassImportInFlight = false
+
     private init() {
         hasRequestedAuthorization = defaults.bool(forKey: SettingsKey.healthRequested)
     }
@@ -414,13 +418,18 @@ final class HealthKitService {
     func importBodyMass(into context: ModelContext, since: Date? = nil) async -> Int {
         guard AppSettings.shared.healthBodyWeight,
               isAvailable,
-              let type = HKQuantityType.quantityType(forIdentifier: .bodyMass)
+              let type = HKQuantityType.quantityType(forIdentifier: .bodyMass),
+              !bodyMassImportInFlight
         else { return 0 }
+        bodyMassImportInFlight = true
+        defer { bodyMassImportInFlight = false }
 
         let start = since ?? Calendar.current.date(byAdding: .year, value: -2, to: .now)
         let predicate = start.map { HKQuery.predicateForSamples(withStart: $0, end: nil, options: []) }
         let samples: [HKQuantitySample] = await withCheckedContinuation { continuation in
-            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+            // The newest reading wins when a scale recorded more than one on
+            // the same day. The importer keeps only the first sample per day.
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
             let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, _ in
                 continuation.resume(returning: samples as? [HKQuantitySample] ?? [])
             }

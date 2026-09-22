@@ -158,7 +158,8 @@ final class WatchCommandCenter {
                 reps: template.reps,
                 seconds: template.seconds,
                 targetRepsLow: template.targetRepsLow,
-                targetRepsHigh: template.targetRepsHigh
+                targetRepsHigh: template.targetRepsHigh,
+                tracking: template.tracking
             )
             set.session = session
             context.insert(set)
