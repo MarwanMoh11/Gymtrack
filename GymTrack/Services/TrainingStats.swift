@@ -52,7 +52,11 @@ enum TrainingStats {
     static func setsPerMuscle(_ sessions: [WorkoutSession]) -> [Muscle: Double] {
         var result: [Muscle: Double] = [:]
         for session in sessions {
-            for set in session.completedSets where !set.isWarmup {
+            // Efforts, not rows: a drop set is one hard set taken further. Its
+            // back-off rows counted here would show as extra weekly volume the
+            // lifter never added, and the heat map would warm up because they
+            // stripped a plate.
+            for set in session.effortSets {
                 guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { continue }
                 for (index, muscle) in exercise.muscles.prefix(2).enumerated() {
                     result[muscle, default: 0] += index == 0 ? 1.0 : 0.5
@@ -98,7 +102,7 @@ enum TrainingStats {
             .filter { !$0.isActive }
             .compactMap { session -> ExerciseSessionSummary? in
                 let sets = session.completedSets
-                    .filter { $0.catalogID == catalogID && !$0.isWarmup }
+                    .filter { $0.catalogID == catalogID }
                     .sorted { $0.setIndex < $1.setIndex }
                 guard !sets.isEmpty else { return nil }
                 let top = sets.max { lhs, rhs in
@@ -111,7 +115,14 @@ enum TrainingStats {
                     sets: sets,
                     topSet: top,
                     volumeKg: sets.reduce(0) { $0 + $1.volumeKg },
-                    bestEstimatedOneRepMax: sets.map(\.estimatedOneRepMax).max() ?? 0,
+                    // Strength estimated off the sets that stood on their own.
+                    // A drop's rows are lifted pre-fatigued, as part of the set
+                    // above them, so a light row taken for a lot of reps says
+                    // nothing about a one-rep max — see `isPersonalRecord`,
+                    // which draws the same line. The volume and the rep count
+                    // above keep them, because those reps happened.
+                    bestEstimatedOneRepMax: sets.filter { !$0.isContinuation }
+                        .map(\.estimatedOneRepMax).max() ?? 0,
                     totalReps: sets.reduce(0) { $0 + $1.reps }
                 )
             }
@@ -119,7 +130,28 @@ enum TrainingStats {
     }
 
     /// The most recent completed sets for an exercise, used to prefill the
-    /// logger and to show "last time" next to each set.
+    /// logger, to show "last time" next to each set, and as the whole input to
+    /// the progression.
+    ///
+    /// Only the sets that were sets. A row that continued the one above it is
+    /// not a working set, and everything downstream of this reads it positionally
+    /// or by weight and would read it wrong:
+    ///
+    /// * The "was 62.5 × 8" hints pair this session's sets against last
+    ///   session's by position. One drop taken last week shifts every set under
+    ///   it down a place, so set 2 would be hinted with set 1's numbers for the
+    ///   rest of the exercise — and the shift moves around from session to
+    ///   session, so it can't even be wrong consistently.
+    /// * `suggestion` takes the heaviest weight, then the worst rep count among
+    ///   the sets at it. A cluster is taken at exactly that weight for three or
+    ///   four reps, which lands in that group and reads as a working set that
+    ///   collapsed — the app would prescribe a deload off the back of the
+    ///   lifter deliberately doing more work. That is the silent wrong answer
+    ///   this filter exists to stop, and it is why the cut is made here, at the
+    ///   one place the progression gets its input, rather than in each reader.
+    ///
+    /// What actually happened is not lost: the session itself still holds every
+    /// row, and that is what the history screen and the export read.
     static func lastPerformance(of catalogID: String,
                                 in sessions: [WorkoutSession],
                                 excluding sessionID: UUID? = nil) -> [SetLog] {
@@ -127,8 +159,8 @@ enum TrainingStats {
             .filter { $0.id != sessionID && !$0.isActive }
             .sorted { $0.startedAt > $1.startedAt }
         for session in candidates {
-            let sets = session.completedSets
-                .filter { $0.catalogID == catalogID && !$0.isWarmup }
+            let sets = session.effortSets
+                .filter { $0.catalogID == catalogID }
                 .sorted { $0.setIndex < $1.setIndex }
             if !sets.isEmpty { return sets }
         }
@@ -151,7 +183,9 @@ enum TrainingStats {
     static func records(in sessions: [WorkoutSession]) -> [PersonalRecord] {
         var byExercise: [String: [SetLog]] = [:]
         for session in sessions where !session.isActive {
-            for set in session.completedSets where !set.isWarmup {
+            // Records are set by sets, not by the rows underneath one. See
+            // `isPersonalRecord` — the same line, for the same reason.
+            for set in session.effortSets {
                 byExercise[set.catalogID, default: []].append(set)
             }
         }
@@ -180,8 +214,16 @@ enum TrainingStats {
     /// The first set of an exercise you've never done is not a record — with no
     /// baseline there's nothing to beat, and celebrating it would fire on every
     /// new movement.
+    ///
+    /// A row that continued the set above it can neither set a record nor stop
+    /// one. It was lifted inside another set, already fatigued, off a load
+    /// chosen to be survivable — twenty reps at 40 kg after eight at 62.5
+    /// estimates a higher one-rep max than the 62.5 did, and it would both
+    /// light up the trophy on a back-off row and raise the bar every real set
+    /// after it has to clear. Both directions are the same mistake: comparing
+    /// a piece of a set against whole ones.
     static func isPersonalRecord(_ set: SetLog, in sessions: [WorkoutSession]) -> Bool {
-        guard set.isCompleted, !set.isWarmup else { return false }
+        guard set.isCompleted, !set.isContinuation else { return false }
 
         let previous = allSets(for: set.catalogID, in: sessions, before: set)
         guard !previous.isEmpty else { return false }
@@ -207,7 +249,7 @@ enum TrainingStats {
         return sessions.flatMap(\.sets).filter {
             $0.catalogID == catalogID
             && $0.isCompleted
-            && !$0.isWarmup
+            && !$0.isContinuation
             && $0.id != set.id
             && (($0.completedAt ?? .distantPast) < boundary)
         }
@@ -233,16 +275,17 @@ enum TrainingStats {
         return values[values.count / 2]
     }
 
+    /// The same thing in the word the lifter actually answered with, which is
+    /// what the suggestions are written in.
+    static func feel(of sets: [SetLog]) -> SetFeel? {
+        medianRPE(of: sets).map(SetFeel.nearest(to:))
+    }
+
     /// `LoadScale.step` moves exactly one rung however big the direction is, so
     /// climbing two means asking twice — and asking twice is also the only way
     /// to land on rungs the machine has when they aren't evenly spaced.
     private static func climb(_ scale: LoadScale, from kg: Double, rungs: Int) -> Double {
         (0..<max(1, rungs)).reduce(kg) { weight, _ in scale.step(kg: weight, by: 1) }
-    }
-
-    /// "8" or "8.5" — never "8.0".
-    static func rpeText(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 
     /// Double progression: work up the rep range at a fixed load, then add
@@ -290,14 +333,18 @@ enum TrainingStats {
         // tell a set that had three left in the tank from one that had none,
         // which is why plain double progression climbs at the same rung a
         // session either way.
-        let effort = medianRPE(of: setsAtWeight)
+        //
+        // Each of the four answers changes something here. An answer that led
+        // to the same advice as every other answer would be a question not
+        // worth asking.
+        let feel = feel(of: setsAtWeight)
 
         if allHitTop {
             if isUnloadedBodyweight {
-                if let effort, effort <= 7 {
+                if feel == .easy {
                     return OverloadSuggestion(
                         action: .addReps, weightKg: 0, reps: item.targetRepsHigh + 3,
-                        message: "You cleared \(item.targetRepsHigh) reps at RPE \(rpeText(effort)) — that's not close to failure. Push well past it, or start adding weight."
+                        message: "You cleared \(item.targetRepsHigh) reps and it felt easy — that's not close to failure. Push well past it, or start adding weight."
                     )
                 }
                 return OverloadSuggestion(
@@ -307,15 +354,18 @@ enum TrainingStats {
             }
             // Two rungs when there was clearly room left. One stays the default,
             // and stays it for every exercise that has never been rated.
-            let rungs = (effort ?? 10) <= 7 ? 2 : 1
+            let rungs = feel == .easy ? 2 : 1
             let next = climb(scale, from: workingWeight, rungs: rungs)
             let cleared = "You cleared \(item.targetRepsHigh) reps on every set"
             let message: String
-            if let effort, rungs == 2 {
-                message = "\(cleared) at RPE \(rpeText(effort)) — there's room. Jump two steps to \(scale.format(next)) and reset to \(item.targetRepsLow) reps."
-            } else if let effort, effort >= 9.5 {
-                message = "\(cleared), but at RPE \(rpeText(effort)). Go to \(scale.format(next)) and expect it to be a fight."
-            } else {
+            switch feel {
+            case .easy:
+                message = "\(cleared) and it felt easy — there's room. Jump two steps to \(scale.format(next)) and reset to \(item.targetRepsLow) reps."
+            case .hard:
+                message = "\(cleared), and it was hard. Go to \(scale.format(next)) and expect a fight for the bottom of the range."
+            case .allOut:
+                message = "\(cleared) with nothing left. Go to \(scale.format(next)), but expect to sit at \(item.targetRepsLow) reps for a few sessions."
+            case .solid, nil:
                 message = "\(cleared). Go to \(scale.format(next)) and reset to \(item.targetRepsLow) reps."
             }
             return OverloadSuggestion(action: .increaseWeight, weightKg: next,
@@ -324,35 +374,47 @@ enum TrainingStats {
 
         if minReps < item.targetRepsLow - 2 && workingWeight > increment && !isUnloadedBodyweight {
             // Falling short of the range is only a reason to take weight off if
-            // the weight is what stopped you. Short reps at RPE 7 is a set that
-            // was ended early, and deloading it would be fixing the wrong thing.
-            if let effort, effort <= 7 {
+            // the weight is what stopped you. Short reps that felt easy is a set
+            // that was ended early, and deloading it would fix the wrong thing.
+            switch feel {
+            case .easy:
                 return OverloadSuggestion(
-                    action: .repeatLoad,
-                    weightKg: workingWeight,
-                    reps: item.targetRepsLow,
-                    message: "Reps fell short, but you called it RPE \(rpeText(effort)) — the load isn't what stopped you. Stay at \(scale.format(workingWeight)) and take it closer to failure."
+                    action: .repeatLoad, weightKg: workingWeight, reps: item.targetRepsLow,
+                    message: "Reps fell short, but you called it easy — the load isn't what stopped you. Stay at \(scale.format(workingWeight)) and take it closer to failure."
+                )
+            case .solid:
+                return OverloadSuggestion(
+                    action: .repeatLoad, weightKg: workingWeight, reps: item.targetRepsLow,
+                    message: "Reps fell short at a solid effort — there was still something in the tank. Stay at \(scale.format(workingWeight)) and get the range before touching the weight."
+                )
+            case .hard, .allOut, nil:
+                let backOff = scale.step(kg: workingWeight, by: -1)
+                return OverloadSuggestion(
+                    action: .deload, weightKg: backOff, reps: item.targetRepsLow,
+                    message: "Reps fell below the range last time. Back off to \(scale.format(backOff)) and rebuild."
                 )
             }
-            let backOff = scale.step(kg: workingWeight, by: -1)
-            return OverloadSuggestion(
-                action: .deload,
-                weightKg: backOff,
-                reps: item.targetRepsLow,
-                message: "Reps fell below the range last time. Back off to \(scale.format(backOff)) and rebuild."
-            )
         }
 
         let goal = min(item.targetRepsHigh, minReps + 1)
         let message: String
         if isUnloadedBodyweight {
             message = "Chase \(goal) reps on every set."
-        } else if let effort, effort >= 9.5 {
-            // Already at the limit inside the range: another rep is the goal,
-            // but repeating the session honestly is the way to earn it.
-            message = "Stay at \(scale.format(workingWeight)) — last time was RPE \(rpeText(effort)). Repeat it before you chase \(goal)."
         } else {
-            message = "Stay at \(scale.format(workingWeight)) and chase \(goal) reps on every set."
+            switch feel {
+            case .easy:
+                // Inside the range and it still felt easy: the sets are being
+                // ended before they get hard, not stopped by the load.
+                message = "It felt easy and still stopped short of \(item.targetRepsHigh). Stay at \(scale.format(workingWeight)) and take every set to at least \(goal)."
+            case .allOut:
+                // Already at the limit inside the range: another rep is the
+                // goal, but repeating the session honestly is how it's earned.
+                message = "Stay at \(scale.format(workingWeight)) — last time took everything you had. Repeat it before you chase \(goal)."
+            case .hard:
+                message = "Stay at \(scale.format(workingWeight)) and chase \(goal). Last time was hard, so that rep has to be earned."
+            case .solid, nil:
+                message = "Stay at \(scale.format(workingWeight)) and chase \(goal) reps on every set."
+            }
         }
         return OverloadSuggestion(action: .addReps, weightKg: workingWeight, reps: goal, message: message)
     }
@@ -396,8 +458,11 @@ extension TrainingStats {
 
         func value(of session: WorkoutSession) -> Double {
             switch self {
+            // Volume counts every kilogram moved; sets count efforts. A drop
+            // set adds to the first and not the second, which is exactly the
+            // difference the two charts exist to show.
             case .volume: AppSettings.shared.weightUnit.fromKg(session.totalVolumeKg)
-            case .sets: Double(session.workingSets.count)
+            case .sets: Double(session.effortSets.count)
             case .reps: Double(session.totalReps)
             }
         }
@@ -493,7 +558,7 @@ extension TrainingStats {
             .filter { session in
                 session.completedSets.contains { set in
                     guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { return false }
-                    return !set.isWarmup && exercise.muscles.prefix(2).contains(muscle)
+                    return exercise.muscles.prefix(2).contains(muscle)
                 }
             }
             .map(\.startedAt)
@@ -507,7 +572,10 @@ extension TrainingStats {
                              limit: Int = 3) -> [(name: String, sets: Double)] {
         var tally: [String: Double] = [:]
         for session in sessions {
-            for set in session.completedSets where !set.isWarmup {
+            // Counted the same way `setsPerMuscle` counts, since this is the
+            // breakdown of that number — otherwise the parts wouldn't add up
+            // to the whole they're explaining.
+            for set in session.effortSets {
                 guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { continue }
                 for (index, candidate) in exercise.muscles.prefix(2).enumerated() where candidate == muscle {
                     tally[set.exerciseName, default: 0] += index == 0 ? 1.0 : 0.5

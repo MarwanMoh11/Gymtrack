@@ -234,20 +234,39 @@ struct ExerciseDetailView: View {
                     }
                     FlowRow(spacing: 6) {
                         ForEach(entry.sets) { set in
-                            Text((set.tracking == .duration
-                                  ? "\(set.seconds)s"
-                                  : (set.weightKg == 0 ? "\(set.reps)" : "\(scale.format(set.weightKg, showUnit: false))×\(set.reps)"))
-                                 + set.effortSuffix)
-                                .font(Theme.number(12, weight: .semibold))
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(Theme.panel, in: Capsule())
-                                .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
+                            setChip(set)
                         }
                     }
                 }
                 .gtCard(padding: 12)
             }
         }
+    }
+
+    /// One logged set, with a dot in the colour of how it felt when it was
+    /// answered for. Pulled out of the list because the chained ternaries and
+    /// the modifiers together are more than the type checker will sit through.
+    private func setChip(_ set: SetLog) -> some View {
+        let value: String
+        if set.tracking == .duration {
+            value = "\(set.seconds)s"
+        } else if set.weightKg == 0 {
+            value = "\(set.reps)"
+        } else {
+            value = "\(scale.format(set.weightKg, showUnit: false))×\(set.reps)"
+        }
+        return HStack(spacing: 4) {
+            Text(value)
+                .font(Theme.number(12, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+            if let feel = set.feel {
+                Circle().fill(feel.tint).frame(width: 5, height: 5)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Theme.panel, in: Capsule())
+        .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(set.feel.map { "\(value), felt \($0.label)" } ?? value)
     }
 }

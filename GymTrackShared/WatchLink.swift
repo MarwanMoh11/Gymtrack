@@ -38,17 +38,21 @@ struct WatchSetSnapshot: Codable, Hashable, Identifiable, Sendable {
     var targetRepsLow: Int
     var targetRepsHigh: Int
     var isCompleted: Bool
-    /// Optional only so a mirror in flight during an app update still decodes —
-    /// read it through `isWarmup`.
-    var warmup: Bool?
+    /// Whether this row was taken on from the row above rather than started
+    /// fresh — the second half of a drop, the next cluster of a myo-rep run.
+    /// Optional only so a mirror in flight during an app update still decodes;
+    /// read it through `isContinuation`.
+    var continuation: Bool?
 
-    /// Whether this is a rung on the way to the work rather than the work.
-    var isWarmup: Bool { warmup == true }
+    /// A continuation's weight was chosen for that row alone, so it neither
+    /// carries forward onto the sets still to come nor accepts a load carried
+    /// down onto it. The watch has to know which rows those are, or its own
+    /// prediction of the phone's answer quietly deloads the rest of the
+    /// exercise — see `WatchConnector.session`.
+    var isContinuation: Bool { continuation == true }
 
     var targetLabel: String {
-        // A warm-up states the reps it was built with: it has no rep range to
-        // work up, so a range here would be a target that doesn't exist.
-        isWarmup || targetRepsHigh <= 0 || targetRepsLow == targetRepsHigh
+        targetRepsHigh <= 0 || targetRepsLow == targetRepsHigh
             ? "\(max(targetRepsLow, reps))"
             : "\(targetRepsLow)–\(targetRepsHigh)"
     }

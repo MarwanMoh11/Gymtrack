@@ -23,6 +23,9 @@ struct WatchLoggerView: View {
     /// The number the crown is currently turning, and its live value.
     @State private var editing: Field?
     @State private var crownValue: Double = 0
+    /// The numbers the lifter has dialled themselves on the set that's up.
+    /// Cleared when the logger moves to another set — see `adopt`.
+    @State private var touched: Set<Field> = []
     @State private var showingExercises = false
     @FocusState private var isCrownFocused: Bool
 
@@ -61,7 +64,12 @@ struct WatchLoggerView: View {
             WatchExerciseListView(session: session, connector: connector)
         }
         .onAppear { load(set) }
-        .onChange(of: set?.id) { _, _ in load(set) }
+        .onChange(of: set) { was, now in
+            // A different set starts the dials over. The same set coming back
+            // changed is the phone revising what you are about to lift, which
+            // is worth following rather than ignoring.
+            if was?.id == now?.id { adopt(now) } else { load(now) }
+        }
     }
 
     // MARK: - Header
@@ -86,19 +94,11 @@ struct WatchLoggerView: View {
                         // Once everything is logged there is no current set to
                         // name, so the line switches to the session's total
                         // rather than pointing at a set that's already done.
-                        // A warm-up drops the counter and says what it is. The
-                        // wrist is where you most need to know whether the set
-                        // you're about to log is one the app will measure you
-                        // on, and "Warm-up 2/5" makes you do that arithmetic.
                         Text(phase == .done
                              ? "\(session.completedSets)/\(session.totalSets) sets"
-                             : (set?.isWarmup == true
-                                ? "Warm-up"
-                                : "Set \(session.currentSetNumber)/\(exercise?.sets.count ?? 0)"))
+                             : "Set \(session.currentSetNumber)/\(exercise?.sets.count ?? 0)")
                             .font(Theme.number(11, weight: .bold))
-                            .foregroundStyle(set?.isWarmup == true && phase != .done
-                                             ? SessionPhase.resting.gradient
-                                             : phase.gradient)
+                            .foregroundStyle(phase.gradient)
                         if let last = exercise?.lastTimeLabel {
                             Text("last \(last)")
                                 .font(Theme.rounded(11, weight: .medium))
@@ -272,14 +272,20 @@ struct WatchLoggerView: View {
     /// What the crown writes back to, and the sane bounds for it.
     private func write(_ turned: Double) {
         guard let editing else { return }
+        let next: Double
         switch editing {
         // Onto the ladder: the crown is the only way in here — there is no
         // keypad to reach a weight between two pins — so a turn should always
         // land on something the machine can be set to.
-        case .weight: weightDisplay = scale.snap(display: max(0, turned))
-        case .reps: repsValue = max(0, turned.rounded())
-        case .seconds: secondsValue = max(0, turned.rounded())
+        case .weight: next = scale.snap(display: max(0, turned))
+        case .reps, .seconds: next = max(0, turned.rounded())
         }
+        // Selecting a number hands the crown its current value, which arrives
+        // here as a turn that changes nothing. Only a real change counts as
+        // the lifter having dialled it.
+        guard next != currentValue(of: editing) else { return }
+        assign(next, to: editing)
+        touched.insert(editing)
     }
 
     private func currentValue(of field: Field) -> Double {
@@ -287,6 +293,14 @@ struct WatchLoggerView: View {
         case .weight: weightDisplay
         case .reps: repsValue
         case .seconds: secondsValue
+        }
+    }
+
+    private func assign(_ value: Double, to field: Field) {
+        switch field {
+        case .weight: weightDisplay = value
+        case .reps: repsValue = value
+        case .seconds: secondsValue = value
         }
     }
 
@@ -388,13 +402,31 @@ struct WatchLoggerView: View {
     /// Loads the set that's up into the dials, carrying last time's numbers
     /// when the set has none of its own.
     private func load(_ set: WatchSetSnapshot?) {
-        guard let set else { return }
-        weightDisplay = scale.display(set.weightKg)
-        repsValue = Double(set.reps > 0 ? set.reps : max(set.targetRepsLow, 1))
-        secondsValue = Double(set.seconds > 0 ? set.seconds : 45)
+        guard set != nil else { return }
         // Nothing is selected until it is tapped: until then the crown
-        // scrolls the screen rather than changing a number.
+        // scrolls the screen rather than changing a number. Nothing has been
+        // dialled on this set yet either, so every number follows the phone.
         editing = nil
+        touched = []
+        adopt(set)
+    }
+
+    /// Takes the phone's revision of the set that's already up.
+    ///
+    /// The phone owns these numbers and goes on revising them after the fact:
+    /// the load carried down from the set just logged is the ordinary case, and
+    /// a weight changed on the phone mid-session is the other. Until the dials
+    /// followed that, the wrist sat on the weight the lifter had moved away
+    /// from and wrote it back over the phone's the next time they logged.
+    ///
+    /// What the lifter has dialled here is theirs and is left alone. The weight
+    /// changing under a thumb already reaching for the bar is worse than the
+    /// two screens disagreeing.
+    private func adopt(_ set: WatchSetSnapshot?) {
+        guard let set else { return }
+        if !touched.contains(.weight) { weightDisplay = scale.display(set.weightKg) }
+        if !touched.contains(.reps) { repsValue = Double(set.reps > 0 ? set.reps : max(set.targetRepsLow, 1)) }
+        if !touched.contains(.seconds) { secondsValue = Double(set.seconds > 0 ? set.seconds : 45) }
     }
 
     private func trimmed(_ value: Double) -> String { scale.text(value) }

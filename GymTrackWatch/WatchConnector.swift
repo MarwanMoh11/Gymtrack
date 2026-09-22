@@ -24,8 +24,12 @@ final class WatchConnector: NSObject {
     private(set) var isReachable = false
     private(set) var hasEverReceivedMirror = false
 
-    /// Sets logged here that the phone hasn't confirmed yet.
-    private var pendingCompletions: Set<UUID> = []
+    /// Sets logged here that the phone hasn't confirmed yet, and the numbers
+    /// each was logged with. The numbers are kept, not just the fact of the
+    /// log, because the phone mirrors the load just used onto the rest of the
+    /// exercise — a watch that predicted only the tick would draw the next set
+    /// at the weight the lifter had just moved away from.
+    private var pendingCompletions: [UUID: PendingLog] = [:]
     private var pendingUndos: Set<UUID> = []
     /// An exercise picked here that the phone hasn't confirmed yet, held for
     /// the same reason a logged set is drawn as done straight away: the pick
@@ -33,6 +37,13 @@ final class WatchConnector: NSObject {
     /// in the queue for as long as the phone stays in the locker, and until it
     /// lands this is the only record that the lifter moved.
     private var pendingFocus: String?
+
+    /// What a set was logged with while the phone hasn't answered yet.
+    private struct PendingLog: Hashable {
+        var weightKg: Double
+        var reps: Int
+        var seconds: Int
+    }
 
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack.watchkitapp", category: "Connector")
 
@@ -57,16 +68,7 @@ final class WatchConnector: NSObject {
         if let pendingFocus { session.preferredExerciseID = pendingFocus }
         guard hasPendingChanges else { return session }
 
-        session.exercises = session.exercises.map { exercise in
-            var exercise = exercise
-            exercise.sets = exercise.sets.map { set in
-                var set = set
-                if pendingCompletions.contains(set.id) { set.isCompleted = true }
-                if pendingUndos.contains(set.id) { set.isCompleted = false }
-                return set
-            }
-            return exercise
-        }
+        session.exercises = session.exercises.map(folding)
         // The current set moves on as soon as the last one is logged, rather
         // than when the phone says so — and it has to move to the set the phone
         // is about to name, which is the one on the exercise the lifter chose.
@@ -76,6 +78,45 @@ final class WatchConnector: NSObject {
         // answer.
         session.currentSetID = session.focusedExercise?.sets.first { !$0.isCompleted }?.id
         return session
+    }
+
+    /// One exercise with this watch's unconfirmed work folded in: the numbers
+    /// on the rows logged here, and the load those logs carry onto the rows
+    /// still to come.
+    ///
+    /// The carry-forward is `ActiveWorkout.carryLoadForward` said again on the
+    /// wrist, and it has to stay the same answer. The gap it closes is the one
+    /// between the tap and the phone's reply — the set the logger moves to is
+    /// drawn from this, so without it the dial lands on the weight the lifter
+    /// just changed, and logging that row writes the old weight back over the
+    /// phone's. Dropping a plate on the wrist undid itself for the rest of the
+    /// exercise.
+    private func folding(_ exercise: WatchExerciseSnapshot) -> WatchExerciseSnapshot {
+        var exercise = exercise
+        exercise.sets = exercise.sets.map { set in
+            var set = set
+            if let pending = pendingCompletions[set.id] {
+                set.isCompleted = true
+                set.weightKg = pending.weightKg
+                set.reps = pending.reps
+                if exercise.tracking == .duration { set.seconds = pending.seconds }
+            }
+            if pendingUndos.contains(set.id) { set.isCompleted = false }
+            return set
+        }
+        // A continuation carries nothing forward: its weight was chosen to be
+        // lower, for that row, and pushing it down the card would leave the
+        // working sets still to come sitting at the drop weight.
+        for logged in exercise.sets where pendingCompletions[logged.id] != nil && !logged.isContinuation {
+            exercise.sets = exercise.sets.map { other in
+                var other = other
+                guard !other.isCompleted, !other.isContinuation, other.index > logged.index else { return other }
+                other.weightKg = logged.weightKg
+                if exercise.tracking == .duration { other.seconds = logged.seconds }
+                return other
+            }
+        }
+        return exercise
     }
 
     var idle: WatchIdleSnapshot { mirror.idle }
@@ -112,12 +153,12 @@ final class WatchConnector: NSObject {
     /// Logs a set: drawn as done here immediately, confirmed by the phone.
     func logSet(_ set: WatchSetSnapshot, weightKg: Double, reps: Int, seconds: Int) {
         pendingUndos.remove(set.id)
-        pendingCompletions.insert(set.id)
+        pendingCompletions[set.id] = PendingLog(weightKg: weightKg, reps: reps, seconds: seconds)
         send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds))
     }
 
     func undoSet(_ set: WatchSetSnapshot) {
-        pendingCompletions.remove(set.id)
+        pendingCompletions.removeValue(forKey: set.id)
         pendingUndos.insert(set.id)
         send(.undoSet(id: set.id))
     }
@@ -157,7 +198,7 @@ final class WatchConnector: NSObject {
             return
         }
         let sets = Dictionary(session.allSets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        pendingCompletions = pendingCompletions.filter { sets[$0]?.isCompleted == false }
+        pendingCompletions = pendingCompletions.filter { sets[$0.key]?.isCompleted == false }
         pendingUndos = pendingUndos.filter { sets[$0]?.isCompleted == true }
         // The pick is the phone's own once it names the same exercise — or once
         // that exercise is no longer in the session, which is the one way the

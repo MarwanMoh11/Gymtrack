@@ -24,6 +24,13 @@ enum BackupService {
         /// Which library exercises the user has put away. Optional like the
         /// rest — an older backup simply restores with nothing hidden.
         var hiddenExercises: [String]?
+        /// What the bundled library knows about the exercises this file names,
+        /// so the file explains itself to whatever reads it — a backup handed
+        /// to an AI coach otherwise has to guess from "Front Squat" that the
+        /// set was quads and a barbell. Optional like the rest: a backup
+        /// written before this existed still restores, and restore ignores the
+        /// section either way.
+        var exerciseCatalog: [CatalogExerciseDTO]?
     }
 
     struct Settings: Codable {
@@ -70,6 +77,8 @@ enum BackupService {
         var title: String
         var startedAt: Date
         var endedAt: Date?
+        /// What the lifter said about the whole session. Has always been in the
+        /// file; until recently nothing in the app could write to it.
         var notes: String
         var planName: String
         // Optional so backups written before Health support still restore.
@@ -77,7 +86,27 @@ enum BackupService {
         var maxHeartRate: Double?
         var activeEnergyKcal: Double?
         var wasWatchDriven: Bool?
+        /// The session note's tags — `NoteTag` raw values. Optional like the
+        /// rest, and absent rather than empty on a session nobody tagged, so
+        /// the file doesn't carry a line of nothing per session.
+        var noteTags: [String]?
+        /// What was said about individual exercises. Absent when nothing was.
+        var exerciseNotes: [ExerciseNoteDTO]?
         var sets: [SetDTO]
+    }
+
+    /// One exercise's note from one session — the tags and the sentence, which
+    /// are independent of each other and of the sets around them.
+    ///
+    /// Carries the exercise's name as well as its ID, the way `SetDTO` does, so
+    /// a reader can follow the note without resolving anything: a note is the
+    /// part of this file a person wrote on purpose, and it should be legible on
+    /// its own.
+    struct ExerciseNoteDTO: Codable {
+        var catalogID: String
+        var exerciseName: String
+        var text: String
+        var tags: [String]
     }
 
     struct SetDTO: Codable {
@@ -89,14 +118,92 @@ enum BackupService {
         var reps: Int
         var seconds: Int
         var isCompleted: Bool
-        var isWarmup: Bool
+        /// Written by versions that had a warm-up flag. Decoded so those
+        /// backups still restore, and ignored — a set is a set now.
+        var isWarmup: Bool?
         var completedAt: Date?
+        /// The moment the lifter said the set was beginning, where they said
+        /// so. Optional like the rest — a backup written before this existed
+        /// still restores, and a set nobody announced is absent here rather
+        /// than carrying a stamp copied off `completedAt`: the whole point of
+        /// the field is that the reader can tell the two apart. With both, a
+        /// coach reading this file gets the set's own length and the real rest
+        /// before it; with only `completedAt`, the gap to the previous set is
+        /// rest and set together and can't be pulled apart.
+        var startedAt: Date?
         var targetRepsLow: Int
         var targetRepsHigh: Int
         /// Optional so a backup written before effort tracking still restores —
         /// and so a set that was never rated round-trips as unrated rather than
         /// as an RPE of zero.
         var rpe: Double?
+        /// What the watch read during this set. Both absent on a set the watch
+        /// wasn't there for, which is most of them — an average of zero would
+        /// tell a coach the set was easy, and a null written as a value would
+        /// tell them it was measured as nothing.
+        ///
+        /// This is the field per-set detail exists for: a session average of
+        /// 132 says a workout happened, while a heavy triple at 168 beside
+        /// accessory work at 110 says which part of it was the work.
+        var averageHeartRate: Double?
+        var maxHeartRate: Double?
+        /// How the window those two were read over was arrived at —
+        /// `measured` where the lifter announced the set's start and the window
+        /// is the set itself, `inferred` where the app worked out the likely
+        /// last seconds before the set was logged. Written whenever there is a
+        /// heart rate and never otherwise, so a reader is never left deciding
+        /// for themselves how much to trust a number this file handed them.
+        var heartRateWindow: String?
+        /// The load the app offered off the back of this set's rating, and what
+        /// the lifter did with it. Absent — the whole key — on every set that
+        /// was never offered anything, which is nearly all of them, and absent
+        /// again wherever an offer was taken and then undone. Optional like the
+        /// rest, so a backup written before this existed still restores.
+        var loadNudge: LoadNudgeDTO?
+        /// Present only where this row and the one above it were one effort,
+        /// taken without putting the weight down — the second and third rows of
+        /// a drop set, the clusters after a myo-rep activation set.
+        ///
+        /// This is the fact the file was missing. Three rows at 62.5, 50 and 40
+        /// with nothing joining them read as a lifter falling apart across
+        /// three working sets; the same three rows with this key are one
+        /// working set deliberately taken twice further, which is a lifter
+        /// doing well. Identical numbers, opposite conclusions, and nothing
+        /// else here can separate them — a drop leaves the same falling weights
+        /// as a collapse, and the seconds between its rows are the same short
+        /// gap as a lifter who doesn't rest enough.
+        ///
+        /// The key's **presence** is that fact, and it is the only part
+        /// restored. Its **value** — `drop` where the load came down between
+        /// the rows, `cluster` where it didn't — is this app's reading of the
+        /// two weights, written out so the file explains itself instead of
+        /// making a reader fetch the row above to classify this one. It is
+        /// never stored and never read back, so it cannot drift from the
+        /// weights it describes, and a word some later version writes that this
+        /// one has never heard of still says "one effort" simply by being here.
+        ///
+        /// Absent on every ordinary set, which is nearly all of them, and
+        /// optional like the rest so older backups still decode.
+        var continues: String?
+    }
+
+    /// One load offer and what became of it.
+    ///
+    /// This is the autoregulation signal in the file: whether the lifter pushes
+    /// when told there is room, or holds. `outcome` is `taken` or `declined` —
+    /// declining covers the cross and simply lifting the next set at the weight
+    /// that stood, which the app can't tell apart and doesn't pretend to.
+    ///
+    /// The rung travels with the outcome because neither is worth anything
+    /// alone: turning down 62.5 → 65 on a squat and turning down 20 → 25 on a
+    /// curl are different decisions. The other end of it is the set's own
+    /// `weightKg` — every offer is computed from it — so it isn't copied here,
+    /// where a reader would have two numbers that could disagree.
+    struct LoadNudgeDTO: Codable {
+        /// `taken` or `declined`.
+        var outcome: String
+        /// The weight the offer moved the remaining sets to, in kilograms.
+        var toKg: Double
     }
 
     struct BodyMetricDTO: Codable {
@@ -121,6 +228,36 @@ enum BackupService {
         var trackingRaw: String
     }
 
+    /// A bundled library exercise that something in this file refers to,
+    /// flattened into the archive. Shaped after `CustomExerciseDTO`, which has
+    /// always carried these same facts about the user's own exercises.
+    ///
+    /// Custom exercises stay out of here even when they were trained, because
+    /// `customExercises` already describes them in full: copying one into both
+    /// sections would give a reader two records for the same exercise with no
+    /// rule for which wins, and would tempt a future restore into inserting it
+    /// twice. Resolving an ID means checking both sections.
+    ///
+    /// Nothing reads this back. The bundled library is the source of truth at
+    /// runtime, and seeding exercises from a backup would let a file written by
+    /// an older build shadow an entry the app has since corrected or merged.
+    struct CatalogExerciseDTO: Codable {
+        /// Spelled as the sets and plan items in this file spell it, which
+        /// isn't always the ID the app resolved it to — a set logged under an
+        /// exercise that has since been merged into another keeps the old ID,
+        /// and that's the one a reader has to be able to look up.
+        var catalogID: String
+        var name: String
+        var category: String
+        /// The library's own wording, which runs to dozens of free-text labels.
+        var muscleRaw: [String]
+        /// The same muscles folded into the canonical groups the app credits
+        /// work to — the list worth counting sets against.
+        var muscles: [String]
+        var equipment: [String]
+        var trackingRaw: String
+    }
+
     // MARK: - Export
 
     static func export(context: ModelContext) throws -> URL {
@@ -130,6 +267,7 @@ enum BackupService {
         let bodyMetrics = try context.fetch(FetchDescriptor<BodyMetric>())
         let loadScales = try context.fetch(FetchDescriptor<ExerciseLoadPreference>())
         let hidden = try context.fetch(FetchDescriptor<HiddenExerciseRecord>())
+        let finished = sessions.filter { !$0.isActive }
 
         let archive = Archive(
             settings: Settings(
@@ -152,21 +290,41 @@ enum BackupService {
                                    })
                         })
             },
-            sessions: sessions.filter { !$0.isActive }.map { session in
+            sessions: finished.map { session in
                 SessionDTO(id: session.id, title: session.title, startedAt: session.startedAt,
-                           endedAt: session.endedAt, notes: session.notes, planName: session.planName,
+                           endedAt: session.endedAt,
+                           // Trimmed: a field that was opened and cleared again
+                           // shouldn't reach the file as a note made of spaces.
+                           notes: session.trimmedNotes, planName: session.planName,
                            averageHeartRate: session.averageHeartRate,
                            maxHeartRate: session.maxHeartRate,
                            activeEnergyKcal: session.activeEnergyKcal,
                            wasWatchDriven: session.wasWatchDriven,
+                           noteTags: session.noteTagsRaw.isEmpty ? nil : session.noteTags.map(\.rawValue),
+                           exerciseNotes: exerciseNotes(of: session),
                            sets: session.sets.map { set in
                                SetDTO(catalogID: set.catalogID, exerciseName: set.exerciseName,
                                       exerciseOrder: set.exerciseOrder, setIndex: set.setIndex,
                                       weightKg: set.weightKg, reps: set.reps, seconds: set.seconds,
-                                      isCompleted: set.isCompleted, isWarmup: set.isWarmup,
+                                      isCompleted: set.isCompleted,
                                       completedAt: set.completedAt,
+                                      startedAt: set.startedAt,
                                       targetRepsLow: set.targetRepsLow, targetRepsHigh: set.targetRepsHigh,
-                                      rpe: set.rpe)
+                                      rpe: set.rpe,
+                                      averageHeartRate: set.averageHeartRate,
+                                      maxHeartRate: set.maxHeartRate,
+                                      // Read through the set rather than off
+                                      // the stored string, so a provenance left
+                                      // behind by a set whose heart rate has
+                                      // since been cleared can't reach the file
+                                      // on its own, describing a window over
+                                      // numbers that aren't there.
+                                      heartRateWindow: set.heartRateWindow?.rawValue,
+                                      loadNudge: loadNudge(of: set),
+                                      // Read through the set, so a link whose
+                                      // set isn't in this file can't reach a
+                                      // reader as half a drop set.
+                                      continues: set.continuation?.rawValue)
                            })
             },
             bodyMetrics: bodyMetrics.map {
@@ -179,7 +337,8 @@ enum BackupService {
             loadScales: loadScales.map {
                 LoadScaleDTO(catalogID: $0.catalogID, unit: $0.unitRaw, increment: $0.increment)
             },
-            hiddenExercises: hidden.map(\.catalogID)
+            hiddenExercises: hidden.map(\.catalogID),
+            exerciseCatalog: referencedCatalog(plans: plans, sessions: finished)
         )
 
         let encoder = JSONEncoder()
@@ -196,6 +355,72 @@ enum BackupService {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         try data.write(to: url, options: .atomic)
         return url
+    }
+
+    /// The notes kept on individual exercises in one session, in the order they
+    /// were trained. Nothing is written for a session nobody wrote about.
+    ///
+    /// An empty note can't normally survive the end of a session, but the check
+    /// is here too: this file is the one thing that outlives the app, and a
+    /// note that says nothing would read to anything parsing it as a lifter who
+    /// had something to report and didn't say what.
+    private static func exerciseNotes(of session: WorkoutSession) -> [ExerciseNoteDTO]? {
+        let notes = session.orderedExerciseNotes.filter { !$0.isEmpty }
+        guard !notes.isEmpty else { return nil }
+        return notes.map {
+            ExerciseNoteDTO(catalogID: $0.catalogID, exerciseName: $0.exerciseName,
+                            text: $0.trimmedText, tags: $0.tags.map(\.rawValue))
+        }
+    }
+
+    /// What the app offered this set's rating and what came of it, where an
+    /// offer was both made and resolved. Nothing is written otherwise: a set
+    /// nobody was offered a rung on has to stay indistinguishable from a set
+    /// logged before any of this existed, which is what a null or a "none"
+    /// would quietly break.
+    private static func loadNudge(of set: SetLog) -> LoadNudgeDTO? {
+        guard let outcome = set.loadNudgeOutcome, let toKg = set.loadNudgeToKg else { return nil }
+        return LoadNudgeDTO(outcome: outcome.rawValue, toKg: toKg)
+    }
+
+    /// The library definitions behind the exercises the archive's plans and
+    /// sessions name, and only those — the bundled library runs to hundreds of
+    /// entries, and a backup is a file the user opens and sends on, not a copy
+    /// of the app's resources.
+    ///
+    /// Load scales and the hidden list are read as settings rather than as
+    /// training, so the IDs in them don't pull an exercise in: hiding is how
+    /// the library gets trimmed down to one gym, and following that list would
+    /// put most of the library back in the file it was kept out of.
+    private static func referencedCatalog(plans: [Plan], sessions: [WorkoutSession]) -> [CatalogExerciseDTO] {
+        var ids: Set<String> = []
+        for plan in plans {
+            for day in plan.days {
+                for item in day.items { ids.insert(item.catalogID) }
+            }
+        }
+        for session in sessions {
+            for set in session.sets { ids.insert(set.catalogID) }
+        }
+
+        // Sorted so two exports of unchanged data are the same bytes, which is
+        // what `.sortedKeys` buys everywhere else in the file.
+        return ids.sorted().compactMap { id in
+            // A custom exercise is left to `customExercises`, and an ID that
+            // resolves to nothing at all — a custom exercise deleted out from
+            // under its own history — has nothing to say. The set still
+            // carries the name it was logged under.
+            guard let exercise = ExerciseCatalog.shared.exercise(id: id), !exercise.isCustom else { return nil }
+            return CatalogExerciseDTO(
+                catalogID: id,
+                name: exercise.name,
+                category: exercise.category,
+                muscleRaw: exercise.muscleGroups,
+                muscles: exercise.muscles.map(\.name),
+                equipment: exercise.equipment,
+                trackingRaw: exercise.tracking.rawValue
+            )
+        }
     }
 
     // MARK: - Import
@@ -255,17 +480,60 @@ enum BackupService {
             session.maxHeartRate = dto.maxHeartRate
             session.activeEnergyKcal = dto.activeEnergyKcal
             session.wasWatchDriven = dto.wasWatchDriven ?? false
+            // Tags the app doesn't know are dropped rather than stored: a value
+            // nothing can draw would sit in the record unreadable and be
+            // written back out as though it had been understood.
+            session.noteTagsRaw = NoteTag.resolve(dto.noteTags ?? []).map(\.rawValue)
             context.insert(session)
+
+            for noteDTO in dto.exerciseNotes ?? [] {
+                let tags = NoteTag.resolve(noteDTO.tags)
+                let text = noteDTO.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty || !tags.isEmpty else { continue }
+                let note = ExerciseNote(catalogID: noteDTO.catalogID, exerciseName: noteDTO.exerciseName)
+                note.text = text
+                note.tags = tags
+                note.session = session
+                context.insert(note)
+            }
 
             for setDTO in dto.sets {
                 let set = SetLog(catalogID: setDTO.catalogID, exerciseName: setDTO.exerciseName,
                                  exerciseOrder: setDTO.exerciseOrder, setIndex: setDTO.setIndex,
                                  weightKg: setDTO.weightKg, reps: setDTO.reps, seconds: setDTO.seconds,
-                                 targetRepsLow: setDTO.targetRepsLow, targetRepsHigh: setDTO.targetRepsHigh,
-                                 isWarmup: setDTO.isWarmup)
+                                 targetRepsLow: setDTO.targetRepsLow, targetRepsHigh: setDTO.targetRepsHigh)
                 set.isCompleted = setDTO.isCompleted
                 set.completedAt = setDTO.completedAt
+                set.startedAt = setDTO.startedAt
                 set.rpe = setDTO.rpe
+                set.averageHeartRate = setDTO.averageHeartRate
+                set.maxHeartRate = setDTO.maxHeartRate
+                // A window the app doesn't recognise is dropped rather than
+                // stored, the way an unknown note tag is: a provenance nothing
+                // can read would still be written back out on the next export
+                // as though it had been understood. The numbers survive it and
+                // read as a heart rate of unstated provenance, which is the
+                // truth about them once their label is unreadable.
+                set.heartRateWindowRaw = setDTO.heartRateWindow
+                    .flatMap(HeartRateWindowSource.init(rawValue:))?.rawValue
+                // An outcome the app can't read is dropped whole, rung and all.
+                // Unlike a heart rate, whose numbers survive losing their
+                // label, there is nothing left here once the word goes: a rung
+                // on its own doesn't say whether anybody took it.
+                if let nudge = setDTO.loadNudge, let outcome = LoadNudgeOutcome(rawValue: nudge.outcome) {
+                    set.recordLoadNudge(outcome, toKg: nudge.toKg)
+                }
+                // The key being there is the whole of what's restored — which
+                // kind of continuation it was gets read back off the weights,
+                // so an unfamiliar word costs nothing here, unlike an unknown
+                // heart-rate window or a load outcome. What it can't survive is
+                // having nothing above it to continue: the first set of an
+                // exercise continues the end of the exercise before it, or
+                // nothing at all, and a file claiming otherwise would put a
+                // dangling link into the record that no reader could resolve.
+                if setDTO.continues != nil && setDTO.setIndex > 0 {
+                    set.continuesPreviousSet = true
+                }
                 set.session = session
                 context.insert(set)
             }
@@ -313,6 +581,7 @@ enum BackupService {
         for item in try context.fetch(FetchDescriptor<PlanItem>()) { context.delete(item) }
         for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
         for set in try context.fetch(FetchDescriptor<SetLog>()) { context.delete(set) }
+        for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
 

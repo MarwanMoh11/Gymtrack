@@ -80,22 +80,31 @@ final class WatchCommandCenter {
 
         case .undoSet(let id):
             guard let set = setLog(id: id, in: context) else { return }
-            set.isCompleted = false
-            set.completedAt = nil
+            // The same erasure the phone's own undo performs, and deliberately
+            // the identical call. Clearing the completion alone left the effort
+            // answer, the announced start and the heart rate read through it
+            // sitting on a set the lifter had taken back — so a mis-tap on the
+            // wrist wrote a rating and a time under tension into the record for
+            // a set that, as far as the record is concerned, never happened.
+            set.unlog()
             save(context)
             pushMirror(context: context)
 
         case .addSet(let catalogID):
-            guard let session = activeSession(in: context),
-                  let template = session.sets
-                    .filter({ $0.catalogID == catalogID })
-                    .max(by: { $0.setIndex < $1.setIndex })
+            guard let session = activeSession(in: context) else { return }
+            let existing = session.sets.filter { $0.catalogID == catalogID }
+            // Modelled on the last set that was a set, exactly as the logger
+            // does it — the wrist shouldn't add a different kind of set to the
+            // phone just because it was the thing that asked. After a drop the
+            // bottom row of an exercise is the lightest thing the lifter did.
+            guard let template = existing.filter({ !$0.isContinuation }).max(by: { $0.setIndex < $1.setIndex })
+                    ?? existing.max(by: { $0.setIndex < $1.setIndex })
             else { return }
             let set = SetLog(
                 catalogID: template.catalogID,
                 exerciseName: template.exerciseName,
                 exerciseOrder: template.exerciseOrder,
-                setIndex: template.setIndex + 1,
+                setIndex: (existing.map(\.setIndex).max() ?? template.setIndex) + 1,
                 weightKg: template.weightKg,
                 reps: template.reps,
                 seconds: template.seconds,
@@ -162,10 +171,11 @@ final class WatchCommandCenter {
     /// logger does — the watch shouldn't behave differently because the phone
     /// happened to be asleep.
     private func carryLoadForward(from set: SetLog) {
-        guard let session = set.session else { return }
+        guard let session = set.session, !set.isContinuation else { return }
         for other in session.sets
         where other.catalogID == set.catalogID
             && !other.isCompleted
+            && !other.isContinuation
             && other.setIndex > set.setIndex {
             other.weightKg = set.weightKg
             if other.tracking == .duration { other.seconds = set.seconds }
@@ -287,7 +297,7 @@ enum WatchSnapshotFactory {
                             targetRepsLow: set.targetRepsLow,
                             targetRepsHigh: set.targetRepsHigh,
                             isCompleted: set.isCompleted,
-                            warmup: set.isWarmup ? true : nil
+                            continuation: set.isContinuation
                         )
                     },
                     lastTimeLabel: lastTimeLabel(group.catalogID),

@@ -19,6 +19,9 @@ enum SettingsKey {
     /// One-shot marker for the migration that turned per-exercise rest into a
     /// real override rather than a copy of the default.
     static let didClearBakedRest = "settings.didClearBakedRest"
+    /// One-shot marker for the cleanup that removed sets logged as warm-ups
+    /// back when the app had them.
+    static let didDropWarmupSets = "settings.didDropWarmupSets"
 
     // Health
     /// Whether the Health permission sheet has been through at least once.
@@ -61,10 +64,13 @@ final class AppSettings {
     var userName: String {
         didSet { defaults.set(userName, forKey: SettingsKey.userName) }
     }
-    /// Offer an effort rating after each set, and let it steer the progression.
-    /// The strip only ever appears on the set you just logged and never blocks
-    /// the next one, so leaving it unanswered costs nothing — which is what
-    /// makes it safe to have on by default.
+    /// Ask how each set felt, and let the answer steer the progression. The
+    /// question rides on the rest bar and never blocks the next set, so leaving
+    /// it unanswered costs nothing — which is what makes it safe to have on by
+    /// default.
+    ///
+    /// The key keeps its old `trackRPE` name so that turning the question off
+    /// once still means off after this rename.
     var trackRPE: Bool {
         didSet { defaults.set(trackRPE, forKey: SettingsKey.trackRPE) }
     }
