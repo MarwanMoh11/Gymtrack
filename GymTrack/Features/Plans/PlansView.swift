@@ -146,9 +146,12 @@ struct PlansView: View {
                     .buttonStyle(.plain)
                     .contextMenu {
                         if !isInUse(day) {
+                            // See the dock's Discard: the accent tint would
+                            // otherwise draw this icon green.
                             Button(role: .destructive) { dayPendingDeletion = day } label: {
                                 Label("Delete day", systemImage: "trash")
                             }
+                            .tint(Theme.negative)
                         }
                     }
                 }

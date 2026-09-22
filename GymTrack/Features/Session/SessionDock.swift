@@ -47,9 +47,12 @@ struct SessionDockBar: View {
         .contextMenu {
             Button { onResume() } label: { Label("Resume workout", systemImage: "arrow.up.forward.app") }
             Button { onFinish() } label: { Label("Finish workout", systemImage: "checkmark.circle") }
+            // The app-wide accent tint reaches into menus and paints a
+            // destructive item's icon green, which reads as the safe choice.
             Button(role: .destructive) { onDiscard() } label: {
                 Label("Discard workout", systemImage: "trash")
             }
+            .tint(Theme.negative)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(workout.session.title), workout in progress")
