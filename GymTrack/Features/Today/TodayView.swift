@@ -16,6 +16,17 @@ struct TodayView: View {
     private var activePlan: Plan? { plans.first(where: \.isActive) ?? plans.first }
     private var scheduledDay: PlanDay? { activePlan?.day(for: .now) }
     private var finishedSessions: [WorkoutSession] { sessions.filter { !$0.isActive } }
+    /// The latest real workout finished today. An empty session is not a day
+    /// trained — closing a freestyle session without logging anything should
+    /// not turn the home screen into a victory card.
+    private var completedToday: WorkoutSession? {
+        finishedSessions
+            .filter {
+                !$0.completedSets.isEmpty
+                    && Calendar.current.isDateInToday($0.endedAt ?? $0.startedAt)
+            }
+            .max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
+    }
     private var streak: TrainingStats.Streak { TrainingStats.streak(from: finishedSessions) }
 
     /// Sessions logged since Monday of the current week.
@@ -111,6 +122,8 @@ struct TodayView: View {
     private var heroCard: some View {
         if let workout = activeWorkout {
             inProgressCard(workout)
+        } else if let session = completedToday {
+            completedCard(session)
         } else if let day = scheduledDay {
             scheduledCard(day)
         } else if activePlan != nil {
@@ -211,6 +224,89 @@ struct TodayView: View {
         }
         guard let group = workout.currentGroup else { return "Tap to log your first set" }
         return "\(group.name) · set \(workout.nextSetNumber) of \(group.sets.count)"
+    }
+
+    /// Once today's work is saved, the hero stops offering the same workout as
+    /// though it never happened. The result is useful at a glance, while both
+    /// reviewing it and choosing to train again remain close at hand.
+    private func completedCard(_ session: WorkoutSession) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 13) {
+                GlyphTile(symbol: "checkmark", tint: SessionPhase.done.tint, size: 54, solid: true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("WORKOUT DONE")
+                        .font(Theme.eyebrow)
+                        .tracking(1.4)
+                        .foregroundStyle(SessionPhase.done.tint)
+                    Text(session.title)
+                        .font(Theme.rounded(24, weight: .heavy))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                    if let endedAt = session.endedAt {
+                        Text("Finished at \(endedAt.formatted(.dateTime.hour().minute()))")
+                            .font(Theme.rounded(12, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 0) {
+                completionStat("\(session.effortSets.count)", label: "sets")
+                completionDivider
+                completionStat(AppSettings.shared.weight(session.totalVolumeKg), label: "moved")
+                completionDivider
+                completionStat(session.duration.durationString, label: "time")
+            }
+            .gtWell(vertical: 12, horizontal: 8)
+
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(SessionPhase.done.tint)
+                Text("You're done for today. Recovery starts now.")
+                    .font(Theme.rounded(13, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Button("View workout") { pastSession = session }
+                .buttonStyle(PrimaryButtonStyle(phase: .done))
+
+            Button("Start another workout") {
+                if activePlan != nil {
+                    showingDayPicker = true
+                } else {
+                    startFreestyle()
+                }
+            }
+            .font(Theme.rounded(14, weight: .semibold))
+            .foregroundStyle(Theme.textSecondary)
+            .frame(maxWidth: .infinity)
+        }
+        .gtCard(padding: 18, phase: .done)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func completionStat(_ value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(Theme.number(17, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label.uppercased())
+                .font(Theme.microCaps)
+                .tracking(0.8)
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var completionDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.08))
+            .frame(width: 1, height: 32)
     }
 
     private func scheduledCard(_ day: PlanDay) -> some View {
