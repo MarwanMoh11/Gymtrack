@@ -5,6 +5,9 @@ import SwiftUI
 struct WatchIdleView: View {
     var connector: WatchConnector
 
+    /// A start has been asked for and the session hasn't arrived yet.
+    @State private var isStarting = false
+
     private var idle: WatchIdleSnapshot { connector.idle }
 
     /// Whether the mirror still describes the day it is being read on.
@@ -129,23 +132,64 @@ struct WatchIdleView: View {
         VStack(spacing: 6) {
             Button {
                 WatchHaptics.log()
-                connector.send(startsFreestyle ? .startFreestyle : .startToday)
+                start(startsFreestyle ? .startFreestyle : .startToday)
             } label: {
-                Label(startsFreestyle ? "Start freestyle" : "Start workout",
-                      systemImage: "figure.strengthtraining.traditional")
+                if isStarting {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .tint(.black)
+                            .frame(width: 16, height: 16)
+                        Text("Starting")
+                    }
+                } else {
+                    Label(startsFreestyle ? "Start freestyle" : "Start workout",
+                          systemImage: "figure.strengthtraining.traditional")
+                }
             }
             .buttonStyle(WatchProminentButtonStyle(phase: .working))
+            .disabled(isStarting)
 
-            if !startsFreestyle {
+            if isStarting {
+                Text(connector.isReachable
+                     ? "Your phone is building the session."
+                     : "Your phone is out of reach. It starts the session as soon as it's back.")
+                    .font(Theme.rounded(11, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .transition(.opacity)
+            } else if !startsFreestyle {
                 Button {
                     WatchHaptics.tick()
-                    connector.send(.startFreestyle)
+                    start(.startFreestyle)
                 } label: {
                     Text("Freestyle instead")
                 }
                 .buttonStyle(WatchQuietButtonStyle(weight: .semibold))
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: isStarting)
+        // Long enough for a phone in range to answer, short enough that a
+        // command lost on the way doesn't leave the button locked; the queue
+        // makes a second press harmless either way, because the phone never
+        // starts a session while one is running.
+        .task(id: isStarting) {
+            guard isStarting else { return }
+            try? await Task.sleep(for: .seconds(8))
+            isStarting = false
+        }
+    }
+
+    /// Asks the phone for a session and says so until one arrives.
+    ///
+    /// The watch can't build a session itself — the plan, the progression and
+    /// the store are all on the phone — so the tap is answered by a mirror a
+    /// moment later, or, with the phone out of range, by nothing at all. The
+    /// button used to sit there unchanged either way, which reads as a tap that
+    /// didn't register and invites a second one.
+    private func start(_ command: WatchCommand) {
+        isStarting = true
+        connector.send(command)
     }
 
     private var footer: some View {
