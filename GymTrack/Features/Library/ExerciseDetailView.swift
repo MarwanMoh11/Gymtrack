@@ -125,7 +125,12 @@ struct ExerciseDetailView: View {
     private var bestRow: some View {
         let allSets = history.flatMap(\.sets)
         let heaviest = allSets.map(\.weightKg).max() ?? 0
-        let bestE1RM = allSets.map(\.estimatedOneRepMax).max() ?? 0
+        // Each session's own estimate, not one taken across every row: those
+        // leave out the rows of a drop or a cluster, which are lifted
+        // pre-fatigued as part of the set above them. A light row taken for a
+        // pile of reps estimates a one-rep max the lifter never had, and the
+        // tile would outrank the chart underneath it and the progression both.
+        let bestE1RM = history.map(\.bestEstimatedOneRepMax).max() ?? 0
         let bestReps = allSets.map(\.reps).max() ?? 0
 
         return HStack(spacing: 10) {
@@ -228,7 +233,7 @@ struct ExerciseDetailView: View {
                             .font(Theme.rounded(13, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                         Spacer()
-                        Text("\(entry.sets.count) sets · \(scale.format(entry.volumeKg))")
+                        Text("\(setCount(entry)) · \(scale.format(entry.volumeKg))")
                             .font(Theme.rounded(11, weight: .medium))
                             .foregroundStyle(Theme.textTertiary)
                     }
@@ -243,9 +248,21 @@ struct ExerciseDetailView: View {
         }
     }
 
+    /// Sets counted as efforts, the way the logger and the session screens
+    /// count them. Counting rows, a session with one drop in it said "4 sets"
+    /// here while its own summary said 3.
+    private func setCount(_ entry: TrainingStats.ExerciseSessionSummary) -> String {
+        let count = entry.sets.filter { !$0.isContinuation }.count
+        return count == 1 ? "1 set" : "\(count) sets"
+    }
+
     /// One logged set, with a dot in the colour of how it felt when it was
     /// answered for. Pulled out of the list because the chained ternaries and
     /// the modifiers together are more than the type checker will sit through.
+    ///
+    /// A drop or cluster row carries the glyph the session screens mark it
+    /// with. Without it, 62.5×8 then 50×10 then 40×12 reads as a lifter
+    /// falling apart across three sets rather than one set taken further.
     private func setChip(_ set: SetLog) -> some View {
         let value: String
         if set.tracking == .duration {
@@ -255,7 +272,13 @@ struct ExerciseDetailView: View {
         } else {
             value = "\(scale.format(set.weightKg, showUnit: false))×\(set.reps)"
         }
+        let continuation = set.continuation
         return HStack(spacing: 4) {
+            if continuation != nil {
+                Image(systemName: SetContinuation.symbol)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+            }
             Text(value)
                 .font(Theme.number(12, weight: .semibold))
                 .foregroundStyle(Theme.textSecondary)
@@ -267,6 +290,13 @@ struct ExerciseDetailView: View {
         .background(Theme.panel, in: Capsule())
         .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(set.feel.map { "\(value), felt \($0.label)" } ?? value)
+        .accessibilityLabel(chipLabel(value, continuation: continuation, feel: set.feel))
+    }
+
+    private func chipLabel(_ value: String, continuation: SetContinuation?, feel: SetFeel?) -> String {
+        var parts = [value]
+        if let continuation { parts.insert(continuation.label, at: 0) }
+        if let feel { parts.append("felt \(feel.label)") }
+        return parts.joined(separator: ", ")
     }
 }
