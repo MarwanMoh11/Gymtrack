@@ -72,7 +72,7 @@ struct ExercisePickerView: View {
                 }
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 
     private var createRow: some View {

@@ -67,7 +67,7 @@ struct LoadScaleSheet: View {
                 }
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }

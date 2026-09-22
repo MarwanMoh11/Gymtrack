@@ -198,7 +198,7 @@ struct SettingsView: View {
                 Alert(title: Text(payload.title), message: Text(payload.message), dismissButton: .default(Text("OK")))
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 
     /// A one-word read on the integration, so the row says something without

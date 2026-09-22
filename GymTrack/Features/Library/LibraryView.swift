@@ -323,6 +323,6 @@ struct HiddenExercisesView: View {
                 }
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 }

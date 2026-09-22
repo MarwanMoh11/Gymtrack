@@ -249,7 +249,7 @@ struct TemplatePickerView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 }
 

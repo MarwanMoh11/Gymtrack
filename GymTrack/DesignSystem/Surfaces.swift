@@ -112,6 +112,18 @@ extension View {
         self.background(Theme.background.ignoresSafeArea())
     }
 
+    /// The ground under a sheet, and the end of the session dock's reach.
+    ///
+    /// The dock makes room for itself by setting a bottom content margin on
+    /// its tab, and a sheet presented from that tab inherits it — every list
+    /// in the sheet then ended on a band of empty space the height of a bar
+    /// that isn't there, because the sheet covers it.
+    func gtSheetBackground() -> some View {
+        self
+            .contentMargins(.bottom, 0, for: .scrollContent)
+            .presentationBackground(Theme.background)
+    }
+
     /// The wash behind the logger, keyed to the phase — amber across the top of
     /// the screen says you're resting before you've read the clock.
     ///

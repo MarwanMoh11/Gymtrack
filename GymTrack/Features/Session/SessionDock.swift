@@ -174,18 +174,51 @@ extension View {
         onFinish: @escaping () -> Void,
         onDiscard: @escaping () -> Void
     ) -> some View {
-        safeAreaInset(edge: .bottom, spacing: 0) {
-            if let workout, !isExpanded {
-                SessionDockBar(
-                    workout: workout,
-                    onResume: onResume,
-                    onFinish: onFinish,
-                    onDiscard: onDiscard
-                )
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        modifier(SessionDockModifier(workout: workout, isExpanded: isExpanded,
+                                     onResume: onResume, onFinish: onFinish, onDiscard: onDiscard))
+    }
+}
+
+/// Floats the bar over the tab and pushes every scroll view in it up by the
+/// bar's height.
+///
+/// This was a `safeAreaInset` on the tab's navigation stack, and on iOS 26 that
+/// inset never reached the scroll views inside the stack: they still scrolled
+/// under the bar, but stopped short of it, so the last row of every tab — the
+/// oldest recent session, "Add a routine", a day's "Delete this day" — sat
+/// behind the bar for as long as a session was minimised, with no way to
+/// scroll it clear. Content margins travel down through the environment, into
+/// pushed screens as well as the root one, so each scroll view makes the room
+/// itself.
+private struct SessionDockModifier: ViewModifier {
+    let workout: ActiveWorkout?
+    let isExpanded: Bool
+    let onResume: () -> Void
+    let onFinish: () -> Void
+    let onDiscard: () -> Void
+
+    /// The bar's height with its padding, measured rather than assumed because
+    /// Dynamic Type changes it.
+    @State private var dockHeight: CGFloat = 0
+
+    private var isShowing: Bool { workout != nil && !isExpanded }
+
+    func body(content: Content) -> some View {
+        content
+            .contentMargins(.bottom, isShowing ? dockHeight : 0, for: .scrollContent)
+            .overlay(alignment: .bottom) {
+                if let workout, !isExpanded {
+                    SessionDockBar(
+                        workout: workout,
+                        onResume: onResume,
+                        onFinish: onFinish,
+                        onDiscard: onDiscard
+                    )
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { dockHeight = $0 }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
-        }
     }
 }

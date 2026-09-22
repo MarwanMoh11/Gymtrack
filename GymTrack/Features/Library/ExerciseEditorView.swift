@@ -164,7 +164,7 @@ struct ExerciseEditorView: View {
                 load()
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 
     private static let equipmentOptions = [

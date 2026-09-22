@@ -53,7 +53,7 @@ struct SessionSummaryView: View {
                 }
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 
     /// The one moment in the app worth a flourish: the session's own colour

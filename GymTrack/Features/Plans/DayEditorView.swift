@@ -253,7 +253,7 @@ struct PlanItemEditor: View {
                 }
             }
         }
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
         .sheet(isPresented: $showingScale) {
             if let catalog = item.catalog {
                 LoadScaleSheet(exercise: catalog, referenceKg: item.targetWeightKg) { updated in

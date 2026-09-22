@@ -581,6 +581,6 @@ struct DayPickerSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 }

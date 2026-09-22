@@ -233,6 +233,6 @@ private struct LogWeightSheet: View {
             }
         }
         .presentationDetents([.medium])
-        .presentationBackground(Theme.background)
+        .gtSheetBackground()
     }
 }
