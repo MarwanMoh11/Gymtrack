@@ -662,7 +662,8 @@ private struct ExerciseLogCard: View {
             // two copies of it would be one too many.
             asksInline: !workout.restTimer.isRunning,
             onRate: { workout.rate(set, feel: $0) },
-            onClearRating: { workout.clearRating(set) }
+            onClearRating: { workout.clearRating(set) },
+            onEdit: { workout.numbersChanged() }
         )
         // Long press, and nothing on screen. A lifter who only does straight
         // sets has to be able to use this app for a year without ever learning
@@ -885,6 +886,10 @@ private struct SetRow: View {
     let asksInline: Bool
     let onRate: (SetFeel) -> Void
     let onClearRating: () -> Void
+    /// A number on this row was changed by hand. The row writes it to the set
+    /// itself; this is what tells everything drawing a copy of that set — the
+    /// wrist above all — that it has moved.
+    let onEdit: () -> Void
 
     @State private var showingKeypad = false
     @State private var showingScale = false
@@ -1214,6 +1219,7 @@ private struct SetRow: View {
                     for pendingSet in pending {
                         pendingSet.weightKg = updated.snap(kg: pendingSet.weightKg)
                     }
+                    onEdit()
                 }
             }
         }
@@ -1280,16 +1286,16 @@ private struct SetRow: View {
     private var weightBinding: Binding<Double> {
         Binding(
             get: { scale.display(set.weightKg) },
-            set: { set.weightKg = scale.kilograms(max(0, $0)) }
+            set: { set.weightKg = scale.kilograms(max(0, $0)); onEdit() }
         )
     }
 
     private var repsBinding: Binding<Double> {
-        Binding(get: { Double(set.reps) }, set: { set.reps = max(0, Int($0)) })
+        Binding(get: { Double(set.reps) }, set: { set.reps = max(0, Int($0)); onEdit() })
     }
 
     private var secondsBinding: Binding<Double> {
-        Binding(get: { Double(set.seconds) }, set: { set.seconds = max(0, Int($0)) })
+        Binding(get: { Double(set.seconds) }, set: { set.seconds = max(0, Int($0)); onEdit() })
     }
 }
 

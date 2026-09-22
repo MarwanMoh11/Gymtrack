@@ -274,6 +274,18 @@ final class ActiveWorkout {
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
 
+    /// A weight or a rep count changed by hand on a set that hasn't been logged
+    /// yet. The logger writes those straight onto the `SetLog` through a
+    /// binding, so the number on screen is already right and nothing here has
+    /// to touch it — but everything drawing the same set from a copy is still
+    /// holding the old one.
+    ///
+    /// The wrist is the one that bites. It went on showing the weight from
+    /// before the edit and then wrote that stale weight back over this one the
+    /// moment the set was logged from the watch, so an adjustment made on the
+    /// phone was undone by the next tap on the wrist.
+    func numbersChanged() { save() }
+
     // MARK: - Taking a set further
 
     /// Adds a row that carries on from `set` without the effort being put down
