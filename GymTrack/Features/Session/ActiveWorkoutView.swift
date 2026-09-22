@@ -21,6 +21,10 @@ struct ActiveWorkoutView: View {
     @State private var showingAddExercise = false
     @State private var showingFinishConfirm = false
     @State private var showingDiscardConfirm = false
+    /// A finished exercise can still be opened to change a note, rate a set or
+    /// undo one. It is kept separate from `currentGroup`, whose job is to tell
+    /// the watch and Live Activity what the lifter is doing next.
+    @State private var reviewedGroupID: String?
     @State private var dragOffset: CGFloat = 0
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -91,36 +95,55 @@ struct ActiveWorkoutView: View {
     /// Grab handle, the session clock, and the two ways out — leaving (which
     /// keeps everything) on the left, finishing on the right.
     private var header: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 7) {
             grabHandle
 
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Button(action: minimise) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .black))
-                        Text("Minimise")
-                            .font(Theme.rounded(12, weight: .bold))
-                    }
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Theme.panel, in: Capsule())
-                    .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .black))
+                        .frame(width: 36, height: 36)
+                        .foregroundStyle(Theme.textSecondary)
+                        .background(Theme.panel, in: Circle())
+                        .overlay { Circle().strokeBorder(Theme.edge, lineWidth: 1) }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Minimise workout")
                 .accessibilityHint("Keeps the session running in the background")
 
-                Spacer(minLength: 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(workout.session.title)
+                        .font(Theme.rounded(15, weight: .bold))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
 
-                Text(elapsed.clockString)
-                    .font(Theme.number(20))
-                    .foregroundStyle(workout.phase.tint)
-                    .shadow(color: workout.phase.glow, radius: 8)
-                    .accessibilityLabel("Elapsed \(elapsed.durationString)")
+                    HStack(spacing: 6) {
+                        Text(elapsed.clockString)
+                            .font(Theme.number(13, weight: .semibold))
+                            .foregroundStyle(workout.phase.tint)
+                            .shadow(color: workout.phase.glow, radius: 6)
+                            .accessibilityLabel("Elapsed \(elapsed.durationString)")
 
-                Spacer(minLength: 4)
+                        Text("\(workout.completedCount)/\(workout.totalCount) sets")
+                            .font(Theme.rounded(11, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+
+                        if workout.volumeKg > 0 {
+                            Text(AppSettings.shared.weight(workout.volumeKg))
+                                .font(Theme.rounded(11, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                                .accessibilityLabel("\(AppSettings.shared.weight(workout.volumeKg)) moved")
+                        }
+
+                        if let heartRate = watch.liveMetrics?.currentHeartRate {
+                            LiveHeartRatePill(bpm: heartRate)
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                }
+
+                Spacer(minLength: 0)
 
                 // Green once everything is logged: the screen stops asking for
                 // sets and starts asking to be closed.
@@ -134,17 +157,6 @@ struct ActiveWorkoutView: View {
                         .shadow(color: finishTint.glow, radius: 8, y: 2)
                 }
                 .buttonStyle(.plain)
-            }
-
-            HStack(spacing: 6) {
-                Text("\(workout.session.title) · \(workout.completedCount) of \(workout.totalCount) sets")
-                    .font(Theme.rounded(12, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-
-                if let heartRate = watch.liveMetrics?.currentHeartRate {
-                    LiveHeartRatePill(bpm: heartRate)
-                }
             }
 
             headerProgressLine
@@ -217,21 +229,32 @@ struct ActiveWorkoutView: View {
     private var content: some View {
         ScrollViewReader { scroll in
             ScrollView {
-                VStack(spacing: 14) {
-                    progressHeader
+                LazyVStack(spacing: 12) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id("logger-top")
 
-                    ForEach(workout.groups) { group in
+                    if let group = displayedGroup {
+                        if reviewedGroupID != nil,
+                           let current = workout.currentGroup,
+                           current.catalogID != group.catalogID {
+                            reviewBanner(current: current, scroll: scroll)
+                        }
+
                         ExerciseLogCard(workout: workout, group: group, scroll: scroll)
                             .id(group.catalogID)
+                    } else {
+                        EmptyStateView(
+                            icon: "dumbbell.fill",
+                            title: "Choose your first exercise",
+                            message: "Add an exercise, then the next set will stay at the top of this screen.",
+                            actionTitle: "Add exercise",
+                            action: { showingAddExercise = true }
+                        )
+                        .gtCard(padding: 0)
                     }
 
-                    Button {
-                        showingAddExercise = true
-                    } label: {
-                        Label("Add exercise", systemImage: "plus")
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .padding(.top, 4)
+                    exerciseQueue(scroll: scroll)
 
                     discardFooter
                 }
@@ -249,49 +272,181 @@ struct ActiveWorkoutView: View {
             // goes looking for the next exercise, rather than by finding a
             // button.
             .scrollDismissesKeyboard(.interactively)
+            .onChange(of: workout.currentGroup?.catalogID) { _, currentID in
+                if reviewedGroupID == currentID { reviewedGroupID = nil }
+                guard reviewedGroupID == nil else { return }
+                scrollToLogger(scroll)
+            }
         }
     }
 
-    private var progressHeader: some View {
-        HStack(spacing: 14) {
-            ProgressRing(progress: workout.progress, lineWidth: 7, phase: workout.phase,
-                         label: "\(Int(workout.progress * 100))")
-                .frame(width: 54, height: 54)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(workout.completedCount) of \(workout.totalCount) sets")
-                    .font(Theme.rounded(16, weight: .bold))
-                    .foregroundStyle(Theme.ink)
-                Text("\(AppSettings.shared.weight(workout.volumeKg)) moved")
-                    .font(Theme.rounded(13, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            Spacer()
+    private var displayedGroup: SessionExerciseGroup? {
+        if let reviewedGroupID,
+           let reviewed = workout.groups.first(where: { $0.catalogID == reviewedGroupID }) {
+            return reviewed
         }
-        .gtCard(padding: 14, phase: workout.phase)
+        return workout.currentGroup
+    }
+
+    /// The route through the workout stays visible without making every
+    /// exercise carry a live editor. One tap changes the exercise at the top;
+    /// completed exercises open for review without changing what the watch
+    /// calls "next".
+    private func exerciseQueue(scroll: ScrollViewProxy) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("WORKOUT")
+                    .font(Theme.eyebrow)
+                    .tracking(1.4)
+                    .foregroundStyle(Theme.textTertiary)
+                Spacer()
+                Text("\(workout.groups.filter(\.isComplete).count)/\(workout.groups.count) exercises")
+                    .font(Theme.rounded(11, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+
+            ForEach(workout.groups) { group in
+                Divider()
+                    .overlay(Theme.edge)
+                    .padding(.leading, 58)
+
+                Button {
+                    workout.focus(on: group.catalogID)
+                    reviewedGroupID = group.isComplete ? group.catalogID : nil
+                    scrollToLogger(scroll)
+                } label: {
+                    HStack(spacing: 10) {
+                        GlyphTile(symbol: group.isComplete ? "checkmark" : (group.catalog?.symbol ?? "dumbbell.fill"),
+                                  tint: group.isComplete ? Theme.positive : Theme.textSecondary,
+                                  size: 32)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.name)
+                                .font(Theme.rounded(14, weight: .bold))
+                                .foregroundStyle(Theme.ink)
+                                .lineLimit(1)
+                            Text(queueDetail(group))
+                                .font(Theme.rounded(11, weight: .medium))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 4)
+
+                        if displayedGroup?.catalogID == group.catalogID {
+                            Text(group.isComplete ? "REVIEWING" : "CURRENT")
+                                .font(Theme.microCaps)
+                                .tracking(0.8)
+                                .foregroundStyle(group.isComplete ? Theme.positive : Theme.accent)
+                        } else if workout.pendingNudge?.catalogID == group.catalogID {
+                            Text("ADJUST")
+                                .font(Theme.microCaps)
+                                .tracking(0.8)
+                                .foregroundStyle(Theme.warning)
+                        } else if workout.takenNudge?.nudge.catalogID == group.catalogID {
+                            Text("CHANGED")
+                                .font(Theme.microCaps)
+                                .tracking(0.8)
+                                .foregroundStyle(Theme.positive)
+                        } else {
+                            Text("\(group.completedCount)/\(group.sets.count)")
+                                .font(Theme.number(12, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                            DisclosureChevron()
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(group.order + 1), \(group.name), \(group.completedCount) of \(group.sets.count) sets")
+                .accessibilityHint(group.isComplete ? "Review this exercise" : "Make this the current exercise")
+            }
+
+            Divider().overlay(Theme.edge)
+
+            Button { showingAddExercise = true } label: {
+                Label("Add exercise", systemImage: "plus")
+                    .font(Theme.rounded(13, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .gtCard(padding: 0)
+    }
+
+    private func reviewBanner(current: SessionExerciseGroup, scroll: ScrollViewProxy) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(Theme.textSecondary)
+            Text("Reviewing a finished exercise")
+                .font(Theme.rounded(12, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+            Spacer(minLength: 4)
+            Button("Back to \(current.name)") {
+                reviewedGroupID = nil
+                scrollToLogger(scroll)
+            }
+            .font(Theme.rounded(12, weight: .bold))
+            .foregroundStyle(Theme.accent)
+            .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Theme.well, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func queueDetail(_ group: SessionExerciseGroup) -> String {
+        if group.isComplete { return "Complete · \(group.sets.count) sets" }
+        if workout.pendingNudge?.catalogID == group.catalogID {
+            return "Load change waiting · tap to review"
+        }
+        if workout.takenNudge?.nudge.catalogID == group.catalogID {
+            return "Load changed · tap to review or undo"
+        }
+        guard let next = group.sets.first(where: { !$0.isCompleted }) else { return "Ready" }
+        return "Set \(group.label(for: next)) · \(targetLabel(next))"
+    }
+
+    private func targetLabel(_ set: SetLog) -> String {
+        if set.tracking == .duration { return "\(set.seconds)s" }
+        let reps = set.targetRepsHigh > 0
+            ? (set.targetRepsLow == set.targetRepsHigh
+               ? "\(set.targetRepsLow)"
+               : "\(set.targetRepsLow)–\(set.targetRepsHigh)")
+            : "\(set.reps)"
+        if set.weightKg == 0 { return "\(reps) reps" }
+        return "\(set.loadScale.format(set.weightKg)) × \(reps)"
+    }
+
+    private func scrollToLogger(_ scroll: ScrollViewProxy) {
+        Task {
+            await Task.yield()
+            withAnimation(.easeOut(duration: 0.28)) {
+                scroll.scrollTo("logger-top", anchor: .top)
+            }
+        }
     }
 
     /// Deliberately at the very bottom, past everything else. Leaving the
     /// screen shouldn't cost you the session — only this should.
     private var discardFooter: some View {
-        VStack(spacing: 6) {
-            Button(role: .destructive) {
-                showingDiscardConfirm = true
-            } label: {
-                Label("Discard this workout", systemImage: "trash")
-                    .font(Theme.rounded(13, weight: .semibold))
-                    .foregroundStyle(Theme.negative)
-            }
-            .buttonStyle(.plain)
-
-            Text("Minimising keeps everything and lets the session run in the background. Discarding deletes it.")
-                .font(Theme.rounded(11, weight: .medium))
-                .foregroundStyle(Theme.textTertiary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 20)
+        Button(role: .destructive) {
+            showingDiscardConfirm = true
+        } label: {
+            Label("Discard this workout", systemImage: "trash")
+                .font(Theme.rounded(13, weight: .semibold))
+                .foregroundStyle(Theme.negative)
         }
-        .padding(.top, 22)
+        .buttonStyle(.plain)
+        .padding(.top, 18)
     }
 
     // MARK: - Actions
@@ -321,6 +476,10 @@ private struct ExerciseLogCard: View {
     /// Whether the note's field is open on this card. Off by default and never
     /// opened by the app — a note is offered, never asked for.
     @State private var isWriting = false
+    /// Earlier work and later prescriptions stay one tap away, but neither is
+    /// allowed to push the set being performed below the fold.
+    @State private var showsEarlierSets = false
+    @State private var showsQueuedSets = false
     @State private var noteDraft = ""
     @FocusState private var noteFocused: Bool
 
@@ -331,6 +490,18 @@ private struct ExerciseLogCard: View {
     /// The first set the user hasn't logged — expanded for immediate input.
     private var activeSetID: UUID? {
         group.sets.first { !$0.isCompleted }?.id
+    }
+
+    private var completedSets: [SetLog] { group.sets.filter(\.isCompleted) }
+    private var queuedSets: [SetLog] {
+        guard let activeSetID,
+              let activeIndex = group.sets.firstIndex(where: { $0.id == activeSetID })
+        else { return [] }
+        return Array(group.sets.dropFirst(activeIndex + 1).filter { !$0.isCompleted })
+    }
+
+    private var visibleCompletedSets: [SetLog] {
+        showsEarlierSets ? completedSets : Array(completedSets.suffix(1))
     }
 
     var body: some View {
@@ -367,44 +538,7 @@ private struct ExerciseLogCard: View {
                 }
             }
 
-            VStack(spacing: 8) {
-                ForEach(group.sets) { set in
-                    SetRow(
-                        set: set,
-                        label: group.label(for: set),
-                        isExpanded: set.id == activeSetID,
-                        previous: previousSet(for: set),
-                        isPR: workout.isPR(set),
-                        onLog: { workout.complete(set, restSeconds: planItem?.restSeconds) },
-                        onUndo: { workout.uncomplete(set) },
-                        onStart: { workout.announceStart(set) },
-                        onCancelStart: { workout.cancelStart(set) },
-                        isLastLogged: workout.lastLoggedSetID == set.id,
-                        // The rest bar is already holding the question up at
-                        // thumb height; two copies of it would be one too many.
-                        asksInline: !workout.restTimer.isRunning,
-                        onRate: { workout.rate(set, feel: $0) },
-                        onClearRating: { workout.clearRating(set) }
-                    )
-                    // Long press, and nothing on screen. A lifter who only does
-                    // straight sets has to be able to use this app for a year
-                    // without ever learning that drop sets are in it: a control
-                    // on the row, however quiet, is a control every one of them
-                    // reads past on every set of every session. What the menu
-                    // offers changes with the row, so it is never a list of
-                    // things that don't apply.
-                    .contextMenu { effortMenu(for: set) }
-                    .accessibilityActions { effortMenu(for: set) }
-
-                    if let nudge = workout.pendingNudge, nudge.setID == set.id {
-                        LoadNudgeRow(nudge: nudge,
-                                     onTake: { workout.apply(nudge) },
-                                     onDismiss: { workout.dismissNudge() })
-                    } else if let taken = workout.takenNudge, taken.nudge.setID == set.id {
-                        NudgeTakenRow(taken: taken, onUndo: { workout.undoTakenNudge() })
-                    }
-                }
-            }
+            setLogger
             .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.pendingNudge)
             .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.takenNudge)
 
@@ -448,6 +582,126 @@ private struct ExerciseLogCard: View {
                 NavigationStack { ExerciseDetailView(exercise: catalog) }
             }
         }
+    }
+
+    /// Only the row that matters now is open. The last logged row remains in
+    /// sight for rating, undo and continuation; everything older and everything
+    /// still queued is grouped behind a plainly labelled disclosure.
+    private var setLogger: some View {
+        VStack(spacing: 8) {
+            if completedSets.count > 1 {
+                disclosureRow(
+                    showsEarlierSets
+                        ? "Hide earlier sets"
+                        : "\(completedSets.count - 1) earlier set\(completedSets.count == 2 ? "" : "s")",
+                    symbol: "clock.arrow.circlepath",
+                    expanded: showsEarlierSets
+                ) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                        showsEarlierSets.toggle()
+                    }
+                }
+            }
+
+            ForEach(visibleCompletedSets) { set in
+                setRow(set, expanded: false)
+            }
+
+            if let active = group.sets.first(where: { $0.id == activeSetID }) {
+                setRow(active, expanded: true)
+            } else if group.isComplete {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.positive)
+                    Text("Exercise complete")
+                        .font(Theme.rounded(13, weight: .bold))
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(Theme.positive.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            if !queuedSets.isEmpty {
+                disclosureRow(
+                    showsQueuedSets
+                        ? "Hide queued sets"
+                        : "\(queuedSets.count) more set\(queuedSets.count == 1 ? "" : "s") queued",
+                    symbol: "ellipsis.circle",
+                    expanded: showsQueuedSets
+                ) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                        showsQueuedSets.toggle()
+                    }
+                }
+
+                if showsQueuedSets {
+                    ForEach(queuedSets) { set in
+                        setRow(set, expanded: false)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func setRow(_ set: SetLog, expanded: Bool) -> some View {
+        SetRow(
+            set: set,
+            label: group.label(for: set),
+            isExpanded: expanded,
+            previous: previousSet(for: set),
+            isPR: workout.isPR(set),
+            onLog: { workout.complete(set, restSeconds: planItem?.restSeconds) },
+            onUndo: { workout.uncomplete(set) },
+            onStart: { workout.announceStart(set) },
+            onCancelStart: { workout.cancelStart(set) },
+            isLastLogged: workout.lastLoggedSetID == set.id,
+            // The rest bar is already holding the question up at thumb height;
+            // two copies of it would be one too many.
+            asksInline: !workout.restTimer.isRunning,
+            onRate: { workout.rate(set, feel: $0) },
+            onClearRating: { workout.clearRating(set) }
+        )
+        // Long press, and nothing on screen. A lifter who only does straight
+        // sets has to be able to use this app for a year without ever learning
+        // that drop sets are in it.
+        .contextMenu { effortMenu(for: set) }
+        .accessibilityActions { effortMenu(for: set) }
+
+        if let nudge = workout.pendingNudge, nudge.setID == set.id {
+            LoadNudgeRow(nudge: nudge,
+                         onTake: { workout.apply(nudge) },
+                         onDismiss: { workout.dismissNudge() })
+        } else if let taken = workout.takenNudge, taken.nudge.setID == set.id {
+            NudgeTakenRow(taken: taken, onUndo: { workout.undoTakenNudge() })
+        }
+    }
+
+    private func disclosureRow(_ title: String,
+                               symbol: String,
+                               expanded: Bool,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .bold))
+                Text(title)
+                    .font(Theme.rounded(12, weight: .semibold))
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
+            }
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var header: some View {
@@ -919,12 +1173,15 @@ private struct SetRow: View {
             }
             .frame(maxWidth: .infinity)
 
-            SetStartStrip(startedAt: set.startedAt, onStart: onStart, onCancel: onCancelStart)
+            HStack(spacing: 10) {
+                SetStartStrip(startedAt: set.startedAt, onStart: onStart, onCancel: onCancelStart)
+                    .frame(width: 112)
 
-            Button(action: onLog) {
-                Label("Log set", systemImage: "checkmark")
+                Button(action: onLog) {
+                    Label("Log set", systemImage: "checkmark")
+                }
+                .buttonStyle(PrimaryButtonStyle())
             }
-            .buttonStyle(PrimaryButtonStyle())
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.86), value: set.startedAt)
         .padding(14)
@@ -1041,18 +1298,12 @@ private struct SetRow: View {
 /// The announcement, and the clock it becomes: one tap to say the set is
 /// beginning now, and a running readout of how long you've been under the bar.
 ///
-/// It lives in the expanded row, between the numbers and *Log set*, because
-/// that is the order the thing actually happens in — read the weight, say
-/// you're on it, do the set, log it. Nothing else on the screen is at that
-/// point in the sequence, and the row is already the one lit object on the
-/// logger, so the tap is findable from arm's length.
+/// It lives beside *Log set*, because both actions happen with the same thumb:
+/// start before the effort if timing matters, then log when it is done.
 ///
-/// Deliberately not a step you have to take. It is a low, quiet capsule under
-/// the full-strength Log button rather than beside it, it never blocks or
-/// precedes logging, and a set logged without it is logged exactly as it always
-/// was. Once tapped it stops being a button at all — there is nothing left to
-/// press but the small cross that takes it back, so the announcement can't be
-/// made twice and the thumb's path to *Log set* stays clear.
+/// Deliberately not a step you have to take. It is quieter and narrower than
+/// the full-strength Log button, and a set logged without it is logged exactly
+/// as it always was.
 private struct SetStartStrip: View {
     let startedAt: Date?
     let onStart: () -> Void
@@ -1068,22 +1319,20 @@ private struct SetStartStrip: View {
 
     private var invitation: some View {
         Button(action: onStart) {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 Image(systemName: "play.fill")
                     .font(.system(size: 11, weight: .black))
-                Text("Start set")
+                Text("Start")
                     .font(Theme.rounded(13, weight: .bold))
-                Spacer(minLength: 0)
-                Text("optional")
-                    .font(Theme.rounded(11, weight: .medium))
-                    .foregroundStyle(Theme.textTertiary)
             }
             .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(Theme.well, in: Capsule())
-            .overlay { Capsule().strokeBorder(Theme.edge, lineWidth: 1) }
+            .frame(height: 54)
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Theme.edge, lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Start set")
@@ -1096,39 +1345,42 @@ private struct SetStartStrip: View {
     /// per expanded row — there is one on every unfinished exercise — would be
     /// several timers running to draw one number each.
     private func working(since start: Date) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: "stopwatch.fill")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Theme.accent.wash)
-            Text("WORKING")
-                .font(Theme.eyebrow)
-                .tracking(1.2)
-                .foregroundStyle(Theme.accent.wash)
-            TimelineView(.periodic(from: start, by: 1)) { context in
-                Text(max(0, context.date.timeIntervalSince(start)).clockString)
-                    .font(Theme.number(15))
-                    .foregroundStyle(Theme.ink)
-                    .monospacedDigit()
+        HStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("WORKING")
+                    .font(Theme.microCaps)
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.accent.wash)
+                TimelineView(.periodic(from: start, by: 1)) { context in
+                    Text(max(0, context.date.timeIntervalSince(start)).clockString)
+                        .font(Theme.number(14, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .monospacedDigit()
+                }
             }
             Spacer(minLength: 0)
             Button(action: onCancel) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .black))
+                    .font(.system(size: 10, weight: .black))
                     .foregroundStyle(Theme.textTertiary)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 28, height: 40)
                     .background(Color.white.opacity(0.07), in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Cancel — this set hasn't started")
         }
-        .padding(.leading, 13)
+        .padding(.leading, 11)
         .padding(.trailing, 5)
-        .padding(.vertical, 5)
         .frame(maxWidth: .infinity)
+        .frame(height: 54)
         .background {
-            Capsule().fill(LinearGradient(colors: [Theme.accent.opacity(0.18), Theme.accent.opacity(0.05)],
-                                          startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay { Capsule().strokeBorder(Theme.accent.opacity(0.28), lineWidth: 1) }
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LinearGradient(colors: [Theme.accent.opacity(0.18), Theme.accent.opacity(0.05)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.28), lineWidth: 1)
+                }
         }
         .accessibilityElement(children: .contain)
         .transition(.opacity)
