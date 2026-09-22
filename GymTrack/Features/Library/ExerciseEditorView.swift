@@ -36,8 +36,15 @@ struct ExerciseEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var muscles: Set<Muscle> = []
-    @State private var equipment: Set<String> = []
+    /// In the order they were picked, because the order is data: the first
+    /// muscle is the one the exercise is credited to in full on the heat map
+    /// and in the weekly split, and the second gets half. Kept in a set, they
+    /// were saved in whatever order the hash gave that day, so a hip thrust
+    /// could go in as a hamstring exercise with the glutes behind it.
+    @State private var muscles: [Muscle] = []
+    /// Picked order too, so the label under the name doesn't reshuffle itself
+    /// every time the exercise is saved.
+    @State private var equipment: [String] = []
     @State private var tracking: TrackingMode = .weightReps
     @State private var confirmingDelete = false
     /// Counted when Delete is tapped and not before. The alert's message is
@@ -101,15 +108,16 @@ struct ExerciseEditorView: View {
                 Section {
                     ForEach(Muscle.Region.allCases) { region in
                         ForEach(Muscle.allCases.filter { $0.region == region }) { option in
-                            toggleRow(option.name, isOn: muscles.contains(option)) {
-                                if muscles.contains(option) { muscles.remove(option) } else { muscles.insert(option) }
+                            toggleRow(option.name, isOn: muscles.contains(option),
+                                      note: muscles.first == option ? "Main" : nil) {
+                                toggle(option, in: &muscles)
                             }
                         }
                     }
                 } header: {
                     Text("Muscles worked")
                 } footer: {
-                    Text("Drives the heatmap and the weekly volume split. Pick the ones it really trains.")
+                    Text("Drives the heatmap and the weekly volume split. Pick the ones it really trains, the main one first.")
                         .font(Theme.rounded(12, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
@@ -118,7 +126,7 @@ struct ExerciseEditorView: View {
                 Section {
                     ForEach(Self.equipmentOptions, id: \.self) { option in
                         toggleRow(option, isOn: equipment.contains(option)) {
-                            if equipment.contains(option) { equipment.remove(option) } else { equipment.insert(option) }
+                            toggle(option, in: &equipment)
                         }
                     }
                 } header: {
@@ -137,6 +145,7 @@ struct ExerciseEditorView: View {
                             confirmingDelete = true
                         } label: {
                             Label("Delete exercise", systemImage: "trash")
+                                .foregroundStyle(Theme.negative)
                         }
                     }
                     .listRowBackground(Theme.surface)
@@ -177,7 +186,16 @@ struct ExerciseEditorView: View {
         "Barbell", "Dumbbell", "Machine", "Cable", "Kettlebell", "Band", "Bench", "Plate",
     ]
 
-    private func toggleRow(_ title: String, isOn: Bool, toggle: @escaping () -> Void) -> some View {
+    private func toggle<Value: Equatable>(_ value: Value, in list: inout [Value]) {
+        if let index = list.firstIndex(of: value) {
+            list.remove(at: index)
+        } else {
+            list.append(value)
+        }
+    }
+
+    private func toggleRow(_ title: String, isOn: Bool, note: String? = nil,
+                           toggle: @escaping () -> Void) -> some View {
         Button {
             toggle()
             Haptics.tick()
@@ -185,6 +203,11 @@ struct ExerciseEditorView: View {
             HStack {
                 Text(title).foregroundStyle(Theme.textPrimary)
                 Spacer()
+                if let note {
+                    Text(note)
+                        .font(Theme.rounded(12, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                }
                 if isOn {
                     Image(systemName: "checkmark").foregroundStyle(Theme.accent)
                 }
@@ -200,8 +223,9 @@ struct ExerciseEditorView: View {
             name = seed
         case .existing(let record):
             name = record.name
-            muscles = Set(record.muscles)
-            equipment = Set(record.equipment)
+            var seen = Set<Muscle>()
+            muscles = record.muscles.filter { seen.insert($0).inserted }
+            equipment = record.equipment
             tracking = record.tracking
         }
     }
@@ -210,14 +234,14 @@ struct ExerciseEditorView: View {
         let saved: CustomExerciseRecord
         if let record {
             record.apply(name: trimmedName,
-                         muscles: Array(muscles),
-                         equipment: Array(equipment),
+                         muscles: muscles,
+                         equipment: equipment,
                          tracking: tracking)
             saved = record
         } else {
             saved = CustomExerciseRecord(name: trimmedName,
-                                         muscles: Array(muscles),
-                                         equipment: Array(equipment),
+                                         muscles: muscles,
+                                         equipment: equipment,
                                          tracking: tracking)
             context.insert(saved)
         }
