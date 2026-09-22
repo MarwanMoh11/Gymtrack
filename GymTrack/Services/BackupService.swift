@@ -425,8 +425,28 @@ enum BackupService {
 
     // MARK: - Import
 
+    enum RestoreError: LocalizedError {
+        case workoutInProgress
+
+        var errorDescription: String? {
+            switch self {
+            case .workoutInProgress:
+                "Finish or discard the workout that's running first. Restoring replaces everything on this phone, and a workout still in progress isn't in any backup to bring it back."
+            }
+        }
+    }
+
     /// Replaces everything currently stored with the archive's contents.
+    ///
+    /// Refused while a workout is open. Export leaves the running session out,
+    /// so no file can hold it, and the wipe would delete it from under the
+    /// logger, the dock, the Live Activity and the wrist, all of which are
+    /// still reading it. Nothing is touched before this check.
     static func restore(from url: URL, context: ModelContext) throws {
+        let open = try context.fetchCount(FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { $0.endedAt == nil }))
+        guard open == 0 else { throw RestoreError.workoutInProgress }
+
         let needsScope = url.startAccessingSecurityScopedResource()
         defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
 
