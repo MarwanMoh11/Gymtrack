@@ -94,6 +94,9 @@ struct SessionDockBar: View {
                     .font(Theme.rounded(11, weight: .medium))
                     .foregroundStyle(phase == .working ? Theme.textSecondary : phase.tint)
                     .lineLimit(1)
+                    // From the middle: the set number is at the end of the
+                    // line, and a long exercise name used to push it off.
+                    .truncationMode(.middle)
             }
 
             Spacer(minLength: 4)

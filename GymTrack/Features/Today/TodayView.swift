@@ -160,6 +160,9 @@ struct TodayView: View {
                         .font(Theme.rounded(13, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
+                        // "Standing Barbell Overhead Press · set…" hid the one
+                        // part of the line that changes; cut the name instead.
+                        .truncationMode(.middle)
                 }
                 Spacer()
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -459,7 +462,7 @@ struct TodayView: View {
                      caption: activePlan.map { "of \($0.trainingDayCount) planned" })
             StatTile(value: TrainingStats.totalVolume(thisWeek).compactVolume,
                      label: "Volume \(AppSettings.shared.weightUnit.short)",
-                     caption: "last 7 days")
+                     caption: "this week")
             StatTile(value: "\(streak.longest)", label: "Best streak", caption: "days")
         }
     }

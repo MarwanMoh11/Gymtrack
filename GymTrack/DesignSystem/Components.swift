@@ -349,9 +349,26 @@ struct StepperField: View {
                             in: shape)
                 .overlay { shape.strokeBorder(Theme.edge, lineWidth: 1) }
                 .opacity(enabled ? 1 : 0.45)
+                .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StepperKeyStyle())
+        // Held, a key keeps stepping. Twenty-odd taps to dial a working weight
+        // up from an empty bar was the slowest thing in the logger; a tap is
+        // still exactly one step, so nobody who never holds it can tell.
+        .buttonRepeatBehavior(.enabled)
         .disabled(!enabled)
+    }
+}
+
+/// The − and + keys. They go down under the thumb and brighten, because a key
+/// that doesn't move reads as one that didn't register — and a lifter who isn't
+/// sure a tap landed taps again, and ends up a plate heavier than they meant.
+private struct StepperKeyStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .brightness(configuration.isPressed ? 0.12 : 0)
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .animation(.spring(response: 0.18, dampingFraction: 0.65), value: configuration.isPressed)
     }
 }
 

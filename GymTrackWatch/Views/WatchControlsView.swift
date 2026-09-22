@@ -10,8 +10,13 @@ struct WatchControlsView: View {
     let onDiscard: () -> Void
 
     @State private var confirmingDiscard = false
+    @State private var confirmingFinish = false
 
     private var phase: SessionPhase { session.phase(resting: rest.isRunning) }
+
+    /// Sets still waiting to be logged. Finishing drops them from the record,
+    /// which is the one thing about finishing that can't be put back.
+    private var unloggedSets: Int { session.totalSets - session.completedSets }
 
     var body: some View {
         ScrollView {
@@ -20,7 +25,16 @@ struct WatchControlsView: View {
                 restControls
                 addSetButton
 
-                Button(action: onEnd) {
+                // Asked only while there is something left to lose, the same
+                // rule the phone's Finish follows. This page is a swipe away
+                // from the logger and the button is the size of the screen; one
+                // stray tap used to end the session there and then, drop the
+                // rest of the plan and close the workout in Health, with no way
+                // back. With everything logged there is nothing to lose, and it
+                // still finishes on the first tap.
+                Button {
+                    if unloggedSets > 0 { confirmingFinish = true } else { onEnd() }
+                } label: {
                     Label("Finish workout", systemImage: "flag.checkered")
                 }
                 // Green rather than the session's colour: finishing is the one
@@ -48,6 +62,12 @@ struct WatchControlsView: View {
             Button("Discard", role: .destructive, action: onDiscard)
         } message: {
             Text("Every set logged in this session is deleted.")
+        }
+        .alert("Finish this workout?", isPresented: $confirmingFinish) {
+            Button("Keep going", role: .cancel) {}
+            Button("Finish", action: onEnd)
+        } message: {
+            Text("\(unloggedSets) set\(unloggedSets == 1 ? "" : "s") not logged — they'll be dropped from the record.")
         }
     }
 

@@ -405,6 +405,9 @@ struct WatchLoggerView: View {
                 .frame(minHeight: 14)
         }
         .buttonStyle(WatchQuietButtonStyle(tint: Theme.textPrimary))
+        // Held, it keeps stepping — the phone's keys do the same, and on the
+        // wrist it is the one way to cover a big change without the crown.
+        .buttonRepeatBehavior(.enabled)
         .accessibilityLabel("\(verb) \(editingName)")
     }
 
