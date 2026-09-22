@@ -398,9 +398,19 @@ struct SessionExerciseGroup: Identifiable {
     /// 4. Numbering the rows instead would have the card claim a four-set
     /// exercise the moment somebody stripped a plate, and the number a set is
     /// called on screen is the number the record and the wrist use too.
-    func label(for set: SetLog) -> String {
-        "\(effortsBefore(set) + (set.isContinuation ? 0 : 1))"
+    func label(for set: SetLog) -> String { "\(number(of: set))" }
+
+    /// The same number, for the places that print "set 3 of 4" — the Lock
+    /// Screen, the dock, the Today card. They used to count rows, so one drop
+    /// had the card reading SET 3 while the Lock Screen underneath it said set
+    /// 4 of 4, about the same set, at the same moment.
+    func number(of set: SetLog) -> Int {
+        max(1, effortsBefore(set) + (set.isContinuation ? 0 : 1))
     }
+
+    /// How many sets the exercise holds, counted the way `number(of:)` counts
+    /// them, so "set 3 of 3" is never followed by a fourth.
+    var effortCount: Int { sets.filter { !$0.isContinuation }.count }
 
     /// Which of last session's sets this one is compared against — its position
     /// among the efforts.

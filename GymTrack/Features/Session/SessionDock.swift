@@ -147,7 +147,7 @@ struct SessionDockBar: View {
             return "All \(workout.totalCount) sets logged — tap to finish"
         }
         guard let group = workout.currentGroup else { return "Tap to log a set" }
-        return "\(group.name) · set \(workout.nextSetNumber) of \(group.sets.count)"
+        return "\(group.name) · set \(workout.nextSetNumber) of \(workout.currentSetTotal)"
     }
 }
 

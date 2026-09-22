@@ -164,13 +164,16 @@ final class ActiveWorkout {
         currentGroup?.sets.first { !$0.isCompleted }
     }
 
-    /// 1-based position of `nextSet` within its exercise.
+    /// What `nextSet` is called on its card — efforts, not rows; see
+    /// `SessionExerciseGroup.number(of:)`.
     var nextSetNumber: Int {
-        guard let group = currentGroup, let next = nextSet,
-              let index = group.sets.firstIndex(where: { $0.id == next.id })
-        else { return currentGroup?.sets.count ?? 0 }
-        return index + 1
+        guard let group = currentGroup else { return 0 }
+        guard let next = nextSet else { return group.effortCount }
+        return group.number(of: next)
     }
+
+    /// How many sets the exercise that's up holds, counted the same way.
+    var currentSetTotal: Int { currentGroup?.effortCount ?? 0 }
 
     /// "60 kg × 8–12" — the prescription for the set that's up.
     var nextTargetLabel: String {
@@ -963,7 +966,7 @@ final class ActiveWorkout {
             totalSets: totalCount,
             currentExercise: currentGroup?.name ?? "Freestyle",
             currentSetNumber: nextSetNumber,
-            currentSetTotal: currentGroup?.sets.count ?? 0,
+            currentSetTotal: currentSetTotal,
             currentTarget: nextTargetLabel,
             upNext: upNextName,
             restEndsAt: restTimer.endsAt,

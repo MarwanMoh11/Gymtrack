@@ -61,7 +61,7 @@ struct WatchLoggerView: View {
             if let subject = effortSet, let owner = effortExercise {
                 ScrollView {
                     WatchSetFeelView(
-                        exerciseName: owner.name, setNumber: subject.index + 1,
+                        exerciseName: owner.name, setNumber: owner.number(of: subject),
                         current: subject.rpe.map(SetFeel.nearest(to:)),
                         onPick: { feel in
                             connector.rateSet(subject, rpe: subject.rpe == feel.rawValue ? nil : feel.rawValue)
@@ -186,7 +186,7 @@ struct WatchLoggerView: View {
                         // rather than pointing at a set that's already done.
                         Text(phase == .done
                              ? "\(session.completedSets)/\(session.totalSets) sets"
-                             : "Set \(session.currentSetNumber)/\(exercise?.sets.count ?? 0)")
+                             : "Set \(session.currentSetNumber)/\(exercise?.effortCount ?? 0)")
                             .font(Theme.number(11, weight: .bold))
                             .foregroundStyle(phase.gradient)
                         if let last = exercise?.lastTimeLabel {
@@ -278,7 +278,7 @@ struct WatchLoggerView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
 
-                Text("\(exercise.name) · Set \(session.currentSetNumber)/\(exercise.sets.count)")
+                Text("\(exercise.name) · Set \(session.currentSetNumber)/\(exercise.effortCount)")
                     .font(Theme.rounded(11, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(2)

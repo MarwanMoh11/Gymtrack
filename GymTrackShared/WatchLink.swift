@@ -100,6 +100,18 @@ struct WatchExerciseSnapshot: Codable, Hashable, Identifiable, Sendable {
     var completedCount: Int { sets.filter(\.isCompleted).count }
     var isComplete: Bool { !sets.isEmpty && completedCount == sets.count }
     var progress: Double { sets.isEmpty ? 0 : Double(completedCount) / Double(sets.count) }
+
+    /// What a row is called on the wrist — `SessionExerciseGroup.number(of:)`
+    /// said again, because the two screens are describing the same set. A
+    /// drop carries the number of the set it was taken off; counting rows
+    /// instead had the watch calling it set 4 while the phone called it 3.
+    func number(of set: WatchSetSnapshot) -> Int {
+        let before = sets.prefix { $0.id != set.id }.filter { !$0.isContinuation }.count
+        return max(1, before + (set.isContinuation ? 0 : 1))
+    }
+
+    /// How many sets the exercise holds, counted the same way.
+    var effortCount: Int { sets.filter { !$0.isContinuation }.count }
 }
 
 /// A session in progress, as the watch sees it.
@@ -164,12 +176,11 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
         return exercise.sets.first { !$0.isCompleted }
     }
 
-    /// 1-based position of the current set within its exercise.
+    /// What the current set is called within its exercise — see
+    /// `WatchExerciseSnapshot.number(of:)`.
     var currentSetNumber: Int {
-        guard let exercise = currentExercise, let set = currentSet,
-              let index = exercise.sets.firstIndex(where: { $0.id == set.id })
-        else { return 1 }
-        return index + 1
+        guard let exercise = currentExercise, let set = currentSet else { return 1 }
+        return exercise.number(of: set)
     }
 
     var upNextName: String? {

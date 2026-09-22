@@ -223,7 +223,7 @@ struct TodayView: View {
             return "Every set logged — ready to finish"
         }
         guard let group = workout.currentGroup else { return "Tap to log your first set" }
-        return "\(group.name) · set \(workout.nextSetNumber) of \(group.sets.count)"
+        return "\(group.name) · set \(workout.nextSetNumber) of \(workout.currentSetTotal)"
     }
 
     /// Once today's work is saved, the hero stops offering the same workout as
@@ -528,7 +528,7 @@ struct SessionRow: View {
                     .font(Theme.rounded(15, weight: .bold))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
-                Text("\(session.completedSets.count) sets · \(AppSettings.shared.weight(session.totalVolumeKg)) · \(session.duration.durationString)")
+                Text("\(session.effortSets.count) sets · \(AppSettings.shared.weight(session.totalVolumeKg)) · \(session.duration.durationString)")
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)

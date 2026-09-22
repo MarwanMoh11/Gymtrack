@@ -88,7 +88,7 @@ struct SessionSummaryView: View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 StatTile(value: session.duration.durationString, label: "Duration")
-                StatTile(value: "\(session.completedSets.count)", label: "Sets")
+                StatTile(value: "\(session.effortSets.count)", label: "Sets")
                 StatTile(value: AppSettings.shared.weight(session.totalVolumeKg, showUnit: false),
                          label: "Volume \(AppSettings.shared.weightUnit.short)")
             }
@@ -337,7 +337,7 @@ struct SessionDetailView: View {
             VStack(spacing: 14) {
                 HStack(spacing: 10) {
                     StatTile(value: session.duration.durationString, label: "Duration")
-                    StatTile(value: "\(session.completedSets.count)", label: "Sets")
+                    StatTile(value: "\(session.effortSets.count)", label: "Sets")
                     StatTile(value: AppSettings.shared.weight(session.totalVolumeKg, showUnit: false),
                              label: "Volume \(AppSettings.shared.weightUnit.short)")
                 }
@@ -359,22 +359,8 @@ struct SessionDetailView: View {
                             NoteReadout(text: note.text, tags: note.tags)
                                 .padding(.bottom, 2)
                         }
-                        ForEach(Array(group.sets.filter(\.isCompleted).enumerated()), id: \.element.id) { index, set in
-                            HStack {
-                                Text("Set \(index + 1)")
-                                    .font(Theme.rounded(12, weight: .medium))
-                                    .foregroundStyle(Theme.textTertiary)
-                                Spacer()
-                                // Before the weight, so the weights stay in one
-                                // hard-right column down the card whether or
-                                // not the watch was on that day.
-                                SetHeartRateBadge(set: set)
-                                Text(set.tracking == .duration
-                                     ? "\(set.seconds)s"
-                                     : "\(set.weightLabel) × \(set.reps)")
-                                    .font(Theme.number(13, weight: .semibold))
-                                    .foregroundStyle(Theme.textPrimary)
-                            }
+                        ForEach(group.sets.filter(\.isCompleted)) { set in
+                            HistorySetRow(set: set, number: group.label(for: set))
                         }
                     }
                     .gtCard(padding: 12)
@@ -408,6 +394,56 @@ struct SessionDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Its sets are removed from your history and stats. This can't be undone.")
+        }
+    }
+}
+
+/// One logged set, read back from the record.
+///
+/// Numbered the way the logger numbered it, efforts rather than rows. This
+/// screen used to count rows, so a session with one drop in it had a "Set 4"
+/// here that the logger, the Lock Screen and the wrist had all called set 3 —
+/// and the hardest-set line on the same screen, which does count efforts,
+/// named a set the list below it didn't have.
+///
+/// A drop or cluster row carries its word instead of a number of its own, and
+/// a set that was rated carries the answer. Both were in the record all along
+/// and this was the only screen that read it back without them.
+private struct HistorySetRow: View {
+    let set: SetLog
+    let number: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let continuation = set.continuation {
+                Label(continuation.label, systemImage: SetContinuation.symbol)
+                    .labelStyle(.titleAndIcon)
+                    .font(Theme.rounded(12, weight: .semibold))
+                    .foregroundStyle(Theme.accent.wash)
+                    .padding(.leading, 10)
+                    .accessibilityLabel(continuation.spoken)
+            } else {
+                Text("Set \(number)")
+                    .font(Theme.rounded(12, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            if let feel = set.feel {
+                Text(feel.label)
+                    .font(Theme.rounded(10, weight: .bold))
+                    .foregroundStyle(feel.tint)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(feel.tint.opacity(0.14), in: Capsule())
+                    .accessibilityLabel("Felt \(feel.label)")
+            }
+            Spacer()
+            // Before the weight, so the weights stay in one hard-right column
+            // down the card whether or not the watch was on that day.
+            SetHeartRateBadge(set: set)
+            Text(set.tracking == .duration
+                 ? "\(set.seconds)s"
+                 : "\(set.weightLabel) × \(set.reps)")
+                .font(Theme.number(13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
         }
     }
 }

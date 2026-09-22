@@ -404,7 +404,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func queueDetail(_ group: SessionExerciseGroup) -> String {
-        if group.isComplete { return "Complete · \(group.sets.count) sets" }
+        if group.isComplete { return "Complete · \(group.effortCount) set\(group.effortCount == 1 ? "" : "s")" }
         if workout.pendingNudge?.catalogID == group.catalogID {
             return "Load change waiting · tap to review"
         }

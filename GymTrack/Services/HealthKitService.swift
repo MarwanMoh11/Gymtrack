@@ -155,16 +155,22 @@ final class HealthKitService {
                 let activityEnd = min(end, max(cursor, finished))
                 guard activityEnd > cursor else { continue }
 
+                // Sets and the top set are read off the efforts, the way every
+                // screen in the app reads them: a drop is one set taken further,
+                // and its light back-off row for a pile of reps estimates a
+                // higher one-rep max than the set it came off. Reps and volume
+                // keep every row, because that work happened.
+                let efforts = sets.filter { !$0.isContinuation }
                 let activity = HKWorkoutActivity(
                     workoutConfiguration: configuration,
                     start: cursor,
                     end: activityEnd,
                     metadata: [
                         Metadata.exercise: group.name,
-                        Metadata.sets: sets.count,
+                        Metadata.sets: efforts.count,
                         Metadata.reps: sets.reduce(0) { $0 + $1.reps },
                         Metadata.volume: sets.reduce(0) { $0 + $1.volumeKg },
-                        Metadata.topSet: Self.setLabel(sets.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }),
+                        Metadata.topSet: Self.setLabel(efforts.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax }),
                     ]
                 )
                 // One exercise Health won't take is not a reason to lose the
