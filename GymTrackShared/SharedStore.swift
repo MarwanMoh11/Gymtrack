@@ -99,7 +99,49 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
         }
     }
 
+    /// One weekday of the routine, as much of it as a widget draws.
+    struct ScheduledDay: Codable, Hashable, Sendable {
+        /// 1 = Sunday … 7 = Saturday, the way `PlanDay.weekday` counts.
+        var weekday: Int
+        var title: String
+        var exerciseCount: Int
+        var setCount: Int
+        var muscles: [String]
+    }
+
+    /// The workout already finished today, if there was one with anything in
+    /// it — the thing the phone's Today card shows instead of offering the same
+    /// session again.
+    struct Finished: Codable, Hashable, Sendable {
+        var title: String
+        var sets: Int
+        var volumeKg: Double
+        var endedAt: Date
+    }
+
     var updatedAt: Date
+    /// Midnight of the day everything "today" below was worked out for.
+    ///
+    /// The app only restamps the snapshot when it runs, and nothing wakes it at
+    /// midnight — so a widget reloading at 00:01 used to read back exactly what
+    /// it had at 23:59 and go on offering yesterday's session as today's, next
+    /// to a streak that had already lapsed. With the day stamped, and the week
+    /// the routine repeats on carried alongside, the widget can re-read the
+    /// snapshot as of any later moment itself — see `asOf`. The watch's idle
+    /// mirror solved the same problem the same way.
+    ///
+    /// Optional only so a snapshot written by an older build still decodes; one
+    /// without a day is taken at its word.
+    var day: Date?
+    /// What each training weekday of the routine prescribes. Empty with no
+    /// routine; absent on a snapshot from an older build.
+    var schedule: [ScheduledDay]?
+    /// The last day a session was finished on, which is all it takes to tell
+    /// whether the streak below has survived to a later day.
+    var lastTrainedDay: Date?
+    /// The start of the week `sessionsThisWeek` and `weekVolumeKg` count.
+    var weekStart: Date?
+    var finishedToday: Finished?
     /// Whether there's an active routine at all, which is what separates "rest
     /// day" from "nothing set up yet".
     var hasPlan: Bool
@@ -115,6 +157,11 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
     var session: Running?
 
     init(updatedAt: Date = .now,
+                day: Date? = nil,
+                schedule: [ScheduledDay]? = nil,
+                lastTrainedDay: Date? = nil,
+                weekStart: Date? = nil,
+                finishedToday: Finished? = nil,
                 hasPlan: Bool = false,
                 todayTitle: String? = nil,
                 todayExerciseCount: Int = 0,
@@ -126,6 +173,11 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
                 unit: WeightUnit = .kg,
                 session: Running? = nil) {
         self.updatedAt = updatedAt
+        self.day = day
+        self.schedule = schedule
+        self.lastTrainedDay = lastTrainedDay
+        self.weekStart = weekStart
+        self.finishedToday = finishedToday
         self.hasPlan = hasPlan
         self.todayTitle = todayTitle
         self.todayExerciseCount = todayExerciseCount
@@ -140,6 +192,45 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
 
     /// Today is a training day with something prescribed on it.
     var hasSessionToday: Bool { todayTitle != nil }
+
+    /// The same snapshot, read as of a later moment.
+    ///
+    /// Everything that answers "today" or "this week" is worked out again for
+    /// that moment from what was stamped: the weekday's session off the
+    /// routine, the streak kept only while the last trained day is still today
+    /// or yesterday — which is exactly when `TrainingStats.streak` keeps one —
+    /// and the week's count and volume zeroed once a new week has begun.
+    /// Anything that isn't about the day is left exactly as the app wrote it,
+    /// including a session still running past midnight.
+    func asOf(_ date: Date, calendar: Calendar = .current) -> GymTrackSnapshot {
+        guard let day, date > day, !calendar.isDate(day, inSameDayAs: date) else { return self }
+        let midnight = calendar.startOfDay(for: date)
+        var next = self
+        next.day = midnight
+        next.finishedToday = nil
+
+        if let schedule {
+            let weekday = calendar.component(.weekday, from: date)
+            let today = schedule.first { $0.weekday == weekday }
+            next.todayTitle = today?.title
+            next.todayExerciseCount = today?.exerciseCount ?? 0
+            next.todaySetCount = today?.setCount ?? 0
+            next.todayMuscles = today?.muscles ?? []
+        }
+
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: midnight),
+           (lastTrainedDay ?? .distantPast) < yesterday {
+            next.streak = 0
+        }
+
+        if let weekStart, let thisWeek = calendar.dateInterval(of: .weekOfYear, for: date)?.start,
+           thisWeek > weekStart {
+            next.sessionsThisWeek = 0
+            next.weekVolumeKg = 0
+            next.weekStart = thisWeek
+        }
+        return next
+    }
 
     /// What the widget gallery shows, and what a widget falls back to before
     /// the app has ever written a snapshot.

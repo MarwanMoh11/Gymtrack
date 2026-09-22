@@ -30,8 +30,12 @@ final class Plan {
 
     /// The day scheduled for a given date, if any.
     func day(for date: Date) -> PlanDay? {
-        let weekday = Calendar.current.component(.weekday, from: date)   // 1 = Sunday
-        return orderedDays.first { $0.weekday == weekday && !$0.isRest }
+        day(onWeekday: Calendar.current.component(.weekday, from: date))
+    }
+
+    /// The day scheduled on a weekday, 1 = Sunday, if any.
+    func day(onWeekday weekday: Int) -> PlanDay? {
+        orderedDays.first { $0.weekday == weekday && !$0.isRest }
     }
 }
 

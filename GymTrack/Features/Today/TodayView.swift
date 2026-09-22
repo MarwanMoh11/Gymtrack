@@ -19,14 +19,7 @@ struct TodayView: View {
     /// The latest real workout finished today. An empty session is not a day
     /// trained — closing a freestyle session without logging anything should
     /// not turn the home screen into a victory card.
-    private var completedToday: WorkoutSession? {
-        finishedSessions
-            .filter {
-                !$0.completedSets.isEmpty
-                    && Calendar.current.isDateInToday($0.endedAt ?? $0.startedAt)
-            }
-            .max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
-    }
+    private var completedToday: WorkoutSession? { TrainingStats.finishedToday(in: sessions) }
     private var streak: TrainingStats.Streak { TrainingStats.streak(from: finishedSessions) }
 
     /// Sessions logged since Monday of the current week.

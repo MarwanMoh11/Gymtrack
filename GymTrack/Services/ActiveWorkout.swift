@@ -99,10 +99,17 @@ final class ActiveWorkout {
 
         // A rest starting, being extended or running out changes what the Lock
         // Screen should say, and none of those go through `save()`.
+        //
+        // The widgets too. They used to be left out, and `complete` writes the
+        // widget snapshot a moment *before* it starts the rest — so the Today
+        // widget never once showed a rest, and a rest skipped from the Lock
+        // Screen or the wrist went on counting down on the Home Screen.
         restTimer.onChange = { [weak self] in
             Task { @MainActor in
-                self?.pushLiveActivity()
-                self?.pushToWatch()
+                guard let self else { return }
+                self.pushLiveActivity()
+                self.pushToWatch()
+                WidgetPublisher.updateSession(self)
             }
         }
         pushLiveActivity()

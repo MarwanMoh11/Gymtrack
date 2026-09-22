@@ -13,13 +13,13 @@ struct TodayWidget: Widget {
         StaticConfiguration(kind: "GymTrackToday", provider: SnapshotProvider()) { entry in
             Group {
                 if let snapshot = entry.snapshot {
-                    TodayWidgetView(snapshot: snapshot)
+                    TodayWidgetView(snapshot: snapshot, date: entry.date)
                 } else {
                     WidgetUnavailableView()
                 }
             }
             .containerBackground(for: .widget) {
-                WidgetBackground(phase: entry.snapshot?.widgetPhase ?? .working)
+                WidgetBackground(phase: entry.snapshot?.widgetPhase(at: entry.date) ?? .working)
             }
         }
         .configurationDisplayName("Today")
@@ -32,6 +32,8 @@ struct TodayWidget: Widget {
 
 private struct TodayWidgetView: View {
     let snapshot: GymTrackSnapshot
+    /// The moment this card is drawn for — see `widgetPhase(at:)`.
+    let date: Date
     @Environment(\.widgetFamily) private var family
 
     private var isMedium: Bool { family == .systemMedium }
@@ -40,6 +42,8 @@ private struct TodayWidgetView: View {
         Group {
             if let session = snapshot.session {
                 running(session)
+            } else if let finished = snapshot.finishedToday {
+                done(finished)
             } else if snapshot.hasSessionToday {
                 scheduled
             } else {
@@ -52,7 +56,7 @@ private struct TodayWidgetView: View {
     // MARK: A session in progress
 
     private func running(_ session: GymTrackSnapshot.Running) -> some View {
-        let phase = snapshot.widgetPhase
+        let phase = snapshot.widgetPhase(at: date)
         return VStack(alignment: .leading, spacing: 0) {
             Eyebrow(text: phase.eyebrow, tint: phase.tint)
 
@@ -65,8 +69,8 @@ private struct TodayWidgetView: View {
 
             // The rest countdown displaces the target while it runs: waiting is
             // what you're doing, so it's what the card should be about.
-            if let restEndsAt = session.restEndsAt, restEndsAt > .now {
-                Text(timerInterval: Date.now...restEndsAt, countsDown: true)
+            if let restEndsAt = session.restEndsAt, snapshot.isResting(at: date) {
+                Text(timerInterval: date...restEndsAt, countsDown: true)
                     .font(Theme.number(isMedium ? 26 : 22, weight: .bold))
                     .foregroundStyle(SessionPhase.resting.tint)
                     .lineLimit(1)
@@ -144,6 +148,58 @@ private struct TodayWidgetView: View {
 
             StartLink(title: "Start")
         }
+    }
+
+    // MARK: Today's work already done
+
+    /// What the phone's Today card says once the session is saved, said on the
+    /// Home Screen too. The card used to go straight back to offering the
+    /// session that had just been finished, with a lime Start under it —
+    /// inviting the same workout twice from the screen people look at most.
+    ///
+    /// Training again is still one tap away, just not in the colour of the
+    /// thing the card is asking for, because it isn't asking for it.
+    private func done(_ finished: GymTrackSnapshot.Finished) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 6) {
+                Eyebrow(text: "DONE TODAY", tint: SessionPhase.done.tint)
+                Spacer(minLength: 2)
+                if snapshot.streak > 0 { StreakPill(days: snapshot.streak) }
+            }
+
+            Text(finished.title)
+                .font(Theme.rounded(isMedium ? 22 : 17, weight: .heavy))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+                .padding(.top, 5)
+
+            Text(doneLine(finished))
+                .font(Theme.rounded(12, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.top, 2)
+
+            if isMedium {
+                Text("Finished at \(finished.endedAt.formatted(.dateTime.hour().minute())). Recovery starts now.")
+                    .font(Theme.rounded(11, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.top, 6)
+            }
+
+            Spacer(minLength: 6)
+
+            QuietStartLink(title: "Train again")
+        }
+    }
+
+    private func doneLine(_ finished: GymTrackSnapshot.Finished) -> String {
+        let sets = "\(finished.sets) set\(finished.sets == 1 ? "" : "s")"
+        guard finished.volumeKg > 0 else { return sets }
+        return "\(sets) · \(snapshot.unit.fromKg(finished.volumeKg).compactVolume) \(snapshot.unit.short)"
     }
 
     // MARK: Nothing running, nothing scheduled
@@ -248,6 +304,25 @@ private struct StartLink: View {
     }
 }
 
+/// The same way in, drawn as an outline rather than filled — for the card that
+/// has nothing left to ask for today.
+private struct QuietStartLink: View {
+    let title: String
+
+    var body: some View {
+        Link(destination: GymTrackDeepLink.startToday) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus").font(.system(size: 10, weight: .black))
+                Text(title).font(Theme.rounded(12, weight: .bold))
+            }
+            .foregroundStyle(Theme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .overlay { Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1) }
+        }
+    }
+}
+
 /// What a widget has instead of data: the app has never published a snapshot.
 /// On a build where the App Group isn't provisioned, this is every refresh —
 /// so it says what's true rather than borrowing "no routine yet", which would
@@ -327,12 +402,25 @@ struct WidgetBackground: View {
 // MARK: - Phase
 
 extension GymTrackSnapshot {
-    /// Which colour the card belongs to, read the same way the Lock Screen and
-    /// the wrist read it.
-    var widgetPhase: SessionPhase {
-        guard let session else { return hasSessionToday ? .working : .done }
-        if let restEndsAt = session.restEndsAt, restEndsAt > .now { return .resting }
+    /// Which colour the card belongs to at a moment, read the same way the
+    /// Lock Screen and the wrist read it.
+    ///
+    /// Asked of the entry's date rather than the clock. WidgetKit renders an
+    /// entry ahead of the moment it's shown, so a card built for the instant a
+    /// rest runs out, asking the clock, would find the rest still running and
+    /// draw itself amber for the moment it exists to turn green.
+    func widgetPhase(at date: Date) -> SessionPhase {
+        guard let session else {
+            if finishedToday != nil { return .done }
+            return hasSessionToday ? .working : .done
+        }
+        if isResting(at: date) { return .resting }
         if session.totalSets > 0, session.completedSets >= session.totalSets { return .done }
         return .working
+    }
+
+    func isResting(at date: Date) -> Bool {
+        guard let restEndsAt = session?.restEndsAt else { return false }
+        return restEndsAt > date
     }
 }

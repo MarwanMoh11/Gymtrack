@@ -29,9 +29,28 @@ struct SnapshotProvider: TimelineProvider {
                                      ?? (context.isPreview ? .placeholder : nil)))
     }
 
+    /// Now, and the two moments the card has to change with nobody in the app
+    /// to say so: the rest running out, and midnight.
+    ///
+    /// Each entry carries the snapshot as it reads at that moment — see
+    /// `GymTrackSnapshot.asOf`. Reloading at midnight used to hand back the
+    /// same snapshot the widget already had, so the refresh that existed to
+    /// retire yesterday's session went on showing it. And a rest ending is the
+    /// Live Activity's stale date, but nothing at all for a widget: the card
+    /// sat on a finished countdown in amber until the app next wrote.
     func getTimeline(in context: Context, completion: @escaping (Timeline<GymTrackEntry>) -> Void) {
-        let entry = GymTrackEntry(date: .now, snapshot: SharedStore.readSnapshot())
-        completion(Timeline(entries: [entry], policy: .after(nextRefresh())))
+        let now = Date.now
+        let midnight = nextRefresh()
+        let snapshot = SharedStore.readSnapshot()
+
+        var moments = [now]
+        if let restEndsAt = snapshot?.session?.restEndsAt, restEndsAt > now, restEndsAt < midnight {
+            moments.append(restEndsAt)
+        }
+        moments.append(midnight)
+
+        let entries = moments.map { GymTrackEntry(date: $0, snapshot: snapshot?.asOf($0)) }
+        completion(Timeline(entries: entries, policy: .after(midnight)))
     }
 
     /// Just after midnight. A widget showing "Push Day" has to stop showing it

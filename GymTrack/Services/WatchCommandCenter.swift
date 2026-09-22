@@ -177,6 +177,7 @@ final class WatchCommandCenter {
             WorkoutLiveActivity.shared.end(with: nil)
             WatchBridge.shared.update(session: nil)
             WatchBridge.shared.clearMetrics()
+            publishWidgets(context: context)
             recordToHealth(session, context: context)
 
         case .discard:
@@ -186,6 +187,7 @@ final class WatchCommandCenter {
             WorkoutLiveActivity.shared.end(with: nil)
             WatchBridge.shared.update(session: nil)
             WatchBridge.shared.clearMetrics()
+            publishWidgets(context: context)
 
         case .metrics(let metrics):
             // Live heart rate while the app is asleep is only worth keeping if
@@ -245,6 +247,15 @@ final class WatchCommandCenter {
             await HealthKitService.shared.backfillVitals(for: session)
             self.save(context)
         }
+    }
+
+    /// Restamps the widgets once a session has ended here. The Live Activity is
+    /// taken down on this path and the Home Screen has to follow it, or a
+    /// workout finished on the wrist with the phone in a bag goes on showing as
+    /// running there until somebody next opens the app.
+    private func publishWidgets(context: ModelContext) {
+        let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
+        WidgetPublisher.publish(plans: plans, sessions: allSessions(in: context), running: nil)
     }
 
     private func pushMirror(context: ModelContext) {

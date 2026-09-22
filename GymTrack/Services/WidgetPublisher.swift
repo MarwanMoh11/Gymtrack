@@ -25,7 +25,30 @@ enum WidgetPublisher {
         let weekStart = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .distantPast
         let thisWeek = finished.filter { $0.startedAt >= weekStart }
 
+        // The whole week, so a widget can say what tomorrow is without the app
+        // having been opened tomorrow.
+        let schedule: [GymTrackSnapshot.ScheduledDay] = (1...7).compactMap { weekday in
+            guard let day = plan?.day(onWeekday: weekday) else { return nil }
+            return GymTrackSnapshot.ScheduledDay(
+                weekday: weekday,
+                title: day.name,
+                exerciseCount: day.items.count,
+                setCount: day.totalSets,
+                muscles: day.targetedMuscles.prefix(3).map(\.name)
+            )
+        }
+
         write(GymTrackSnapshot(
+            day: calendar.startOfDay(for: .now),
+            schedule: schedule,
+            // Every finished session, empty ones included, because that is what
+            // the streak it stands next to counts.
+            lastTrainedDay: finished.map(\.startedAt).max().map(calendar.startOfDay(for:)),
+            weekStart: weekStart,
+            finishedToday: TrainingStats.finishedToday(in: finished).map {
+                GymTrackSnapshot.Finished(title: $0.title, sets: $0.effortSets.count,
+                                          volumeKg: $0.totalVolumeKg, endedAt: $0.endedAt ?? $0.startedAt)
+            },
             hasPlan: plan != nil,
             todayTitle: today?.name,
             todayExerciseCount: today?.items.count ?? 0,

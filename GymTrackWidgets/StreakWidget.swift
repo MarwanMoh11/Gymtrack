@@ -19,7 +19,7 @@ struct StreakWidget: Widget {
                 }
             }
             .containerBackground(for: .widget) {
-                WidgetBackground(phase: entry.snapshot?.widgetPhase ?? .working)
+                WidgetBackground(phase: entry.snapshot?.widgetPhase(at: entry.date) ?? .working)
             }
         }
         .configurationDisplayName("Streak")
@@ -124,8 +124,11 @@ private struct StreakWidgetView: View {
 
     private var subline: String {
         let count = snapshot.sessionsThisWeek
-        if let title = snapshot.todayTitle, snapshot.session == nil { return "Today: \(title)" }
         if snapshot.session != nil { return "Session running" }
+        // Done beats scheduled: "Today: Push Day" under a streak that Push Day
+        // has just extended reads as a session still owed.
+        if let finished = snapshot.finishedToday { return "Done today: \(finished.title)" }
+        if let title = snapshot.todayTitle { return "Today: \(title)" }
         return count == 0 ? "Nothing logged this week" : "\(count) session\(count == 1 ? "" : "s") this week"
     }
 

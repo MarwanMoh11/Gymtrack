@@ -40,6 +40,21 @@ enum TrainingStats {
         return Streak(current: current, longest: max(longest, current))
     }
 
+    /// The latest real workout finished today — what the Today card and the
+    /// Today widget show as done instead of offering the same session again. An
+    /// empty session is not a day trained, so closing a freestyle session
+    /// without logging anything doesn't count.
+    ///
+    /// The day is checked before the sets. Asked the other way round, every
+    /// finished session in the history had its sets faulted in from the store,
+    /// on every render of the Today tab, to answer a question only today's
+    /// sessions can.
+    static func finishedToday(in sessions: [WorkoutSession], calendar: Calendar = .current) -> WorkoutSession? {
+        sessions
+            .filter { !$0.isActive && calendar.isDateInToday($0.endedAt ?? $0.startedAt) && !$0.completedSets.isEmpty }
+            .max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
+    }
+
     // MARK: - Volume
 
     static func sessions(in sessions: [WorkoutSession], days: Int, calendar: Calendar = .current) -> [WorkoutSession] {
