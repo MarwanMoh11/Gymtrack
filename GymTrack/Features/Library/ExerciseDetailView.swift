@@ -74,14 +74,16 @@ struct ExerciseDetailView: View {
         let value: Double
     }
 
-    private var history: [TrainingStats.ExerciseSessionSummary] {
-        TrainingStats.history(for: exercise.id, in: sessions)
-    }
-
     var body: some View {
-        ScrollView {
+        // Walked once, here, and handed to everything that draws it. It was a
+        // computed property read by the tiles, the chart, its axis, the list
+        // and the scale sheet, so one redraw read every set of every session
+        // half a dozen times over — and opened from the logger, this screen
+        // redraws on every set logged.
+        let history = TrainingStats.history(for: exercise.id, in: sessions)
+        return ScrollView {
             VStack(spacing: 16) {
-                header
+                header(referenceKg: history.first?.topSet?.weightKg ?? 0)
                 if history.isEmpty {
                     EmptyStateView(icon: "chart.line.uptrend.xyaxis",
                                    title: "No history yet",
@@ -114,7 +116,7 @@ struct ExerciseDetailView: View {
 
     // MARK: - Header
 
-    private var header: some View {
+    private func header(referenceKg: Double) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 GlyphTile(symbol: exercise.symbol, size: 50, solid: true)
@@ -168,8 +170,7 @@ struct ExerciseDetailView: View {
         }
         .gtCard()
         .sheet(isPresented: $showingScale) {
-            LoadScaleSheet(exercise: exercise,
-                           referenceKg: history.first?.topSet?.weightKg ?? 0)
+            LoadScaleSheet(exercise: exercise, referenceKg: referenceKg)
         }
     }
 

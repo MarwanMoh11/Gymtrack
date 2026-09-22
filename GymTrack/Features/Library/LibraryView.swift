@@ -16,16 +16,16 @@ struct LibraryView: View {
     @State private var editing: ExerciseEditorView.Subject?
     @State private var showingHidden = false
 
-    private var results: [CatalogExercise] {
-        ExerciseCatalog.shared.search(query, muscle: muscle, equipment: equipment)
-    }
-
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespaces)
     }
 
     var body: some View {
-        NavigationStack {
+        // Searched once per pass. As a computed property it was scored and
+        // sorted across the whole library four times on every keystroke — for
+        // the empty check, the list, and twice for the count above it.
+        let results = ExerciseCatalog.shared.search(query, muscle: muscle, equipment: equipment)
+        return NavigationStack {
             VStack(spacing: 0) {
                 filterBar
                 if results.isEmpty {

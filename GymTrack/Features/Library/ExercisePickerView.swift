@@ -9,16 +9,16 @@ struct ExercisePickerView: View {
     @State private var muscle: Muscle?
     @State private var creating: ExerciseEditorView.Subject?
 
-    private var results: [CatalogExercise] {
-        Array(ExerciseCatalog.shared.search(query, muscle: muscle).prefix(200))
-    }
-
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespaces)
     }
 
     var body: some View {
-        NavigationStack {
+        // Searched once per pass rather than once per reader — the list, the
+        // empty overlay and the create row each asked for it on every
+        // keystroke, and each asking scored and sorted the whole library.
+        let results = Array(ExerciseCatalog.shared.search(query, muscle: muscle).prefix(200))
+        return NavigationStack {
             VStack(spacing: 0) {
                 muscleFilter
                 List {
@@ -44,7 +44,7 @@ struct ExercisePickerView: View {
                     // and it drops into the workout as though it had been there
                     // all along.
                     if !trimmedQuery.isEmpty {
-                        createRow
+                        createRow(libraryHasMatches: !results.isEmpty)
                     }
                 }
                 .listStyle(.plain)
@@ -75,7 +75,7 @@ struct ExercisePickerView: View {
         .gtSheetBackground()
     }
 
-    private var createRow: some View {
+    private func createRow(libraryHasMatches: Bool) -> some View {
         Button {
             creating = .new(name: trimmedQuery)
         } label: {
@@ -86,7 +86,7 @@ struct ExercisePickerView: View {
                         .font(Theme.rounded(15, weight: .semibold))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
-                    Text(results.isEmpty ? "Not in the library yet" : "Not the one you meant?")
+                    Text(libraryHasMatches ? "Not the one you meant?" : "Not in the library yet")
                         .font(Theme.rounded(12, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }

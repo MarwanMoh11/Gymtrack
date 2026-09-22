@@ -40,6 +40,11 @@ struct ExerciseEditorView: View {
     @State private var equipment: Set<String> = []
     @State private var tracking: TrackingMode = .weightReps
     @State private var confirmingDelete = false
+    /// Counted when Delete is tapped and not before. The alert's message is
+    /// built on every pass of the body, so reading the counts from there
+    /// fetched every plan slot and every logged set in the store on each
+    /// keystroke in the name field.
+    @State private var usage = Usage(plans: 0, sets: 0)
     @State private var didLoad = false
 
     private var record: CustomExerciseRecord? {
@@ -128,6 +133,7 @@ struct ExerciseEditorView: View {
                 if record != nil {
                     Section {
                         Button(role: .destructive) {
+                            usage = countUsage()
                             confirmingDelete = true
                         } label: {
                             Label("Delete exercise", systemImage: "trash")
@@ -222,19 +228,27 @@ struct ExerciseEditorView: View {
         dismiss()
     }
 
-    /// What deleting actually costs, counted rather than guessed at.
-    private var usage: (plans: Int, sets: Int) {
-        guard let record else { return (0, 0) }
+    struct Usage {
+        var plans: Int
+        var sets: Int
+    }
+
+    /// What deleting actually costs, counted rather than guessed at. Only
+    /// logged sets count: the rows of a workout still running that haven't
+    /// been done yet are a plan, not history, and calling them logged would
+    /// overstate what the delete touches.
+    private func countUsage() -> Usage {
+        guard let record else { return Usage(plans: 0, sets: 0) }
         let id = record.id
-        let plans = ((try? context.fetch(FetchDescriptor<PlanItem>())) ?? [])
-            .filter { $0.catalogID == id }.count
-        let sets = ((try? context.fetch(FetchDescriptor<SetLog>())) ?? [])
-            .filter { $0.catalogID == id }.count
-        return (plans, sets)
+        let plans = (try? context.fetchCount(FetchDescriptor<PlanItem>(
+            predicate: #Predicate { $0.catalogID == id }))) ?? 0
+        let sets = (try? context.fetchCount(FetchDescriptor<SetLog>(
+            predicate: #Predicate { $0.catalogID == id && $0.isCompleted }))) ?? 0
+        return Usage(plans: plans, sets: sets)
     }
 
     private var deleteMessage: String {
-        let (plans, sets) = usage
+        let plans = usage.plans, sets = usage.sets
         guard plans > 0 || sets > 0 else {
             return "It isn't used anywhere, so nothing else changes."
         }
