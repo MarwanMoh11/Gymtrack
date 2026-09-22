@@ -238,9 +238,17 @@ enum TrainingStats {
     /// after it has to clear. Both directions are the same mistake: comparing
     /// a piece of a set against whole ones.
     static func isPersonalRecord(_ set: SetLog, in sessions: [WorkoutSession]) -> Bool {
+        isPersonalRecord(set, among: sessions.flatMap(\.sets))
+    }
+
+    /// The same question, asked of sets already gathered — see
+    /// `recordCandidates`. Anything in the list that isn't the same exercise,
+    /// isn't a whole logged set or wasn't logged before this one is ignored, so
+    /// the two forms can't disagree.
+    static func isPersonalRecord(_ set: SetLog, among candidates: [SetLog]) -> Bool {
         guard set.isCompleted, !set.isContinuation else { return false }
 
-        let previous = allSets(for: set.catalogID, in: sessions, before: set)
+        let previous = earlierSets(than: set, in: candidates)
         guard !previous.isEmpty else { return false }
 
         switch set.tracking {
@@ -257,16 +265,41 @@ enum TrainingStats {
         }
     }
 
-    private static func allSets(for catalogID: String,
-                                in sessions: [WorkoutSession],
-                                before set: SetLog) -> [SetLog] {
+    private static func earlierSets(than set: SetLog, in candidates: [SetLog]) -> [SetLog] {
         let boundary = set.completedAt ?? .now
-        return sessions.flatMap(\.sets).filter {
-            $0.catalogID == catalogID
+        return candidates.filter {
+            $0.catalogID == set.catalogID
             && $0.isCompleted
             && !$0.isContinuation
             && $0.id != set.id
             && (($0.completedAt ?? .distantPast) < boundary)
+        }
+    }
+
+    /// Every set a record could be measured against, by exercise: one walk
+    /// through the history, for callers that ask the record question often.
+    ///
+    /// The logger asks it on every *Log set* and the summary asks it of every
+    /// set in the session, and both used to answer it by reading every set in
+    /// the whole history each time — on the tap that most needs to feel
+    /// instant, and on each redraw of the screen that pays it off.
+    static func recordCandidates(in sessions: [WorkoutSession]) -> [String: [SetLog]] {
+        var index: [String: [SetLog]] = [:]
+        for session in sessions {
+            for set in session.sets where set.isCompleted && !set.isContinuation {
+                index[set.catalogID, default: []].append(set)
+            }
+        }
+        return index
+    }
+
+    /// The sets in one session that set a record, answered with a single walk
+    /// through the history rather than one per set.
+    static func recordSets(in session: WorkoutSession, history: [WorkoutSession]) -> [SetLog] {
+        let earlier = recordCandidates(in: history.filter { $0.id != session.id })
+        let today = Dictionary(grouping: session.sets, by: \.catalogID)
+        return session.completedSets.filter { set in
+            isPersonalRecord(set, among: (earlier[set.catalogID] ?? []) + (today[set.catalogID] ?? []))
         }
     }
 
@@ -568,16 +601,20 @@ extension TrainingStats {
         return muscles.reduce(0.0) { $0 + min(ratios[$1] ?? 0, 1) } / Double(muscles.count)
     }
 
+    /// Newest first, stopping at the first session that hit it. The answer is
+    /// nearly always in the last week or two, and reading every set of every
+    /// session ever logged to find it made each tap on the heat map slower
+    /// the longer somebody had used the app.
     static func lastTrained(_ muscle: Muscle, in sessions: [WorkoutSession]) -> Date? {
         sessions
-            .filter { session in
+            .sorted { $0.startedAt > $1.startedAt }
+            .first { session in
                 session.completedSets.contains { set in
                     guard let exercise = ExerciseCatalog.shared.exercise(id: set.catalogID) else { return false }
                     return exercise.muscles.prefix(2).contains(muscle)
                 }
-            }
-            .map(\.startedAt)
-            .max()
+            }?
+            .startedAt
     }
 
     /// Which movements are actually feeding a muscle, heaviest contributor

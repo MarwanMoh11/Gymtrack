@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import Combine
 
 /// The logging screen. Optimised for use mid-set: the next set is always
 /// expanded with large steppers, everything else collapses to a summary row.
@@ -17,7 +16,6 @@ struct ActiveWorkoutView: View {
     @Environment(\.modelContext) private var context
     /// The watch's live numbers, when one is recording alongside the phone.
     @State private var watch = WatchBridge.shared
-    @State private var elapsed: TimeInterval = 0
     @State private var showingAddExercise = false
     @State private var showingFinishConfirm = false
     @State private var showingDiscardConfirm = false
@@ -26,8 +24,6 @@ struct ActiveWorkoutView: View {
     /// the watch and Live Activity what the lifter is doing next.
     @State private var reviewedGroupID: String?
     @State private var dragOffset: CGFloat = 0
-
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,8 +60,6 @@ struct ActiveWorkoutView: View {
                 .ignoresSafeArea()
         )
         .offset(y: dragOffset)
-        .onAppear { elapsed = workout.session.duration }
-        .onReceive(ticker) { _ in elapsed = workout.session.duration }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: workout.restTimer.isRunning)
         .sheet(isPresented: $showingAddExercise) {
             ExercisePickerView { exercise in
@@ -118,11 +112,7 @@ struct ActiveWorkoutView: View {
                         .lineLimit(1)
 
                     HStack(spacing: 6) {
-                        Text(elapsed.clockString)
-                            .font(Theme.number(13, weight: .semibold))
-                            .foregroundStyle(workout.phase.tint)
-                            .shadow(color: workout.phase.glow, radius: 6)
-                            .accessibilityLabel("Elapsed \(elapsed.durationString)")
+                        SessionClock(startedAt: workout.session.startedAt, phase: workout.phase)
 
                         Text("\(workout.completedCount)/\(workout.totalCount) sets")
                             .font(Theme.rounded(11, weight: .semibold))
@@ -460,6 +450,30 @@ struct ActiveWorkoutView: View {
         let session = workout.session
         workout.finish()
         onClose(session)
+    }
+}
+
+// MARK: - Session clock
+
+/// How long the session has been running, ticking on its own.
+///
+/// It used to be a one-second timer writing to state on the logger itself, and
+/// state written there re-runs the logger's whole body: every card, every row,
+/// every badge, once a second for the length of the workout, to change four
+/// digits. Off a `TimelineView` only the digits are asked for again.
+private struct SessionClock: View {
+    let startedAt: Date
+    let phase: SessionPhase
+
+    var body: some View {
+        TimelineView(.periodic(from: startedAt, by: 1)) { context in
+            let elapsed = max(0, context.date.timeIntervalSince(startedAt))
+            Text(elapsed.clockString)
+                .font(Theme.number(13, weight: .semibold))
+                .foregroundStyle(phase.tint)
+                .shadow(color: phase.glow, radius: 6)
+                .accessibilityLabel("Elapsed \(elapsed.durationString)")
+        }
     }
 }
 

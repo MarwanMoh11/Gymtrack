@@ -238,7 +238,7 @@ final class ActiveWorkout {
         carryLoadForward(from: set)
         save()
 
-        if TrainingStats.isPersonalRecord(set, in: history + [session]) {
+        if isPersonalRecord(set) {
             recentPRs.insert(set.id)
             Haptics.celebrate()
         } else {
@@ -299,6 +299,19 @@ final class ActiveWorkout {
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
 
+    /// Everything a set logged today has to beat from earlier sessions, per
+    /// exercise. Those sessions are finished and don't change while this one
+    /// runs, so the history is walked once, on the first set logged, instead
+    /// of in full on every tap of *Log set*.
+    @ObservationIgnored private var recordBaseline: [String: [SetLog]]?
+
+    private func isPersonalRecord(_ set: SetLog) -> Bool {
+        let baseline = recordBaseline ?? TrainingStats.recordCandidates(in: history)
+        recordBaseline = baseline
+        let today = session.sets.filter { $0.catalogID == set.catalogID }
+        return TrainingStats.isPersonalRecord(set, among: (baseline[set.catalogID] ?? []) + today)
+    }
+
     /// A weight or a rep count changed by hand on a set that hasn't been logged
     /// yet. The logger writes those straight onto the `SetLog` through a
     /// binding, so the number on screen is already right and nothing here has
@@ -309,7 +322,26 @@ final class ActiveWorkout {
     /// before the edit and then wrote that stale weight back over this one the
     /// moment the set was logged from the watch, so an adjustment made on the
     /// phone was undone by the next tap on the wrist.
-    func numbersChanged() { save() }
+    ///
+    /// Settled rather than sent per step. Each save re-encodes the whole
+    /// session for the watch, updates the Live Activity and restamps the
+    /// widgets, and a weight is dialled in runs — a key held down steps it
+    /// several times a second. The screen is already right, since the row wrote
+    /// the number itself; everything else only needs the one it settles on, a
+    /// beat after the thumb stops. Any other save lands first and takes this
+    /// one with it, so a set logged mid-run still goes out with its numbers.
+    /// The most a force-quit inside that beat can cost is the last step dialled
+    /// onto a set nobody has logged yet.
+    func numbersChanged() {
+        pendingEdit?.cancel()
+        pendingEdit = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            self?.save()
+        }
+    }
+
+    @ObservationIgnored private var pendingEdit: Task<Void, Never>?
 
     // MARK: - Taking a set further
 
@@ -758,6 +790,10 @@ final class ActiveWorkout {
     /// Drops any sets left unlogged and stamps the session finished — see
     /// `WorkoutSession.close`, which the wrist's headless finish runs too.
     func finish() {
+        // A settle still waiting would otherwise go out after the end, about a
+        // session that has already been closed — or, after `discard`, one that
+        // no longer exists.
+        pendingEdit?.cancel()
         session.close(in: context)
         adoptWatchMetrics()
         restTimer.onChange = nil
@@ -772,6 +808,7 @@ final class ActiveWorkout {
     }
 
     func discard() {
+        pendingEdit?.cancel()
         restTimer.onChange = nil
         restTimer.stop()
         context.delete(session)
@@ -822,6 +859,8 @@ final class ActiveWorkout {
     }
 
     private func save() {
+        pendingEdit?.cancel()
+        pendingEdit = nil
         writeThrough()
         pushLiveActivity()
         pushToWatch()

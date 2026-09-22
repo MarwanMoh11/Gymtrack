@@ -11,21 +11,24 @@ struct SessionSummaryView: View {
     /// One row per exercise — a session where you worked up to a top set would
     /// otherwise list every rung of the ladder as its own record.
     private var prs: [SetLog] {
-        let history = allSessions.filter { $0.id != session.id }
-        let all = session.completedSets.filter { TrainingStats.isPersonalRecord($0, in: history + [session]) }
+        let all = TrainingStats.recordSets(in: session, history: allSessions)
         return Dictionary(grouping: all, by: \.catalogID)
             .compactMap { _, sets in sets.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax } }
             .sorted { $0.exerciseOrder < $1.exerciseOrder }
     }
 
     var body: some View {
-        NavigationStack {
+        // Once per pass rather than once per mention. Typing into the session
+        // note saves as it goes, every save redraws this screen, and each read
+        // of `prs` walks the history.
+        let prs = self.prs
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     headline
                     statGrid
                     HealthMetricsCard(session: session)
-                    if !prs.isEmpty { prSection }
+                    if !prs.isEmpty { prSection(prs) }
                     SessionNoteCard(session: session)
                     breakdown
                 }
@@ -135,7 +138,7 @@ struct SessionSummaryView: View {
         return "\(set.weightLabel) for \(set.reps) reps"
     }
 
-    private var prSection: some View {
+    private func prSection(_ prs: [SetLog]) -> some View {
         VStack(spacing: 8) {
             SectionHeader("Personal records")
             ForEach(prs) { set in
