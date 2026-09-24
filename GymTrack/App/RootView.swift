@@ -308,17 +308,23 @@ struct RootView: View {
         case .startToday:
             let plan = plans.first(where: \.isActive) ?? plans.first
             if let day = plan?.day(for: .now) {
-                startFromWatch(ActiveWorkout.start(day: day, plan: plan, context: context,
-                                                   history: sessions.filter { !$0.isActive }))
+                startFromWatch {
+                    ActiveWorkout.start(day: day, plan: plan, context: context,
+                                        history: sessions.filter { !$0.isActive })
+                }
             } else {
-                startFromWatch(ActiveWorkout.startFreestyle(context: context,
-                                                            history: sessions.filter { !$0.isActive }))
+                startFromWatch {
+                    ActiveWorkout.startFreestyle(context: context,
+                                                 history: sessions.filter { !$0.isActive })
+                }
             }
             return true
 
         case .startFreestyle:
-            startFromWatch(ActiveWorkout.startFreestyle(context: context,
-                                                        history: sessions.filter { !$0.isActive }))
+            startFromWatch {
+                ActiveWorkout.startFreestyle(context: context,
+                                             history: sessions.filter { !$0.isActive })
+            }
             return true
 
         case .finish(let metrics):
@@ -341,6 +347,9 @@ struct RootView: View {
             return true
 
         case .requestMirror:
+            // A background start can reach the store before this view adopts
+            // it. Let the headless path read it instead of replying as idle.
+            guard activeWorkout != nil else { return false }
             pushWatchIdle()
             activeWorkout?.pushToWatch()
             // Both of those only push when something changed, and a watch asks
@@ -359,9 +368,26 @@ struct RootView: View {
     /// A session started from the wrist opens minimised: the phone is usually
     /// in a bag when this happens, and springing the logger open would mean
     /// finding it in that state later.
-    private func startFromWatch(_ workout: ActiveWorkout) {
-        guard activeWorkout == nil else { return }
+    private func startFromWatch(_ makeWorkout: () -> ActiveWorkout) {
+        // A live message can also be queued after its send fails, then arrive
+        // twice. Check before building: an already-built workout has inserted
+        // a second active session into the store even if we decline to show it.
+        if let activeWorkout {
+            activeWorkout.pushToWatch()
+            WatchBridge.shared.resend()
+            return
+        }
+        // SwiftUI may not have rendered a background start yet. Read the
+        // store before creating anything so a retry also adopts that session.
+        let stored = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? sessions
+        let workout: ActiveWorkout
+        if let open = stored.first(where: \.isActive) {
+            workout = ActiveWorkout(session: open, context: context, history: stored)
+        } else {
+            workout = makeWorkout()
+        }
         workout.session.wasWatchDriven = true
+        try? context.save()
         activeWorkout = workout
         isSessionExpanded = false
         pushWatchIdle()

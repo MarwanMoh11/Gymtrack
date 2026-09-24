@@ -178,7 +178,16 @@ final class WatchConnector: NSObject {
         let session = WCSession.default
 
         if session.isReachable {
-            session.sendMessage(payload, replyHandler: nil) { [weak self] error in
+            let replyHandler: (([String: Any]) -> Void)?
+            switch command {
+            case .startToday, .startFreestyle, .requestMirror:
+                replyHandler = { [weak self] reply in
+                    Task { @MainActor in self?.receive(reply) }
+                }
+            default:
+                replyHandler = nil
+            }
+            session.sendMessage(payload, replyHandler: replyHandler) { [weak self] error in
                 // Reachability can lapse between the check and the send, so a
                 // failed message is re-queued rather than dropped.
                 self?.log.debug("Message failed, queueing: \(error.localizedDescription, privacy: .public)")

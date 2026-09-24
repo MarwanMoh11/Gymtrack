@@ -96,15 +96,7 @@ final class WatchBridge: NSObject {
 
     private func push() {
         guard isSupported, WCSession.default.activationState == .activated else { return }
-        revision += 1
-        let mirror = WatchMirror(
-            revision: revision,
-            sentAt: .now,
-            idle: idle,
-            session: sessionSnapshot,
-            healthEnabled: AppSettings.shared.healthWriteWorkouts
-        )
-        let payload = mirror.watchPayload(key: WatchLink.mirrorKey)
+        let payload = mirrorPayload()
         guard !payload.isEmpty else { return }
 
         do {
@@ -118,6 +110,20 @@ final class WatchBridge: NSObject {
                 self?.log.debug("Live mirror failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+    }
+
+    /// Replies carry the same state as pushes, stamped after the command has
+    /// finished so an earlier idle context cannot undo a successful start.
+    private func mirrorPayload() -> [String: Any] {
+        revision += 1
+        let mirror = WatchMirror(
+            revision: revision,
+            sentAt: .now,
+            idle: idle,
+            session: sessionSnapshot,
+            healthEnabled: AppSettings.shared.healthWriteWorkouts
+        )
+        return mirror.watchPayload(key: WatchLink.mirrorKey)
     }
 
     // MARK: - Receiving
@@ -192,7 +198,13 @@ extension WatchBridge: WCSessionDelegate {
                              replyHandler: @escaping ([String: Any]) -> Void) {
         Task { @MainActor in
             self.handle(message)
-            replyHandler([WatchLink.ackKey: true])
+            // A watch can wake a suspended phone to start a workout. Return
+            // the workout on that same conversation instead of relying on a
+            // separate push to get the watch off its start screen.
+            var reply = self.mirrorPayload()
+            reply[WatchLink.ackKey] = true
+            replyHandler(reply)
+            self.lastMirrorSentAt = .now
         }
     }
 

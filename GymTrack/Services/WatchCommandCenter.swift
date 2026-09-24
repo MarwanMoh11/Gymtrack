@@ -58,7 +58,13 @@ final class WatchCommandCenter {
             WatchBridge.shared.resend()
 
         case .startToday, .startFreestyle:
-            guard activeSession(in: context) == nil else { return }
+            guard activeSession(in: context) == nil else {
+                // The first start may have landed while its mirror did not.
+                // A retry needs the session back, even though nothing changed.
+                pushMirror(context: context)
+                WatchBridge.shared.resend()
+                return
+            }
             let history = finishedSessions(in: context)
             if case .startToday = command,
                let plan = activePlan(in: context),

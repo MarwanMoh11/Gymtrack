@@ -43,6 +43,10 @@ struct WatchIdleView: View {
         .navigationTitle("GymTrack")
         .watchScreenTint(phase)
         .onAppear { connector.requestMirror() }
+        // Starting removes this screen before its eight-second fallback can
+        // finish. Clear the pending tap as it leaves so coming back after
+        // Finish doesn't inherit a disabled start button.
+        .onDisappear { isStarting = false }
     }
 
     // MARK: - Today
@@ -175,7 +179,14 @@ struct WatchIdleView: View {
         // starts a session while one is running.
         .task(id: isStarting) {
             guard isStarting else { return }
-            try? await Task.sleep(for: .seconds(8))
+            do {
+                try await Task.sleep(for: .seconds(3))
+                // Recover a missed start response without starting again.
+                connector.requestMirror()
+                try await Task.sleep(for: .seconds(5))
+            } catch {
+                return
+            }
             isStarting = false
         }
     }
