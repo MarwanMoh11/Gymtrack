@@ -292,7 +292,8 @@ final class WatchCommandCenter {
     // MARK: - Fetching
 
     private func allSessions(in context: ModelContext) -> [WorkoutSession] {
-        (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        return WatchSessionRecovery.discardUntouchedOverlaps(sessions, in: context)
     }
 
     private func finishedSessions(in context: ModelContext) -> [WorkoutSession] {

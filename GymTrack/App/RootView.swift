@@ -443,7 +443,8 @@ struct RootView: View {
     /// Picks up a session left open by a crash or a force-quit.
     private func resumeUnfinishedSession() {
         guard activeWorkout == nil,
-              let open = sessions.first(where: { $0.isActive })
+              let open = WatchSessionRecovery.discardUntouchedOverlaps(sessions, in: context)
+                  .first(where: { $0.isActive })
         else {
             // Nothing to come back to — make sure no Live Activity is left
             // stranded on the Lock Screen from a previous run.

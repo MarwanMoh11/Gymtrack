@@ -23,6 +23,9 @@ final class WatchConnector: NSObject {
     private(set) var mirror: WatchMirror = .placeholder
     private(set) var isReachable = false
     private(set) var hasEverReceivedMirror = false
+    /// A cached active session needs the reachable phone's current answer
+    /// before the watch can treat it as a workout to record.
+    private var waitingForFreshMirror = false
 
     /// Sets logged here that the phone hasn't confirmed yet, and the numbers
     /// each was logged with. The numbers are kept, not just the fact of the
@@ -84,7 +87,13 @@ final class WatchConnector: NSObject {
 
     /// The mirror's session with this watch's unconfirmed changes folded in.
     var session: WatchSessionSnapshot? {
+        guard !waitingForFreshMirror else { return nil }
         guard var session = mirror.session else { return nil }
+        // The phone closes an unfinished session after twelve hours on its
+        // next launch. Its old application context can reach this watch first,
+        // and treating that snapshot as live would start a new Health workout
+        // for yesterday's session before the phone has a chance to correct it.
+        guard session.startedAt.timeIntervalSinceNow > -12 * 3600 else { return nil }
         // The pick goes on first: everything below asks which exercise the
         // logger is on, and while this is set the answer is this one.
         if let pendingFocus { session.preferredExerciseID = pendingFocus }
@@ -267,7 +276,7 @@ final class WatchConnector: NSObject {
 
     // MARK: - Receiving
 
-    private func receive(_ payload: [String: Any]) {
+    private func receive(_ payload: [String: Any], fromCache: Bool = false) {
         guard let incoming = WatchMirror.fromWatchPayload(payload, key: WatchLink.mirrorKey) else { return }
         // Application context and live messages race; an older mirror arriving
         // second would drag the screen backwards. Ordered by the phone's own
@@ -277,6 +286,7 @@ final class WatchConnector: NSObject {
         // everything the phone says from then on.
         guard incoming.sentAt >= mirror.sentAt else { return }
         mirror = incoming
+        if !fromCache { waitingForFreshMirror = false }
         hasEverReceivedMirror = true
         reconcile(with: incoming.session)
     }
@@ -330,9 +340,13 @@ extension WatchConnector: WCSessionDelegate {
         Task { @MainActor in
             self.isReachable = session.isReachable
             // Whatever arrived while the app was closed is waiting in the
-            // application context.
-            if !session.receivedApplicationContext.isEmpty {
-                self.receive(session.receivedApplicationContext)
+            // application context. If the phone is reachable, wait for its
+            // current reply before letting that cached context start Health.
+            if let cached = WatchMirror.fromWatchPayload(session.receivedApplicationContext,
+                                                        key: WatchLink.mirrorKey),
+               cached.sentAt >= self.mirror.sentAt {
+                self.waitingForFreshMirror = session.isReachable
+                self.receive(session.receivedApplicationContext, fromCache: true)
             }
             if state == .activated {
                 for entry in self.ratings.entries.values { self.send(.rateSet(entry.rating)) }
@@ -344,6 +358,7 @@ extension WatchConnector: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor in
             self.isReachable = session.isReachable
+            if !session.isReachable { self.waitingForFreshMirror = false }
             if session.isReachable { self.requestMirror() }
         }
     }
