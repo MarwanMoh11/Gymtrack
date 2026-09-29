@@ -150,6 +150,15 @@ or device-tested. Treat the IDs below as done, and don't re-derive them.
 | LOG-14 residue | Fixed | The continuation glyph has a label. `textTertiary` is 0.50: 4.7:1 on a selected card, about 5:1 on a plain one. | reading only |
 | Unproven tests | Closed | The LINK-09, overlap-recovery, lift-trend drop-row and unlog tests each fail when their fix is reverted in a scratch copy. | n/a |
 | Wave 7 wiring | Fixed | The logger card reads its offer, plan slot, last time and previous set per slot and per exercise. `Prefill` is shared, and a headless undo restores the weights its log carried onto later rows. A re-delivered wrist log that the phone already heard is ignored on both the UI and headless paths (`wasHeardLog`). | `test-wrist-redelivery-undo.sh` |
+| Wave 8: SESS-02 relaunch | Fixed | Standing offers, open takes, settled answers and the carried-prefill undo memory persist per session (`LoggerMemoryStore`, UserDefaults), are checked against the record on resume, and are cleared by every finish and discard path, headless ones included. | `test-logger-relaunch.sh`, `test-watch-command-leftovers.sh` |
+| Wave 8: plan choice | Fixed | `Plan.displayed(among:)` (active plan, else the earliest created) picks the plan for Today, RootView, the widgets and a start from the wrist. The wrist used to start whichever plan the fetch returned first. | `test-watch-command-leftovers.sh`, `test-widget-snapshot.sh` |
+| Wave 8: LOG-10 residue | Fixed | One set-timing rule, in `SessionClosing.swift`, used by the logger and the headless path. A one-time repair drops stored starts that another set's log provably overtook; ties are left alone. | `test-session-rules.sh`, `test-watch-command-leftovers.sh` |
+| Wave 8: headless carry | Fixed | A headless undo restores prefills from the logger's stored carry as well as its own. | `test-watch-command-leftovers.sh` |
+| Wave 8: HK-06 residue | Fixed | A refusal while Health write access is off costs no attempt. Relink failures are capped like delete failures and reach the settings line. | `test-health-cleanup-cap.sh` |
+| Wave 8: DATA-14, DATA-05 | Partly fixed | The export snapshot runs in 16 ms slices (longest hold 674 ms to 18 ms, bytes unchanged). The restore apply deliberately doesn't pause (`Pacer.restoreSliceMilliseconds`), because a watch command or backfill saving mid-restore would commit half of it. Restore refuses a repeated custom exercise ID. | `test-backup-chunked.sh` |
+| Wave 8: Dynamic Type | Fixed | `.gtFont` and `.gtIcon` scale 14 pt, 9-10 pt and text-side icons with `@ScaledMetric`, identical at the default size and still under the logger's cap. | reading only |
+| Wave 8: XC-14 | Mostly fixed | A strict-concurrency build (`SWIFT_STRICT_CONCURRENCY=complete`, a command-line override) found 46 phone and 9 watch diagnostics. The WCSession payload hops, intents, haptics, Live Activity, load-scale book, singletons (`DroppedSetMemory` locked, `AppSettings` documented) and view animatable data were fixed. SwiftData's own `#Predicate` macro warnings remain. | build only |
+| Wave 8: duplicates | Fixed | `WorkoutSession.staleAfter` and the wrist's tombstone read `GymTrackSnapshot.Running.staleAfter`. The compatibility offer properties and `summaryRecords(for:history:)` are gone. | existing scripts |
 
 P2 follow-up round (closing gaps the fixes above left in files their authors did not own):
 - HK-03: `RootView` runs `backfillRecentSessions` on launch and on every foreground.
@@ -163,31 +172,26 @@ P2 follow-up round (closing gaps the fixes above left in files their authors did
 - `docs/AI_COACH.md` now says which export fields are written only when they apply.
 Tests: `test-watch-headless-follow-up.sh`, plus three scripts from the second agent.
 
-Still open after wave 6 (2026-09-29):
-- Decided by the user: a 1,000 kg ceiling; Easy on an off-plan set still offers the next rung; a start past `longestPlausibleLength` is still dropped, not clamped; the effort card stays in view (see the rows above).
+Still open after wave 8 (2026-09-29):
+- Decided by the user: a 1,000 kg ceiling; Easy on an off-plan set still offers the next rung; a start past `longestPlausibleLength` is still dropped, not clamped; the effort card stays in view.
 - Decision waiting on the user: a note pruned at close stays pruned when a late wrist set brings its exercise back. Keeping it means storing the note's text in `DroppedSetMemory`, or pruning later.
 - Needs a device:
   - WATCH-07: with saving off, samples already added may stay in Health.
   - STATS-04: without read access, a watch-written workout may count as removed.
   - WATCH-10: `endCollection` in the past should trim later samples.
-  - HK-06: the locked-phone retry and the Settings line. DATA-10: energy with two watch apps recording.
-- Won't fix:
+  - HK-06: the locked-phone retry, access-off waiting and the Settings line. DATA-10: energy with two watch apps recording.
+- Won't fix, with reasons:
   - DATA-08: a per-session "effort asked" flag would be a guess.
   - LINK-01's Health part: a saved `HKWorkout` can't be updated, and delete-and-resave would drop the watch's samples.
-- Code:
-  - DATA-14: moving the snapshot and restore apply to a background `ModelContext` cut main-thread time to about 1 ms and 10 ms, but a later export after a restore trapped in SwiftData (`ModelSnapshot` `_FullFutureBackingData<SetLog>`). It was reverted. It needs chunked work on main with yields, or the trap's cause.
-  - XC-14: `ExerciseCatalog` and `LoadScaleBook` can't be `@MainActor` until their nonisolated callers move. No Swift 6 build was tried.
-  - LINK-01 and LINK-05: an unstamped undo followed by a re-log still loses the re-log. On the wrist, a phone undo followed by a wrist Finish is covered only once a mirror has arrived.
-  - LOG-10: stored starts overtaken by another set's log aren't repaired, because arrival order was never stored.
-  - SESS-02: offers and the undo memory are lost on relaunch.
-  - HK-06: a refusal because write access is off counts against the cap. An entry whose `relinkSession` never succeeds is never given up (needs `HealthCleanupQueue.drain`).
-  - HK-08: `WorkoutSession.staleAfter` still restates `GymTrackSnapshot.Running.staleAfter`; a test pins them equal.
-  - LOG-14: 14 pt, 9-10 pt, hero numerals and icons sized with `.font(.system(size:))` don't scale.
-  - DATA-05: custom exercise IDs aren't checked for uniqueness on restore.
-  - STATS-09: the widgets' fallback to `plans.first` wasn't checked against Today's `activePlan`.
-  - `summaryRecords(for:history:)` is no longer called by the app; only a test uses it.
-  - The headless carry-forward memory lives in memory only, so a carry the phone logger made and the wrist undid headlessly is not restored.
-  - `ActiveWorkout.pendingNudge` and `takenNudge` remain only for four test files; the app calls the per-exercise versions.
+  - An unstamped undo followed by a re-log loses the re-log. Keeping the row would let a stale log bring back an undone set (false detail); only a watch older than the phone sends one (see `withdrawDroppedSet`).
+  - The restore apply holds the main actor for about 2 s on a large history, on purpose (see the DATA-14 row). Erase is one hold too.
+- Small, by design or unproven:
+  - A carry the wrist made itself, then undone after a relaunch, is not restored (memory only).
+  - `WatchBridge` and `PlansView` restate the plan rule over input that is already sorted.
+  - No test proves the restore's autosave guard.
+  - Icons in fixed-size tiles, hero numerals and chart axis labels don't scale with Dynamic Type.
+  - Health has no "access is back" signal; the foreground drain retries instead.
+  - The strict-concurrency count was not re-measured after all of wave 8 merged.
 
 ## How this review was done
 

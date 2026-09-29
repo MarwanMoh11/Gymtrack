@@ -13,7 +13,7 @@ struct TodayView: View {
     @State private var showingSettings = false
     @State private var pastSession: WorkoutSession?
 
-    private var activePlan: Plan? { plans.first(where: \.isActive) ?? plans.first }
+    private var activePlan: Plan? { Plan.displayed(among: plans) }
     private var scheduledDay: PlanDay? { activePlan?.nextDay(on: .now, after: finishedSessions) }
     /// Nothing is pinned to today, so the card is offering the next day of a
     /// rotation. Calling that "today's session" would state a schedule the
@@ -180,7 +180,7 @@ struct TodayView: View {
                             .foregroundStyle(phase.tint)
                             .shadow(color: phase.glow, radius: 8)
                         Text("elapsed")
-                            .font(Theme.rounded(10, weight: .semibold))
+                            .gtFont(size: 10, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                             .foregroundStyle(Theme.textTertiary)
                     }
                 }
@@ -193,7 +193,7 @@ struct TodayView: View {
                         .frame(width: 46, height: 46)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(workout.completedCount) of \(workout.totalCount) sets logged")
-                            .font(Theme.rounded(14, weight: .bold))
+                            .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                             .foregroundStyle(Theme.ink)
                         Text("\(AppSettings.shared.weight(workout.volumeKg)) moved so far")
                             .font(Theme.rounded(12, weight: .medium))
@@ -284,7 +284,7 @@ struct TodayView: View {
                     startFreestyle()
                 }
             }
-            .font(Theme.rounded(14, weight: .semibold))
+            .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
             .foregroundStyle(Theme.textSecondary)
             .frame(maxWidth: .infinity)
         }
@@ -336,7 +336,7 @@ struct TodayView: View {
                         .font(Theme.number(26))
                         .foregroundStyle(Theme.accent.wash)
                     Text("moves")
-                        .font(Theme.rounded(10, weight: .semibold))
+                        .gtFont(size: 10, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
@@ -353,11 +353,11 @@ struct TodayView: View {
                 ForEach(day.orderedItems.prefix(4)) { item in
                     HStack(spacing: 10) {
                         Image(systemName: item.catalog?.symbol ?? "dumbbell.fill")
-                            .font(.system(size: 12, weight: .semibold))
+                            .gtIcon(size: 12, weight: .semibold, relativeTo: .subheadline, maxScale: 1.6)
                             .foregroundStyle(Theme.accent.opacity(0.75))
                             .frame(width: 20)
                         Text(item.name)
-                            .font(Theme.rounded(14, weight: .semibold))
+                            .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
                         Spacer(minLength: 4)
@@ -379,7 +379,7 @@ struct TodayView: View {
                 .buttonStyle(PrimaryButtonStyle())
 
             Button("Train something else") { showingDayPicker = true }
-                .font(Theme.rounded(14, weight: .semibold))
+                .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: .infinity)
         }
@@ -395,7 +395,7 @@ struct TodayView: View {
             Text(activePlan?.trainingDayCount == 0
                  ? "Add exercises to a day in Plan, or start a freestyle workout now."
                  : "Nothing scheduled. Recovery is part of the plan — but the gym is still open if you want it.")
-                .font(Theme.rounded(14, weight: .medium))
+                .gtFont(size: 14, weight: .medium, relativeTo: .subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

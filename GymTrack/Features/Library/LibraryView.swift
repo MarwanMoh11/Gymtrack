@@ -225,7 +225,7 @@ struct LibraryView: View {
             Text(text)
                 .font(Theme.rounded(13, weight: .semibold))
             Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .bold))
+                .gtIcon(size: 9, weight: .bold, relativeTo: .footnote)
         }
         .foregroundStyle(active ? AnyShapeStyle(Color.black) : AnyShapeStyle(Theme.textSecondary))
         .padding(.horizontal, 12).padding(.vertical, 8)

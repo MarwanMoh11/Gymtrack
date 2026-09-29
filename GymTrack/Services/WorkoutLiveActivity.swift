@@ -14,6 +14,10 @@ final class WorkoutLiveActivity {
     static let shared = WorkoutLiveActivity()
     private init() {}
 
+    /// `Activity` isn't marked Sendable, but `update` and `end` are async calls
+    /// that only message the system, and the Tasks below have always issued
+    /// them from off the main actor. The `nonisolated(unsafe)` copies say so to
+    /// the strict-concurrency checker; they change nothing at run time.
     private var activity: Activity<WorkoutActivity>?
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack", category: "LiveActivity")
 
@@ -43,7 +47,8 @@ final class WorkoutLiveActivity {
         }
         // A card for a workout that already ended is worse than no card.
         for stray in running where stray.attributes.sessionID != sessionID {
-            Task { await stray.end(nil, dismissalPolicy: .immediate) }
+            nonisolated(unsafe) let card = stray
+            Task { await card.end(nil, dismissalPolicy: .immediate) }
         }
 
         guard activity == nil else { return push(state) }
@@ -62,7 +67,8 @@ final class WorkoutLiveActivity {
     func push(_ state: WorkoutActivity.ContentState) {
         guard let activity else { return }
         let content = Self.content(for: state)
-        Task { await activity.update(content) }
+        nonisolated(unsafe) let card = activity
+        Task { await card.update(content) }
     }
 
     /// Takes the card down. Passing the closing state lets it show the final
@@ -72,7 +78,8 @@ final class WorkoutLiveActivity {
         activity = nil
         let content = state.map(Self.content(for:))
         for card in running {
-            Task { await card.end(content, dismissalPolicy: .immediate) }
+            nonisolated(unsafe) let handle = card
+            Task { await handle.end(content, dismissalPolicy: .immediate) }
         }
     }
 

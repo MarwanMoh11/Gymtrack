@@ -131,7 +131,7 @@ struct PhaseProgressBar: View, Animatable {
         self.progress = Double(completed)
     }
 
-    var animatableData: Double {
+    nonisolated var animatableData: Double {
         get { progress }
         set { progress = newValue }
     }

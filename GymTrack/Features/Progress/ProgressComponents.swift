@@ -33,7 +33,7 @@ struct RollingNumber: View, Animatable {
     var value: Double
     var format: (Double) -> String
 
-    var animatableData: Double {
+    nonisolated var animatableData: Double {
         get { value }
         set { value = newValue }
     }
@@ -53,9 +53,9 @@ struct DeltaBadge: View {
             let up = change > 0
             HStack(spacing: 2) {
                 Image(systemName: up ? "arrow.up.right" : "arrow.down.right")
-                    .font(.system(size: 9, weight: .black))
+                    .gtIcon(size: 9, weight: .black, relativeTo: .caption2, maxScale: 1.5)
                 Text("\(abs(change * 100), specifier: "%.0f")%")
-                    .font(Theme.number(10, weight: .bold))
+                    .gtFont(size: 10, weight: .bold, monospacedDigits: true, relativeTo: .caption2, maxScale: 1.5)
                     .lineLimit(1)
             }
             .foregroundStyle(up ? Theme.positive : Theme.negative)
@@ -298,7 +298,7 @@ struct ConsistencyGrid: View {
             Color.clear.frame(height: 11)
             ForEach(monthStarts, id: \.column) { start in
                 Text(start.name)
-                    .font(Theme.rounded(9, weight: .bold))
+                    .gtFont(size: 9, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize()
                     .offset(x: CGFloat(start.column) * (cell + gap))

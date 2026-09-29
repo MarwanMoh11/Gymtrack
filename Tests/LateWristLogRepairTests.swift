@@ -16,7 +16,7 @@ struct LateWristLogRepairTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
-        DroppedSetMemory.shared = DroppedSetMemory(defaults: defaults)
+        DroppedSetMemory.shared.replaceStore(with: defaults)
 
         let now = Date.now
         let center = WatchCommandCenter.shared
@@ -295,56 +295,47 @@ struct LateWristLogRepairTests {
             precondition(stored(ids.legacy, in: store) == nil, "An undo with no stamp still takes the row with it")
         }
 
-        // SessionClosing restates the start rules because it is compiled
-        // without the logger in some harnesses. The restatement must agree with
-        // the logger's own everywhere, the cap included.
+        // The start rules have one copy, in SessionClosing, which the logger and
+        // the replay both call. This pins the cap and the overtaken rule to
+        // literal numbers, so a change to either fails here and not silently
+        // in both paths at once.
         do {
             let store = try makeStore()
             let context = store.mainContext
-            let session = WorkoutSession(title: "Parity")
+            let session = WorkoutSession(title: "Rule")
             context.insert(session)
             let base = now.addingTimeInterval(-3600)
-            for (tracking, amount) in [(TrackingMode.weightReps, 1), (.weightReps, 5), (.weightReps, 12),
-                                       (.weightReps, 18), (.weightReps, 30), (.duration, 10),
-                                       (.duration, 45), (.duration, 120)] {
+            for (tracking, amount, bound) in [(TrackingMode.weightReps, 1, 180.0), (.weightReps, 12, 180),
+                                              (.weightReps, 18, 240), (.weightReps, 30, 360),
+                                              (.duration, 10, 180), (.duration, 45, 180),
+                                              (.duration, 120, 300)] {
                 let set = SetLog(catalogID: "x", exerciseName: "x", exerciseOrder: 0, setIndex: 0,
                                  weightKg: 0, reps: tracking == .duration ? 0 : amount,
                                  seconds: tracking == .duration ? amount : 0,
                                  targetRepsLow: 1, targetRepsHigh: 1, tracking: tracking)
                 set.session = session
                 context.insert(set)
-                let bound = set.longestPlausibleLength
-                for length in [-5, 0, 1, 179, 180, 181, bound - 1, bound, bound + 1, 2 * bound] {
+                precondition(set.longestPlausibleLength == bound,
+                             "The cap for \(tracking) \(amount) is \(set.longestPlausibleLength), not \(bound)")
+                for (length, fits) in [(-5.0, false), (0, true), (bound, true), (bound + 1, false)] {
                     set.startedAt = base
-                    let moment = base.addingTimeInterval(length)
-                    precondition(set.startFits(loggedAt: moment) == set.startStillDescribes(loggedAt: moment),
-                                 "The restated cap disagrees with the logger's at \(tracking) \(amount) \(length)")
+                    precondition(set.startStillDescribes(loggedAt: base.addingTimeInterval(length)) == fits,
+                                 "\(tracking) \(amount): a start \(length)s before the log should\(fits ? "" : " not") describe it")
                 }
                 set.startedAt = nil
-                precondition(!set.startFits(loggedAt: base) && !set.startStillDescribes(loggedAt: base))
+                precondition(!set.startStillDescribes(loggedAt: base))
             }
             try context.save()
 
-            func overtaken(using restated: Bool) throws -> [Bool] {
-                let store = try makeStore()
-                let context = store.mainContext
-                let session = WorkoutSession(title: "Overtaken")
-                context.insert(session)
-                let sets = (0..<4).map { row("bench", order: 0, index: $0, in: session, context: context) }
-                sets[0].startedAt = base.addingTimeInterval(-50)
-                sets[1].startedAt = base.addingTimeInterval(10)
-                sets[2].isCompleted = true
-                sets[2].startedAt = base.addingTimeInterval(-20)
-                sets[3].startedAt = nil
-                if restated {
-                    session.clearStarts(overtakenBy: sets[3], at: base)
-                } else {
-                    session.dropOvertakenStarts(besides: sets[3], at: base)
-                }
-                return sets.map { $0.startedAt != nil }
-            }
-            let restated = try overtaken(using: true), logger = try overtaken(using: false)
-            precondition(restated == logger, "The restated overtaken rule disagrees with the logger's")
+            let sets = (0..<4).map { row("bench", order: 0, index: $0, in: session, context: context) }
+            sets[0].startedAt = base.addingTimeInterval(-50)
+            sets[1].startedAt = base.addingTimeInterval(10)
+            sets[2].isCompleted = true
+            sets[2].startedAt = base.addingTimeInterval(-20)
+            let dropped = session.dropOvertakenStarts(besides: sets[3], at: base)
+            precondition(dropped == [sets[0].id], "Only the unlogged start before the log was overtaken")
+            precondition(sets.map { $0.startedAt != nil } == [false, true, true, false],
+                         "A later start and a logged set's own start are left alone")
         }
 
         print("Late wrist log repairs: focus and batch starts, stored starts, orphans, phone undo, re-log")

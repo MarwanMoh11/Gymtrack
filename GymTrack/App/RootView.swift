@@ -315,7 +315,7 @@ struct RootView: View {
     /// user deliberately pressed.
     private func startScheduledSession() {
         guard activeWorkout == nil else { return expandSession() }
-        let plan = plans.first(where: \.isActive) ?? plans.first
+        let plan = Plan.displayed(among: plans)
         let history = sessions.filter { !$0.isActive }
         if let day = plan?.nextDay(on: .now, after: history) {
             present(ActiveWorkout.start(day: day, plan: plan, context: context, history: history))
@@ -386,7 +386,7 @@ struct RootView: View {
 
         switch command {
         case .startToday:
-            let plan = plans.first(where: \.isActive) ?? plans.first
+            let plan = Plan.displayed(among: plans)
             if let day = plan?.nextDay(on: .now, after: sessions) {
                 startFromWatch {
                     ActiveWorkout.start(day: day, plan: plan, context: context,
@@ -698,7 +698,7 @@ private struct WatchIdleSync: View, Equatable {
     @Query(sort: \Plan.createdAt) private var plans: [Plan]
     @Binding var revision: Int
 
-    static func == (lhs: WatchIdleSync, rhs: WatchIdleSync) -> Bool { true }
+    nonisolated static func == (lhs: WatchIdleSync, rhs: WatchIdleSync) -> Bool { true }
 
     private var idle: WatchIdleSnapshot {
         WatchMirrorBuilder.idle(plans: plans, sessions: sessions)

@@ -23,6 +23,10 @@ struct SettingsView: View {
     /// work starts and cleared when it ends, however it ends, so a second one
     /// can't be started on top of it and the sheet can say what it is doing.
     @State private var running: DataTask?
+    /// How far the running task is, from 0 to 1, or `nil` before it has said.
+    /// The backup and the restore work in slices and report between them; the
+    /// bar fills as they go, and until the first report the row shows a spinner.
+    @State private var fraction: Double?
 
     private enum DataTask {
         case exporting, restoring, erasing
@@ -182,11 +186,14 @@ struct SettingsView: View {
                     .disabled(isBusy)
 
                     if let running {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text(running.label)
-                                .font(Theme.rounded(14, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 10) {
+                                if fraction == nil { ProgressView() }
+                                Text(running.label)
+                                    .gtFont(size: 14, weight: .medium, relativeTo: .subheadline)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            if let fraction { ProgressView(value: fraction) }
                         }
                         .accessibilityElement(children: .combine)
                     }
@@ -308,6 +315,7 @@ struct SettingsView: View {
     /// the work starts, or the spinner would appear only after the freeze it
     /// is there to explain. Returning to the run loop for a frame is enough.
     private func showProgress(_ task: DataTask) async {
+        fraction = nil
         running = task
         try? await Task.sleep(nanoseconds: 60_000_000)
     }
@@ -316,9 +324,10 @@ struct SettingsView: View {
         guard !isBusy else { return }
         Task { @MainActor in
             await showProgress(.exporting)
-            defer { running = nil }
+            defer { running = nil; fraction = nil }
             do {
-                exportURL = try await BackupService.exportOffMain(context: context)
+                exportURL = try await BackupService.exportOffMain(context: context,
+                                                                   progress: { fraction = $0 })
                 Haptics.success()
             } catch {
                 alert = AlertPayload(title: "Export failed", message: error.localizedDescription)
@@ -332,9 +341,10 @@ struct SettingsView: View {
             guard !isBusy else { return }
             Task { @MainActor in
                 await showProgress(.restoring)
-                defer { running = nil }
+                defer { running = nil; fraction = nil }
                 do {
-                    try await BackupService.restoreOffMain(from: url, context: context)
+                    try await BackupService.restoreOffMain(from: url, context: context,
+                                                           progress: { fraction = $0 })
                     Haptics.success()
                     alert = AlertPayload(title: "Restored", message: "Your routines and history are back.")
                 } catch {
@@ -352,7 +362,7 @@ struct SettingsView: View {
         guard !isBusy else { return }
         Task { @MainActor in
             await showProgress(.erasing)
-            defer { running = nil }
+            defer { running = nil; fraction = nil }
             do {
                 let cleanup = try await BackupService.wipe(context: context,
                                                            removingHealthWorkouts: removingHealthWorkouts)

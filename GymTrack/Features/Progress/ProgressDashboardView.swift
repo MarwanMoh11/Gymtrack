@@ -125,7 +125,7 @@ struct ProgressDashboardView: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 13, weight: .bold))
+                        .gtIcon(size: 13, weight: .bold, relativeTo: .callout)
                         .foregroundStyle(figures.streak.current > 0 ? Theme.accent : Theme.textTertiary)
                     Text("\(figures.streak.current) day streak")
                         .font(Theme.rounded(16, weight: .bold))
@@ -277,7 +277,7 @@ struct ProgressDashboardView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(record.exerciseName)
-                    .font(Theme.rounded(14, weight: .semibold))
+                    .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text(record.achievedAt.formatted(date: .abbreviated, time: .omitted))
@@ -291,7 +291,7 @@ struct ProgressDashboardView: View {
                     .foregroundStyle(Theme.textPrimary)
                 if let caption = figures.caption {
                     Text(caption)
-                        .font(Theme.rounded(10, weight: .medium))
+                        .gtFont(size: 10, weight: .medium, relativeTo: .caption2, maxScale: 1.5)
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
@@ -589,7 +589,7 @@ private struct TrendCard: View {
                     DeltaBadge(change: change)
                 } else {
                     Text("tap again to clear")
-                        .font(Theme.rounded(10, weight: .medium))
+                        .gtFont(size: 10, weight: .medium, relativeTo: .caption2, maxScale: 1.5)
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
@@ -771,7 +771,7 @@ struct MuscleDetailPanel: View {
                     .font(Theme.rounded(17, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(MuscleHeat.label(ratio).uppercased())
-                    .font(Theme.rounded(9, weight: .black))
+                    .gtFont(size: 9, weight: .black, relativeTo: .caption2, maxScale: 1.5)
                     .tracking(0.8)
                     .foregroundStyle(.black)
                     .padding(.horizontal, 6)
@@ -779,7 +779,7 @@ struct MuscleDetailPanel: View {
                     .background(Capsule().fill(MuscleHeat.tint(ratio)))
                 Spacer()
                 Text("\(String(format: "%g", sets)) / \(muscle.weeklySetTarget)")
-                    .font(Theme.number(14, weight: .bold))
+                    .gtFont(size: 14, weight: .bold, monospacedDigits: true, relativeTo: .subheadline)
                     .foregroundStyle(MuscleHeat.tint(ratio))
             }
 

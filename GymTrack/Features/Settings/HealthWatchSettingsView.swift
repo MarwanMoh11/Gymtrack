@@ -155,7 +155,7 @@ struct HealthWatchSettingsView: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Text("Retry")
-                            .font(Theme.rounded(14, weight: .semibold))
+                            .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                             .foregroundStyle(Theme.accent)
                     }
                 }
@@ -208,12 +208,12 @@ struct HealthWatchSettingsView: View {
             ForEach(WatchFeature.all) { feature in
                 HStack(spacing: 12) {
                     Image(systemName: feature.symbol)
-                        .font(.system(size: 13, weight: .semibold))
+                        .gtIcon(size: 13, weight: .semibold, relativeTo: .footnote, maxScale: 1.8)
                         .foregroundStyle(Theme.accent)
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(feature.title)
-                            .font(Theme.rounded(14, weight: .bold))
+                            .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                             .foregroundStyle(Theme.textPrimary)
                         Text(feature.detail)
                             .font(Theme.rounded(12, weight: .medium))

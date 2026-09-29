@@ -87,7 +87,7 @@ private struct MuscleFill: View, Animatable {
     var edge: Double = 1
     var lineWidth: CGFloat = 0.7
 
-    var animatableData: Double {
+    nonisolated var animatableData: Double {
         get { ratio }
         set { ratio = newValue }
     }
@@ -249,7 +249,7 @@ struct HeatLegend: View {
                 Spacer()
                 Text("OVER")
             }
-            .font(Theme.rounded(9, weight: .bold))
+            .gtFont(size: 9, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
             .tracking(0.8)
             .foregroundStyle(Theme.textTertiary)
         }
@@ -421,7 +421,7 @@ struct MuscleRankColumn: View {
                 } label: {
                     VStack(alignment: alignment, spacing: 3) {
                         Text(muscle.name)
-                            .font(Theme.rounded(10.5, weight: .semibold))
+                            .gtFont(size: 10.5, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
@@ -434,7 +434,7 @@ struct MuscleRankColumn: View {
                         }
                         .frame(height: 3.5)
                         Text("\(Int((ratio * 100).rounded()))%")
-                            .font(Theme.number(9, weight: .bold))
+                            .gtFont(size: 9, weight: .bold, monospacedDigits: true, relativeTo: .caption2, maxScale: 1.5)
                             .foregroundStyle(MuscleHeat.tint(ratio))
                     }
                     .frame(width: 64, alignment: alignment == .leading ? .leading : .trailing)

@@ -451,15 +451,67 @@ enum BackupService {
     /// year of history, run on a background thread and the sheet stays live.
     /// Byte-identical to `export`: both call the same `encoded`.
     ///
-    /// The snapshot stays on the main context. Read through a second context
-    /// it worked until a restore had run in the same session, and then trapped
-    /// inside SwiftData; see DATA-14 in the review's Still-open list.
+    /// The snapshot stays on the main context, cut into slices with the main
+    /// actor handed back between them (`makeArchivePaced`).
+    /// Read through a second context it worked until a restore had run in the
+    /// same session, and then trapped inside SwiftData (DATA-14).
+    ///
+    /// `progress` runs on the main actor with a fraction from 0 to 1. The
+    /// snapshot is the first 60 per cent, and the encode and write, which have
+    /// no steps to count, fill the rest at once.
     @MainActor
-    static func exportOffMain(context: ModelContext, stamp: ExportStamp = .current()) async throws -> URL {
-        let archive = try makeArchive(context: context, stamp: stamp)
-        return try await Task.detached(priority: .userInitiated) {
+    static func exportOffMain(context: ModelContext, stamp: ExportStamp = .current(),
+                              sliceMilliseconds: Double = Pacer.defaultSliceMilliseconds,
+                              progress: @escaping @MainActor (Double) -> Void = { _ in }) async throws -> URL {
+        let archive = try await makeArchivePaced(context: context, stamp: stamp,
+                                                 sliceMilliseconds: sliceMilliseconds,
+                                                 progress: { progress($0 * 0.6) })
+        progress(0.6)
+        let url = try await Task.detached(priority: .userInitiated) {
             try writeExport(try encoded(archive), stamp: stamp)
         }.value
+        progress(1)
+        return url
+    }
+
+    /// Hands the main actor back once a slice of work has used up its share.
+    ///
+    /// The snapshot and the restore are loops over sessions, and each pass is
+    /// cheap; it is 300 of them in a row that froze the sheet. Checking the
+    /// clock after each pass, rather than counting a fixed number of sessions,
+    /// keeps a slice short whether a session holds 5 sets or 80, and on a slow
+    /// phone as well as a fast one.
+    ///
+    /// The pause is a short sleep rather than a bare `Task.yield()`. A yielded
+    /// task goes straight back on the main queue, where it can run again before
+    /// the run loop has drawn a frame; a timer wakes the run loop, so the
+    /// progress bar moves and touches are heard between slices.
+    @MainActor
+    struct Pacer {
+        nonisolated static let defaultSliceMilliseconds = 16.0
+
+        /// A restore never pauses; see `restoreOffMain`. Tests pass a slice of
+        /// their own to exercise the paced path.
+        nonisolated static let restoreSliceMilliseconds = Double.infinity
+
+        private let sliceNanoseconds: UInt64
+        private let report: @MainActor (Double) -> Void
+        private var sliceStart = DispatchTime.now().uptimeNanoseconds
+
+        init(sliceMilliseconds: Double, report: @escaping @MainActor (Double) -> Void) {
+            sliceNanoseconds = sliceMilliseconds.isFinite
+                ? UInt64(max(0, sliceMilliseconds) * 1_000_000)
+                : .max
+            self.report = report
+        }
+
+        /// Pauses, and reports `fraction`, only when the slice is used up.
+        mutating func pauseIfDue(fraction: Double) async {
+            guard DispatchTime.now().uptimeNanoseconds &- sliceStart >= sliceNanoseconds else { return }
+            report(min(1, max(0, fraction)))
+            try? await Task.sleep(nanoseconds: 1_000_000)
+            sliceStart = DispatchTime.now().uptimeNanoseconds
+        }
     }
 
     /// Puts the bytes in a temporary file named for the export's day.
@@ -489,17 +541,66 @@ enum BackupService {
         return try encoder.encode(archive)
     }
 
-    static func makeArchive(context: ModelContext, stamp: ExportStamp = .current()) throws -> Archive {
+    /// What the archive is made of, read from the store: models for the plans
+    /// and the sessions (whose sets the snapshot turns into value types), and
+    /// plain rows for the rest. Split from the assembly so the synchronous and
+    /// the chunked snapshot can't drift apart.
+    private struct SnapshotInputs {
+        var plans: [Plan]
+        var finished: [WorkoutSession]
+        var custom: [CustomExerciseRecord]
+        var bodyMetrics: [BodyMetric]
+        var loadScales: [ExerciseLoadPreference]
+        var hidden: [HiddenExerciseRecord]
+    }
+
+    private static func fetchInputs(_ context: ModelContext) throws -> SnapshotInputs {
         let plans = plansInOrder(try context.fetch(FetchDescriptor<Plan>()))
         let sessions = sessionsInOrder(try context.fetch(FetchDescriptor<WorkoutSession>()))
-        let custom = try context.fetch(FetchDescriptor<CustomExerciseRecord>())
-            .sorted { $0.id < $1.id }
-        let bodyMetrics = try context.fetch(FetchDescriptor<BodyMetric>())
-            .sorted { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) }
-        let loadScales = try context.fetch(FetchDescriptor<ExerciseLoadPreference>())
-        let hidden = try context.fetch(FetchDescriptor<HiddenExerciseRecord>())
-        let finished = sessions.filter { !$0.isActive }
-        let corrections = loadScaleDTOs(loadScales)
+        return SnapshotInputs(
+            plans: plans,
+            finished: sessions.filter { !$0.isActive },
+            custom: try context.fetch(FetchDescriptor<CustomExerciseRecord>()).sorted { $0.id < $1.id },
+            bodyMetrics: try context.fetch(FetchDescriptor<BodyMetric>())
+                .sorted { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) },
+            loadScales: try context.fetch(FetchDescriptor<ExerciseLoadPreference>()),
+            hidden: try context.fetch(FetchDescriptor<HiddenExerciseRecord>())
+        )
+    }
+
+    static func makeArchive(context: ModelContext, stamp: ExportStamp = .current()) throws -> Archive {
+        let inputs = try fetchInputs(context)
+        return assemble(inputs, sessions: inputs.finished.map(sessionDTO), stamp: stamp)
+    }
+
+    /// The same archive as `makeArchive`, with the walk over the sessions, which
+    /// is nearly all of the time, cut into slices. The main actor is given back
+    /// between them (see `Pacer`), so a year of history holds it for a slice at
+    /// a time rather than for most of a second, and `progress` can move.
+    ///
+    /// Still on the main context: the same reads on a second one trapped inside
+    /// SwiftData once a restore had run, so the store is only ever read here.
+    @MainActor
+    static func makeArchivePaced(context: ModelContext, stamp: ExportStamp = .current(),
+                                 sliceMilliseconds: Double = Pacer.defaultSliceMilliseconds,
+                                 progress: @escaping @MainActor (Double) -> Void = { _ in }) async throws -> Archive {
+        let inputs = try fetchInputs(context)
+        var pacer = Pacer(sliceMilliseconds: sliceMilliseconds, report: progress)
+        var sessions: [SessionDTO] = []
+        sessions.reserveCapacity(inputs.finished.count)
+        for (done, session) in inputs.finished.enumerated() {
+            sessions.append(sessionDTO(session))
+            await pacer.pauseIfDue(fraction: Double(done + 1) / Double(inputs.finished.count))
+        }
+        return assemble(inputs, sessions: sessions, stamp: stamp)
+    }
+
+    private static func assemble(_ inputs: SnapshotInputs, sessions: [SessionDTO], stamp: ExportStamp) -> Archive {
+        let plans = inputs.plans
+        let corrections = loadScaleDTOs(inputs.loadScales)
+        // Taken from the session values rather than the models, so this walk
+        // over every set is not a second trip through the store.
+        let referenced = referencedExerciseIDs(plans: plans, sessions: sessions)
 
         return Archive(
             exportedAt: stamp.exportedAt,
@@ -521,77 +622,78 @@ enum BackupService {
                                    items: itemsInOrder(of: day).map(itemDTO))
                         })
             },
-            sessions: finished.map { session in
-                SessionDTO(id: session.id, title: session.title, startedAt: session.startedAt,
-                           endedAt: session.endedAt,
-                           // Trimmed: a field that was opened and cleared again
-                           // shouldn't reach the file as a note made of spaces.
-                           notes: written(session.trimmedNotes), planName: session.planName,
-                           planDayID: session.planDayID,
-                           averageHeartRate: session.averageHeartRate,
-                           maxHeartRate: session.maxHeartRate,
-                           // Under a kilocalorie is a sensor that woke up,
-                           // not what the workout cost.
-                           activeEnergyKcal: session.reportableEnergyKcal,
-                           healthWorkoutID: session.healthWorkoutID,
-                           wasWatchDriven: session.wasWatchDriven,
-                           // Read through the session, so a source left behind
-                           // by numbers since cleared can't describe values
-                           // that aren't in the file.
-                           heartRateSource: session.heartRateSource?.rawValue,
-                           heartRateReadings: session.reportableHeartRateReadings,
-                           energySource: session.energySource?.rawValue,
-                           noteTags: session.noteTagsRaw.isEmpty ? nil : session.noteTags.map(\.rawValue),
-                           exerciseNotes: exerciseNotes(of: session),
-                           sets: setsInOrder(of: session).map { set in
-                               SetDTO(id: set.id, catalogID: set.catalogID, exerciseName: set.exerciseName,
-                                      exerciseOrder: set.exerciseOrder, setIndex: set.setIndex,
-                                      weightKg: set.weightKg,
-                                      reps: set.tracking == .duration ? nil : set.reps,
-                                      seconds: set.tracking == .duration ? set.seconds : nil,
-                                      tracking: set.trackingRaw,
-                                      isCompleted: set.isCompleted,
-                                      completedAt: set.completedAt,
-                                      startedAt: set.startedAt,
-                                      // Read through the set, so half a pair
-                                      // or a window running backwards never
-                                      // reaches a reader as a set's length.
-                                      detectedStartedAt: set.detectedWindow?.start,
-                                      detectedEndedAt: set.detectedWindow?.end,
-                                      targetRepsLow: repTarget(set.targetRepsLow, tracking: set.tracking),
-                                      targetRepsHigh: repTarget(set.targetRepsHigh, tracking: set.tracking),
-                                      rpe: set.rpe,
-                                      effort: set.rpe.flatMap(SetFeel.answer(forStored:))?.exportKey,
-                                      averageHeartRate: set.averageHeartRate,
-                                      maxHeartRate: set.maxHeartRate,
-                                      // Read through the set rather than off
-                                      // the stored string, so a provenance left
-                                      // behind by a set whose heart rate has
-                                      // since been cleared can't reach the file
-                                      // on its own, describing a window over
-                                      // numbers that aren't there.
-                                      heartRateWindow: set.heartRateWindow?.rawValue,
-                                      loadNudge: loadNudge(of: set),
-                                      // Read through the set, so a link whose
-                                      // set isn't in this file can't reach a
-                                      // reader as half a drop set.
-                                      continues: set.continuation?.rawValue)
-                           })
-            },
-            bodyMetrics: bodyMetrics.map {
+            sessions: sessions,
+            bodyMetrics: inputs.bodyMetrics.map {
                 BodyMetricDTO(id: $0.id, date: $0.date, weightKg: $0.weightKg, source: $0.source)
             },
-            customExercises: custom.map {
+            customExercises: inputs.custom.map {
                 CustomExerciseDTO(id: $0.id, name: $0.name, category: $0.category,
                                   muscleRaw: $0.muscleRaw, equipment: $0.equipment, trackingRaw: $0.trackingRaw)
             },
             loadScales: corrections,
-            hiddenExercises: hidden.map(\.catalogID).sorted(),
-            exerciseCatalog: referencedCatalog(plans: plans, sessions: finished),
-            effectiveLoadScales: effectiveLoadScales(plans: plans, sessions: finished,
-                                                     corrections: corrections),
+            hiddenExercises: inputs.hidden.map(\.catalogID).sorted(),
+            exerciseCatalog: referencedCatalog(referenced),
+            effectiveLoadScales: effectiveLoadScales(referenced, corrections: corrections),
             effortScale: effortScale
         )
+    }
+
+    private static func sessionDTO(_ session: WorkoutSession) -> SessionDTO {
+        return SessionDTO(id: session.id, title: session.title, startedAt: session.startedAt,
+                          endedAt: session.endedAt,
+                          // Trimmed: a field that was opened and cleared again
+                          // shouldn't reach the file as a note made of spaces.
+                          notes: written(session.trimmedNotes), planName: session.planName,
+                          planDayID: session.planDayID,
+                          averageHeartRate: session.averageHeartRate,
+                          maxHeartRate: session.maxHeartRate,
+                          // Under a kilocalorie is a sensor that woke up,
+                          // not what the workout cost.
+                          activeEnergyKcal: session.reportableEnergyKcal,
+                          healthWorkoutID: session.healthWorkoutID,
+                          wasWatchDriven: session.wasWatchDriven,
+                          // Read through the session, so a source left behind
+                          // by numbers since cleared can't describe values
+                          // that aren't in the file.
+                          heartRateSource: session.heartRateSource?.rawValue,
+                          heartRateReadings: session.reportableHeartRateReadings,
+                          energySource: session.energySource?.rawValue,
+                          noteTags: session.noteTagsRaw.isEmpty ? nil : session.noteTags.map(\.rawValue),
+                          exerciseNotes: exerciseNotes(of: session),
+                          sets: setsInOrder(of: session).map { set in
+                              SetDTO(id: set.id, catalogID: set.catalogID, exerciseName: set.exerciseName,
+                                     exerciseOrder: set.exerciseOrder, setIndex: set.setIndex,
+                                     weightKg: set.weightKg,
+                                     reps: set.tracking == .duration ? nil : set.reps,
+                                     seconds: set.tracking == .duration ? set.seconds : nil,
+                                     tracking: set.trackingRaw,
+                                     isCompleted: set.isCompleted,
+                                     completedAt: set.completedAt,
+                                     startedAt: set.startedAt,
+                                     // Read through the set, so half a pair
+                                     // or a window running backwards never
+                                     // reaches a reader as a set's length.
+                                     detectedStartedAt: set.detectedWindow?.start,
+                                     detectedEndedAt: set.detectedWindow?.end,
+                                     targetRepsLow: repTarget(set.targetRepsLow, tracking: set.tracking),
+                                     targetRepsHigh: repTarget(set.targetRepsHigh, tracking: set.tracking),
+                                     rpe: set.rpe,
+                                     effort: set.rpe.flatMap(SetFeel.answer(forStored:))?.exportKey,
+                                     averageHeartRate: set.averageHeartRate,
+                                     maxHeartRate: set.maxHeartRate,
+                                     // Read through the set rather than off
+                                     // the stored string, so a provenance left
+                                     // behind by a set whose heart rate has
+                                     // since been cleared can't reach the file
+                                     // on its own, describing a window over
+                                     // numbers that aren't there.
+                                     heartRateWindow: set.heartRateWindow?.rawValue,
+                                     loadNudge: loadNudge(of: set),
+                                     // Read through the set, so a link whose
+                                     // set isn't in this file can't reach a
+                                     // reader as half a drop set.
+                                     continues: set.continuation?.rawValue)
+                          })
     }
 
     /// The four effort answers and the code each is stored under, taken from
@@ -734,10 +836,10 @@ enum BackupService {
     /// training, so the IDs in them don't pull an exercise in: hiding is how
     /// the library gets trimmed down to one gym, and following that list would
     /// put most of the library back in the file it was kept out of.
-    private static func referencedCatalog(plans: [Plan], sessions: [WorkoutSession]) -> [CatalogExerciseDTO] {
+    private static func referencedCatalog(_ referenced: Set<String>) -> [CatalogExerciseDTO] {
         // Sorted so two exports of unchanged data are the same bytes, which is
         // what `.sortedKeys` buys everywhere else in the file.
-        referencedExerciseIDs(plans: plans, sessions: sessions).sorted().compactMap { id in
+        referenced.sorted().compactMap { id in
             // A custom exercise is left to `customExercises`, and an ID that
             // resolves to nothing at all — a custom exercise deleted out from
             // under its own history — has nothing to say. The set still
@@ -757,7 +859,7 @@ enum BackupService {
 
     /// Every exercise ID the plans and sessions in this file spell, as they
     /// spell it.
-    private static func referencedExerciseIDs(plans: [Plan], sessions: [WorkoutSession]) -> Set<String> {
+    private static func referencedExerciseIDs(plans: [Plan], sessions: [SessionDTO]) -> Set<String> {
         var ids: Set<String> = []
         for plan in plans {
             for day in plan.days {
@@ -780,11 +882,11 @@ enum BackupService {
     /// to no exercise and has no correction is left out: a custom exercise
     /// deleted under its own history has no equipment to derive a rung from, and
     /// the fallback for "unknown" would be a rung nobody chose.
-    private static func effectiveLoadScales(plans: [Plan], sessions: [WorkoutSession],
+    private static func effectiveLoadScales(_ referenced: Set<String>,
                                             corrections: [LoadScaleDTO]) -> [EffectiveLoadScaleDTO] {
         let unit = AppSettings.shared.weightUnit
         let corrected = Dictionary(corrections.map { ($0.catalogID, $0) }, uniquingKeysWith: { first, _ in first })
-        return referencedExerciseIDs(plans: plans, sessions: sessions).sorted().compactMap { id in
+        return referenced.sorted().compactMap { id in
             if let row = corrected[ExerciseCatalog.canonicalID(for: id)] {
                 return EffectiveLoadScaleDTO(catalogID: id, unit: row.unit, increment: row.increment,
                                              source: "correction")
@@ -800,6 +902,9 @@ enum BackupService {
 
     enum RestoreError: LocalizedError {
         case workoutInProgress
+        /// A second restore started while one was still working through its
+        /// slices. Two would wipe and insert into the same context together.
+        case alreadyRunning
         /// A value no version of this app writes, found before anything on
         /// the phone was touched. It names the record, the field and the value
         /// so the file can be put right by hand, which matters most for a file
@@ -810,6 +915,8 @@ enum BackupService {
             switch self {
             case .workoutInProgress:
                 "Finish or discard the workout that's running first. Restoring replaces everything on this phone, and a workout still in progress isn't in any backup to bring it back."
+            case .alreadyRunning:
+                "A restore is already running. Wait for it to finish."
             case let .invalidValue(field, value, record, allowed):
                 "This backup can't be restored: \(record) has a \(field) of \(value), which has to be \(allowed). Nothing on this phone was changed."
             }
@@ -864,36 +971,52 @@ enum BackupService {
     }
 
     /// `restore(from:)` with the reading, decoding and validating moved off
-    /// the main actor, so a large file doesn't freeze the sheet. Only the wipe
-    /// and the inserts, which need the store, run on the main actor, and they
-    /// share the one save as before. Validation still finishes before
-    /// anything is deleted, so a bad file leaves the phone as it was.
+    /// the main actor. Validation still finishes before anything is deleted, so
+    /// a bad file leaves the phone as it was.
     ///
-    /// The wipe and the inserts stay on the main context on purpose: a second
-    /// context over the same store trapped inside SwiftData in testing (see
-    /// `exportOffMain`), and a restore that leaves the main context unusable
-    /// is worse than one that holds it for a second.
+    /// The wipe and the inserts can be cut into slices, but by default they
+    /// are not (`Pacer.restoreSliceMilliseconds`). Between the wipe and the one
+    /// save, a pause would let a watch command or a Health backfill run on the
+    /// same main context and save it, committing half a restore. Holding the
+    /// main actor for the second or two the apply takes is the smaller cost for
+    /// something done this rarely.
+    ///
+    /// The store is still written on the main context, and there is still one
+    /// save, at the end: nothing reaches the store until every insert has been
+    /// made, so a failure part-way, whether in an insert, in `beforeCommit` or
+    /// in the save itself, rolls back to exactly what was there. Autosave is
+    /// switched off for the duration, or a slice boundary could commit half a
+    /// restore. A second context over the same store trapped inside SwiftData
+    /// in testing (see `exportOffMain`), so it is not used.
+    ///
+    /// `progress` runs on the main actor with a fraction from 0 to 1.
     @MainActor
     static func restoreOffMain(from url: URL, context: ModelContext,
-                               beforeCommit: () throws -> Void = {}) async throws {
+                               beforeCommit: () throws -> Void = {},
+                               sliceMilliseconds: Double = Pacer.restoreSliceMilliseconds,
+                               progress: @escaping @MainActor (Double) -> Void = { _ in }) async throws {
         try requireNoOpenWorkout(context)
         let archive = try await Task.detached(priority: .userInitiated) {
             let needsScope = url.startAccessingSecurityScopedResource()
             defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
             return try decodedArchive(from: try Data(contentsOf: url))
         }.value
-        try apply(archive, context: context, beforeCommit: beforeCommit)
+        try await applyPaced(archive, context: context, beforeCommit: beforeCommit,
+                             sliceMilliseconds: sliceMilliseconds, progress: progress)
     }
 
     /// The same, for bytes already in memory.
     @MainActor
     static func restoreOffMain(data: Data, context: ModelContext,
-                               beforeCommit: () throws -> Void = {}) async throws {
+                               beforeCommit: () throws -> Void = {},
+                               sliceMilliseconds: Double = Pacer.restoreSliceMilliseconds,
+                               progress: @escaping @MainActor (Double) -> Void = { _ in }) async throws {
         try requireNoOpenWorkout(context)
         let archive = try await Task.detached(priority: .userInitiated) {
             try decodedArchive(from: data)
         }.value
-        try apply(archive, context: context, beforeCommit: beforeCommit)
+        try await applyPaced(archive, context: context, beforeCommit: beforeCommit,
+                             sliceMilliseconds: sliceMilliseconds, progress: progress)
     }
 
     /// Decoded and validated, and nothing more: no store, so it may run on any
@@ -922,6 +1045,54 @@ enum BackupService {
                               beforeCommit: () throws -> Void) throws {
         try applyStore(archive, context: context, beforeCommit: beforeCommit)
         finishRestore(archive, context: context)
+    }
+
+    /// True while a paced restore is between its first delete and its save.
+    @MainActor private static var pacedRestoreRunning = false
+
+    /// `apply`, in slices. The fraction reported counts one unit for each
+    /// session deleted, one for each restored and one for the save, since the
+    /// sessions are where the time goes.
+    @MainActor
+    private static func applyPaced(_ archive: Archive, context: ModelContext,
+                                   beforeCommit: () throws -> Void, sliceMilliseconds: Double,
+                                   progress: @escaping @MainActor (Double) -> Void) async throws {
+        guard !pacedRestoreRunning else { throw RestoreError.alreadyRunning }
+        pacedRestoreRunning = true
+        let autosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer {
+            context.autosaveEnabled = autosave
+            pacedRestoreRunning = false
+        }
+
+        // The workout check again, because the decode above awaited and a
+        // workout started in that gap would be deleted from under the logger.
+        try requireNoOpenWorkout(context)
+        var pacer = Pacer(sliceMilliseconds: sliceMilliseconds, report: progress)
+        do {
+            let oldSessions = try context.fetchCount(FetchDescriptor<WorkoutSession>())
+            let total = Double(oldSessions + archive.sessions.count + 1)
+
+            let localLinks = try await deleteStoredRecords(context: context, pacer: &pacer, total: total)
+            let links = linksBySession(localLinks)
+
+            insertExercisesAndPlans(archive, context: context)
+            for (n, dto) in archive.sessions.enumerated() {
+                insertSession(dto, keepingLinks: links, context: context)
+                await pacer.pauseIfDue(fraction: Double(oldSessions + n + 1) / total)
+            }
+            insertRemainder(archive, context: context)
+
+            try beforeCommit()
+            progress((total - 1) / total)
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        finishRestore(archive, context: context)
+        progress(1)
     }
 
     /// Checks for an open workout again, because the off-main restore awaits
@@ -1011,6 +1182,16 @@ enum BackupService {
         // have no ID in the file, so there is nothing to compare there.
         var seenPlanIDs: Set<UUID> = []
         var seenDayIDs: Set<UUID> = []
+        // A custom exercise is looked up by its ID, from a set, a plan slot and
+        // a note alike, so two under one ID would have every one of those
+        // resolve to whichever the store returned first, and its name, muscle
+        // and tracking would be the other's.
+        var seenExerciseIDs: Set<String> = []
+        for exercise in archive.customExercises where !seenExerciseIDs.insert(exercise.id).inserted {
+            throw RestoreError.invalidValue(field: "custom exercise ID", value: exercise.id,
+                                           record: "\"\(exercise.name)\"",
+                                           allowed: "different from every other custom exercise's ID in this file")
+        }
         for plan in archive.plans {
             if !seenPlanIDs.insert(plan.id).inserted {
                 throw RestoreError.invalidValue(field: "plan ID", value: plan.id.uuidString,
@@ -1112,6 +1293,13 @@ enum BackupService {
 
     private static func insertArchive(_ archive: Archive, keepingLinks localLinks: [UUID: UUID],
                                       context: ModelContext) {
+        insertExercisesAndPlans(archive, context: context)
+        for dto in archive.sessions { insertSession(dto, keepingLinks: localLinks, context: context) }
+        insertRemainder(archive, context: context)
+    }
+
+    /// The user's own exercises and the plans, the small part of a restore.
+    private static func insertExercisesAndPlans(_ archive: Archive, context: ModelContext) {
         let customTracking = Dictionary(
             archive.customExercises.map { ($0.id, TrackingMode(rawValue: $0.trackingRaw) ?? .weightReps) },
             uniquingKeysWith: { first, _ in first })
@@ -1156,98 +1344,104 @@ enum BackupService {
                 }
             }
         }
+    }
 
-        for dto in archive.sessions {
-            let session = WorkoutSession(title: dto.title, planName: dto.planName, startedAt: dto.startedAt)
-            session.id = dto.id
-            session.endedAt = dto.endedAt
-            session.planDayID = dto.planDayID
-            session.notes = dto.notes ?? ""
-            session.averageHeartRate = dto.averageHeartRate
-            session.maxHeartRate = dto.maxHeartRate
-            session.activeEnergyKcal = dto.activeEnergyKcal
-            session.healthWorkoutID = restoredHealthLink(for: dto, keeping: localLinks)
-            session.wasWatchDriven = dto.wasWatchDriven ?? false
-            session.heartRateSourceRaw = dto.heartRateSource
-            session.heartRateReadings = dto.heartRateReadings
-            session.energySourceRaw = dto.energySource
-            // Tags the app doesn't know are dropped rather than stored: a value
-            // nothing can draw would sit in the record unreadable and be
-            // written back out as though it had been understood.
-            session.noteTagsRaw = NoteTag.resolve(dto.noteTags ?? []).map(\.rawValue)
-            context.insert(session)
+    /// One session with its notes and sets. The unit the chunked restore paces
+    /// itself by, and the same body the synchronous one loops over.
+    private static func insertSession(_ dto: SessionDTO, keepingLinks localLinks: [UUID: UUID],
+                                      context: ModelContext) {
+        let session = WorkoutSession(title: dto.title, planName: dto.planName, startedAt: dto.startedAt)
+        session.id = dto.id
+        session.endedAt = dto.endedAt
+        session.planDayID = dto.planDayID
+        session.notes = dto.notes ?? ""
+        session.averageHeartRate = dto.averageHeartRate
+        session.maxHeartRate = dto.maxHeartRate
+        session.activeEnergyKcal = dto.activeEnergyKcal
+        session.healthWorkoutID = restoredHealthLink(for: dto, keeping: localLinks)
+        session.wasWatchDriven = dto.wasWatchDriven ?? false
+        session.heartRateSourceRaw = dto.heartRateSource
+        session.heartRateReadings = dto.heartRateReadings
+        session.energySourceRaw = dto.energySource
+        // Tags the app doesn't know are dropped rather than stored: a value
+        // nothing can draw would sit in the record unreadable and be
+        // written back out as though it had been understood.
+        session.noteTagsRaw = NoteTag.resolve(dto.noteTags ?? []).map(\.rawValue)
+        context.insert(session)
 
-            for noteDTO in dto.exerciseNotes ?? [] {
-                let tags = NoteTag.resolve(noteDTO.tags)
-                let text = noteDTO.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty || !tags.isEmpty else { continue }
-                let note = ExerciseNote(catalogID: noteDTO.catalogID, exerciseName: noteDTO.exerciseName)
-                note.text = text
-                note.tags = tags
-                note.session = session
-                context.insert(note)
-            }
-
-            // A warm-up from a file written before warm-ups were removed is
-            // left out, the rule the store migration (`dropWarmupSets`)
-            // applied to the phone's own rows. Nothing marks a warm-up any
-            // more, so stored it would become an ordinary working set: a
-            // 40 kg ramp-up counted as training, inflating volume and pairing
-            // the next session's first set against it. That is false detail.
-            for setDTO in dto.sets where setDTO.isWarmup != true {
-                let set = SetLog(catalogID: setDTO.catalogID, exerciseName: setDTO.exerciseName,
-                                 exerciseOrder: setDTO.exerciseOrder, setIndex: setDTO.setIndex,
-                                 weightKg: setDTO.weightKg, reps: setDTO.reps ?? 0, seconds: setDTO.seconds ?? 0,
-                                 targetRepsLow: setDTO.targetRepsLow ?? 0, targetRepsHigh: setDTO.targetRepsHigh ?? 0,
-                                 tracking: setDTO.tracking.flatMap(TrackingMode.init(rawValue:)))
-                // Kept where the file has one, so a citation of this set still
-                // resolves after a restore. A file from before sets were
-                // numbered keeps the fresh one the initializer just made.
-                if let id = setDTO.id { set.id = id }
-                set.isCompleted = setDTO.isCompleted
-                set.completedAt = setDTO.completedAt
-                set.startedAt = setDTO.startedAt
-                // Only a whole window, running forwards and over by the time
-                // the set was logged. Anything less is not a reading of this
-                // set, and stored it would be exported again as though it were.
-                if let start = setDTO.detectedStartedAt, let end = setDTO.detectedEndedAt,
-                   let logged = setDTO.completedAt, start < end, end <= logged {
-                    set.recordDetectedWindow(DetectedSetWindow(start: start, end: end))
-                }
-                set.rpe = setDTO.rpe
-                set.averageHeartRate = setDTO.averageHeartRate
-                set.maxHeartRate = setDTO.maxHeartRate
-                // A window the app doesn't recognise is dropped rather than
-                // stored, the way an unknown note tag is: a provenance nothing
-                // can read would still be written back out on the next export
-                // as though it had been understood. The numbers survive it and
-                // read as a heart rate of unstated provenance, which is the
-                // truth about them once their label is unreadable.
-                set.heartRateWindowRaw = setDTO.heartRateWindow
-                    .flatMap(HeartRateWindowSource.init(rawValue:))?.rawValue
-                // An outcome the app can't read is dropped whole, rung and all.
-                // Unlike a heart rate, whose numbers survive losing their
-                // label, there is nothing left here once the word goes: a rung
-                // on its own doesn't say whether anybody took it.
-                if let nudge = setDTO.loadNudge, let outcome = LoadNudgeOutcome(rawValue: nudge.outcome) {
-                    set.recordLoadNudge(outcome, toKg: nudge.toKg)
-                }
-                // The key being there is the whole of what's restored — which
-                // kind of continuation it was gets read back off the weights,
-                // so an unfamiliar word costs nothing here, unlike an unknown
-                // heart-rate window or a load outcome. What it can't survive is
-                // having nothing above it to continue: the first set of an
-                // exercise continues the end of the exercise before it, or
-                // nothing at all, and a file claiming otherwise would put a
-                // dangling link into the record that no reader could resolve.
-                if setDTO.continues != nil && setDTO.setIndex > 0 {
-                    set.continuesPreviousSet = true
-                }
-                set.session = session
-                context.insert(set)
-            }
+        for noteDTO in dto.exerciseNotes ?? [] {
+            let tags = NoteTag.resolve(noteDTO.tags)
+            let text = noteDTO.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty || !tags.isEmpty else { continue }
+            let note = ExerciseNote(catalogID: noteDTO.catalogID, exerciseName: noteDTO.exerciseName)
+            note.text = text
+            note.tags = tags
+            note.session = session
+            context.insert(note)
         }
 
+        // A warm-up from a file written before warm-ups were removed is
+        // left out, the rule the store migration (`dropWarmupSets`)
+        // applied to the phone's own rows. Nothing marks a warm-up any
+        // more, so stored it would become an ordinary working set: a
+        // 40 kg ramp-up counted as training, inflating volume and pairing
+        // the next session's first set against it. That is false detail.
+        for setDTO in dto.sets where setDTO.isWarmup != true {
+            let set = SetLog(catalogID: setDTO.catalogID, exerciseName: setDTO.exerciseName,
+                             exerciseOrder: setDTO.exerciseOrder, setIndex: setDTO.setIndex,
+                             weightKg: setDTO.weightKg, reps: setDTO.reps ?? 0, seconds: setDTO.seconds ?? 0,
+                             targetRepsLow: setDTO.targetRepsLow ?? 0, targetRepsHigh: setDTO.targetRepsHigh ?? 0,
+                             tracking: setDTO.tracking.flatMap(TrackingMode.init(rawValue:)))
+            // Kept where the file has one, so a citation of this set still
+            // resolves after a restore. A file from before sets were
+            // numbered keeps the fresh one the initializer just made.
+            if let id = setDTO.id { set.id = id }
+            set.isCompleted = setDTO.isCompleted
+            set.completedAt = setDTO.completedAt
+            set.startedAt = setDTO.startedAt
+            // Only a whole window, running forwards and over by the time
+            // the set was logged. Anything less is not a reading of this
+            // set, and stored it would be exported again as though it were.
+            if let start = setDTO.detectedStartedAt, let end = setDTO.detectedEndedAt,
+               let logged = setDTO.completedAt, start < end, end <= logged {
+                set.recordDetectedWindow(DetectedSetWindow(start: start, end: end))
+            }
+            set.rpe = setDTO.rpe
+            set.averageHeartRate = setDTO.averageHeartRate
+            set.maxHeartRate = setDTO.maxHeartRate
+            // A window the app doesn't recognise is dropped rather than
+            // stored, the way an unknown note tag is: a provenance nothing
+            // can read would still be written back out on the next export
+            // as though it had been understood. The numbers survive it and
+            // read as a heart rate of unstated provenance, which is the
+            // truth about them once their label is unreadable.
+            set.heartRateWindowRaw = setDTO.heartRateWindow
+                .flatMap(HeartRateWindowSource.init(rawValue:))?.rawValue
+            // An outcome the app can't read is dropped whole, rung and all.
+            // Unlike a heart rate, whose numbers survive losing their
+            // label, there is nothing left here once the word goes: a rung
+            // on its own doesn't say whether anybody took it.
+            if let nudge = setDTO.loadNudge, let outcome = LoadNudgeOutcome(rawValue: nudge.outcome) {
+                set.recordLoadNudge(outcome, toKg: nudge.toKg)
+            }
+            // The key being there is the whole of what's restored — which
+            // kind of continuation it was gets read back off the weights,
+            // so an unfamiliar word costs nothing here, unlike an unknown
+            // heart-rate window or a load outcome. What it can't survive is
+            // having nothing above it to continue: the first set of an
+            // exercise continues the end of the exercise before it, or
+            // nothing at all, and a file claiming otherwise would put a
+            // dangling link into the record that no reader could resolve.
+            if setDTO.continues != nil && setDTO.setIndex > 0 {
+                set.continuesPreviousSet = true
+            }
+            set.session = session
+            context.insert(set)
+        }
+    }
+
+    /// Body weights, load corrections and hidden exercises.
+    private static func insertRemainder(_ archive: Archive, context: ModelContext) {
         for dto in archive.bodyMetrics ?? [] {
             let metric = BodyMetric(date: dto.date, weightKg: dto.weightKg)
             metric.id = dto.id
@@ -1355,6 +1549,46 @@ enum BackupService {
         return healthLinks
     }
 
+    /// `deleteStoredRecords` in slices, in the same order and over the same
+    /// rows. Only the deletes of sessions and the sweeps, which is where the
+    /// time is, give the main actor back; the deletes are still unsaved.
+    @MainActor
+    private static func deleteStoredRecords(context: ModelContext, pacer: inout Pacer,
+                                            total: Double) async throws -> [HealthLink] {
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        let healthLinks = sessions.compactMap { session in
+            session.healthWorkoutID.map { HealthLink(session: session.id, workout: $0) }
+        }
+        for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
+        for (n, session) in sessions.enumerated() {
+            context.delete(session)
+            await pacer.pauseIfDue(fraction: Double(n + 1) / total)
+        }
+        let deleted = Double(sessions.count) / total
+        for metric in try context.fetch(FetchDescriptor<BodyMetric>()) {
+            context.delete(metric)
+            await pacer.pauseIfDue(fraction: deleted)
+        }
+        for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
+
+        // Sweep anything the cascade missed (orphans from an interrupted write).
+        for item in try context.fetch(FetchDescriptor<PlanItem>()) {
+            context.delete(item)
+            await pacer.pauseIfDue(fraction: deleted)
+        }
+        for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
+        for set in try context.fetch(FetchDescriptor<SetLog>()) {
+            context.delete(set)
+            await pacer.pauseIfDue(fraction: deleted)
+        }
+        for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
+        for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
+        for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
+
+        return healthLinks
+    }
+
+    @MainActor
     private static func deleteHealthWorkouts(
         _ ids: Set<UUID>, using delete: (UUID) async -> Bool
     ) async -> HealthCleanupResult {

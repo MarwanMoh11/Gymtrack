@@ -35,13 +35,21 @@ enum WidgetPublisher {
         write(snapshot(plans: plans, sessions: sessions, running: running))
     }
 
+    /// The plan the widgets describe: the active one, else the oldest. The rule
+    /// lives in `Plan.displayed(among:)`, shared with Today, the root view and
+    /// the headless watch path; this is the name the widget code and its tests
+    /// have always asked for it by.
+    static func displayedPlan(among plans: [Plan]) -> Plan? {
+        Plan.displayed(among: plans)
+    }
+
     /// What the widgets are told, built without touching the shared container
     /// or WidgetKit so a test can ask it questions. `now` and `calendar` are
     /// parameters for the same reason: "today" has to be a day the test picked.
     static func snapshot(plans: [Plan], sessions: [WorkoutSession], running: ActiveWorkout?,
                          calendar: Calendar = .current, now: Date = .now) -> GymTrackSnapshot {
         let finished = sessions.filter { !$0.isActive }
-        let plan = plans.first(where: \.isActive) ?? plans.first
+        let plan = displayedPlan(among: plans)
         let today = plan?.nextDay(on: now, after: finished, calendar: calendar)
         let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? .distantPast
         let thisWeek = finished.filter { $0.startedAt >= weekStart && TrainingStats.isTrained($0) }

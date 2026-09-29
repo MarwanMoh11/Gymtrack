@@ -26,7 +26,7 @@ struct LateWristLogTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
-        DroppedSetMemory.shared = DroppedSetMemory(defaults: defaults)
+        DroppedSetMemory.shared.replaceStore(with: defaults)
 
         let end = Date.now.addingTimeInterval(-10)
         let center = WatchCommandCenter.shared
@@ -206,7 +206,7 @@ struct LateWristLogTests {
         do {
             let store = try makeStore()
             let rows = try closedSession(in: store)
-            DroppedSetMemory.shared = DroppedSetMemory(defaults: defaults)
+            DroppedSetMemory.shared.replaceStore(with: defaults)
             center.configure(container: store)
             precondition(DroppedSetMemory.shared.row(for: rows.spare, now: .now.addingTimeInterval(6 * 86400)) != nil)
             precondition(DroppedSetMemory.shared.row(for: rows.spare, now: .now.addingTimeInterval(8 * 86400)) == nil,

@@ -156,7 +156,7 @@ struct LoadScaleSheet: View {
             SectionHeader("What you'll be offered")
             HStack(spacing: 6) {
                 Text("…")
-                    .font(Theme.number(14))
+                    .gtFont(size: 14, weight: .bold, monospacedDigits: true, relativeTo: .subheadline)
                     .foregroundStyle(Theme.textTertiary)
                 ForEach(Array(rungs.enumerated()), id: \.offset) { _, rung in
                     let isCentre = abs(rung - here) < 0.001
@@ -167,7 +167,7 @@ struct LoadScaleSheet: View {
                         .minimumScaleFactor(0.6)
                 }
                 Text("…")
-                    .font(Theme.number(14))
+                    .gtFont(size: 14, weight: .bold, monospacedDigits: true, relativeTo: .subheadline)
                     .foregroundStyle(Theme.textTertiary)
             }
             .frame(maxWidth: .infinity)
@@ -238,9 +238,9 @@ struct LoadScaleCaption: View {
         Button(action: action) {
             HStack(spacing: 3) {
                 Text(scale.shortLabel)
-                    .font(Theme.rounded(10, weight: .semibold))
+                    .gtFont(size: 10, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
+                    .gtIcon(size: 7, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
             }
             .foregroundStyle(isCustomised ? Theme.accent : Theme.textTertiary)
             .padding(.horizontal, 6)

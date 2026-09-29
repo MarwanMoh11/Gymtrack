@@ -69,15 +69,29 @@ enum HealthCleanupQueue {
     ///   - prepare: Points the session at its successor before the old
     ///     workout goes. False keeps the entry and skips the delete, since a
     ///     link that did not reach disk would be left pointing at nothing.
+    ///   - linkFailed: Told when `prepare` said no, and true when the entry
+    ///     should now leave the list. An entry whose link never succeeds would
+    ///     otherwise be tried at every foreground for as long as the app stays
+    ///     installed, which is the endless retry the delete side already stops.
+    ///     The caller counts the failure, so the entry leaves the list on the
+    ///     same cap and shows in the same Settings line as a delete Health
+    ///     keeps refusing. The default never gives up, which keeps every caller
+    ///     written before it as it was.
     ///   - delete: True when the workout is gone from Health, whether this
     ///     call removed it or it was not there to remove.
     @MainActor
     static func drain(load: () -> [PendingWorkoutCleanup],
                       save: ([PendingWorkoutCleanup]) -> Void,
                       prepare: (PendingWorkoutCleanup) -> Bool,
+                      linkFailed: (PendingWorkoutCleanup) -> Bool = { _ in false },
                       delete: (UUID) async -> Bool) async {
         for entry in load() {
-            guard prepare(entry) else { continue }
+            guard prepare(entry) else {
+                if linkFailed(entry) {
+                    save(settle(load(), workoutID: entry.workoutID, gone: true))
+                }
+                continue
+            }
             let gone = await delete(entry.workoutID)
             save(settle(load(), workoutID: entry.workoutID, gone: gone))
         }

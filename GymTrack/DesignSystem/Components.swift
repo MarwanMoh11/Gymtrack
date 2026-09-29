@@ -1,5 +1,68 @@
 import SwiftUI
 
+// MARK: - Fonts that grow with Dynamic Type
+
+/// A system font at a fixed design size that grows with Dynamic Type along the
+/// curve of `style`. `Theme.rounded` can only follow a text style when the size
+/// is that style's own default, so 14 pt, the 9-10 pt captions and the icons
+/// beside text stayed fixed and were the first thing to become unreadable at a
+/// larger setting. `@ScaledMetric` reads the environment, so the
+/// `.dynamicTypeSize` caps on the logger and the dock still hold. At the
+/// default setting it returns `size` unchanged, so nothing moves.
+///
+/// `maxScale` bounds the growth as a multiple of `size`. Captions and the
+/// symbols beside them sit in pills and badges whose padding is fixed; without
+/// a bound a 10 pt label would swell past its capsule at the largest sizes.
+private struct ScaledSystemFont: ViewModifier {
+    @ScaledMetric private var scaledSize: CGFloat
+    private let size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+    private let monospacedDigits: Bool
+    private let maxScale: CGFloat?
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design,
+         monospacedDigits: Bool, relativeTo style: Font.TextStyle, maxScale: CGFloat?) {
+        _scaledSize = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.size = size
+        self.weight = weight
+        self.design = design
+        self.monospacedDigits = monospacedDigits
+        self.maxScale = maxScale
+    }
+
+    private var font: Font {
+        let points = maxScale.map { min(scaledSize, size * $0) } ?? scaledSize
+        let base = Font.system(size: points, weight: weight, design: design)
+        return monospacedDigits ? base.monospacedDigit() : base
+    }
+
+    func body(content: Content) -> some View {
+        content.font(font)
+    }
+}
+
+extension View {
+    /// `Theme.rounded(size, weight:)` (or `Theme.number` with `monospacedDigits`)
+    /// for a size that has no text style of its own, scaled along `style`.
+    func gtFont(size: CGFloat, weight: Font.Weight, monospacedDigits: Bool = false,
+                relativeTo style: Font.TextStyle, maxScale: CGFloat? = nil) -> some View {
+        modifier(ScaledSystemFont(size: size, weight: weight, design: .rounded,
+                                  monospacedDigits: monospacedDigits,
+                                  relativeTo: style, maxScale: maxScale))
+    }
+
+    /// The same for an SF Symbol that sits beside text, scaled along the style
+    /// of that text. Symbols ignore the font design, so this keeps the default
+    /// one and matches the `.font(.system(size:))` it replaces.
+    func gtIcon(size: CGFloat, weight: Font.Weight = .regular, relativeTo style: Font.TextStyle,
+                maxScale: CGFloat? = nil) -> some View {
+        modifier(ScaledSystemFont(size: size, weight: weight, design: .default,
+                                  monospacedDigits: false,
+                                  relativeTo: style, maxScale: maxScale))
+    }
+}
+
 // MARK: - Section header
 
 struct SectionHeader: View {
@@ -168,7 +231,7 @@ struct EmptyStateView: View {
                 .font(Theme.rounded(19, weight: .bold))
                 .foregroundStyle(Theme.ink)
             Text(message)
-                .font(Theme.rounded(14, weight: .medium))
+                .gtFont(size: 14, weight: .medium, relativeTo: .subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -189,7 +252,7 @@ struct EmptyStateView: View {
 struct DisclosureChevron: View {
     var body: some View {
         Image(systemName: "chevron.right")
-            .font(.system(size: 13, weight: .semibold))
+            .gtIcon(size: 13, weight: .semibold, relativeTo: .footnote)
             .foregroundStyle(Theme.textTertiary)
             .accessibilityHidden(true)
     }
@@ -330,7 +393,7 @@ struct StepperField: View {
             LoadScaleChip(scale: scale, isCustom: unitIsCustom, action: unitAction)
         } else {
             Text(unit)
-                .font(Theme.rounded(10, weight: .semibold))
+                .gtFont(size: 10, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                 .foregroundStyle(Theme.textTertiary)
         }
     }
@@ -499,9 +562,9 @@ struct LoadScaleChip: View {
         Button(action: action) {
             HStack(spacing: 3) {
                 Text(scale.shortLabel)
-                    .font(Theme.rounded(10, weight: .semibold))
+                    .gtFont(size: 10, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
+                    .gtIcon(size: 7, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
             }
             .foregroundStyle(isCustom ? Theme.accent : Theme.textTertiary)
             .padding(.horizontal, 7)

@@ -74,7 +74,7 @@ struct SlotOffersTests {
         top0.reps = 6
         workout.complete(top0, restSeconds: nil)
         workout.rate(top0, feel: .easy)
-        guard let offer = workout.pendingNudge else { preconditionFailure("Missing offer") }
+        guard let offer = workout.pendingNudge(for: "slot-test") else { preconditionFailure("Missing offer") }
         precondition(offer.setCount == 1, "Offer counted \(offer.setCount) sets; the top slot has one left")
         workout.apply(offer)
         precondition(top1.weightKg == offer.toKg)
@@ -83,8 +83,8 @@ struct SlotOffersTests {
 
         // Lifting a back-off set does not answer the top slot's offer.
         workout.complete(back0, restSeconds: nil)
-        precondition(workout.takenNudge != nil, "A back-off set settled the top slot's take")
-        workout.undoTakenNudge()
+        precondition(workout.takenNudge(for: "slot-test") != nil, "A back-off set settled the top slot's take")
+        workout.undoTakenNudge(workout.takenNudge(for: "slot-test")!)
         precondition(top1.weightKg == topLoad && back1.weightKg == back0.weightKg)
     }
 

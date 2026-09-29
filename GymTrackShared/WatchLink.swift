@@ -19,6 +19,20 @@ enum WatchLink {
     static let commandSessionKey = "gymtrack.command.session"
 }
 
+/// A WatchConnectivity payload on its way from the session's delegate queue to
+/// the main actor.
+///
+/// The SDK hands over `[String: Any]` dictionaries and a reply block, and marks
+/// none of them `Sendable`, so each hop drew a data-race warning in Swift 6
+/// mode. These are property lists: values nobody mutates once delivered, and
+/// the callback keeps no reference to them after the hop. The box says that
+/// once, here, instead of at every callback. Nothing that is not a plain
+/// payload belongs in it.
+struct WatchDelivered<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}
+
 // MARK: - How a set is measured
 
 /// The subset of the app's `TrackingMode` the watch needs. Kept separate so the

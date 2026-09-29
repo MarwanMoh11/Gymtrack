@@ -331,7 +331,7 @@ struct ActiveWorkoutView: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(group.name)
-                                .font(Theme.rounded(14, weight: .bold))
+                                .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                                 .foregroundStyle(Theme.ink)
                                 .lineLimit(1)
                             QueueRowDetail(workout: workout, group: group)
@@ -600,7 +600,7 @@ private struct ExerciseLogCard: View {
             if let suggestion, !group.isComplete, !lastTime.isEmpty {
                 HStack(alignment: .top, spacing: 7) {
                     Image(systemName: "arrow.up.forward.circle.fill")
-                        .font(.system(size: 12))
+                        .gtIcon(size: 12, relativeTo: .caption)
                         .foregroundStyle(Theme.accent.wash)
                         .accessibilityHidden(true)
                     Text(suggestion)
@@ -788,12 +788,12 @@ private struct ExerciseLogCard: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .bold))
+                    .gtIcon(size: 11, weight: .bold, relativeTo: .caption)
                 Text(title)
                     .font(Theme.rounded(12, weight: .semibold))
                 Spacer()
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
+                    .gtIcon(size: 10, weight: .bold, relativeTo: .caption)
                     .rotationEffect(.degrees(expanded ? 180 : 0))
             }
             .foregroundStyle(Theme.textTertiary)
@@ -833,7 +833,7 @@ private struct ExerciseLogCard: View {
             if group.catalog != nil {
                 Button { showingDetail = true } label: {
                     Image(systemName: "info.circle")
-                        .font(.system(size: 15))
+                        .gtIcon(size: 15, relativeTo: .subheadline)
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
@@ -851,7 +851,7 @@ private struct ExerciseLogCard: View {
         let written = !(note?.isEmpty ?? true)
         return Button { isWriting ? closeNote() : openNote() } label: {
             Image(systemName: written ? "text.bubble.fill" : "text.bubble")
-                .font(.system(size: 15))
+                .gtIcon(size: 15, relativeTo: .subheadline)
                 .foregroundStyle(written ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.textTertiary))
         }
         .buttonStyle(.plain)
@@ -1075,8 +1075,8 @@ private struct SetRow: View {
                     .foregroundStyle(isPR ? AnyShapeStyle(Color.black) : AnyShapeStyle(Theme.ink))
                 if isPR {
                     HStack(spacing: 3) {
-                        Image(systemName: "trophy.fill").font(.system(size: 9))
-                        Text("PR").font(Theme.rounded(10, weight: .black))
+                        Image(systemName: "trophy.fill").gtIcon(size: 9, relativeTo: .caption2, maxScale: 1.5)
+                        Text("PR").gtFont(size: 10, weight: .black, relativeTo: .caption2, maxScale: 1.5)
                     }
                     .foregroundStyle(.black)
                     .padding(.horizontal, 6).padding(.vertical, 2)
@@ -1155,7 +1155,7 @@ private struct SetRow: View {
     private var rateAffordance: some View {
         Button { editingEffort = true } label: {
             Text("Rate")
-                .font(Theme.rounded(10, weight: .bold))
+                .gtFont(size: 10, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
                 .foregroundStyle(isPR ? .black.opacity(0.55) : Theme.textTertiary)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .overlay {
@@ -1172,7 +1172,7 @@ private struct SetRow: View {
     private func effortBadge(_ feel: SetFeel) -> some View {
         Button { editingEffort = true } label: {
             Text(feel.label)
-                .font(Theme.rounded(10, weight: .bold))
+                .gtFont(size: 10, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
                 .foregroundStyle(isPR ? .black.opacity(0.7) : feel.tint)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background {
@@ -1196,9 +1196,9 @@ private struct SetRow: View {
     private func continuationBadge(_ kind: SetContinuation) -> some View {
         HStack(spacing: 2) {
             Image(systemName: SetContinuation.symbol)
-                .font(.system(size: 8, weight: .black))
+                .gtIcon(size: 8, weight: .black, relativeTo: .caption2, maxScale: 1.5)
             Text(kind.label)
-                .font(Theme.rounded(10, weight: .bold))
+                .gtFont(size: 10, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
         }
         .foregroundStyle(isPR ? AnyShapeStyle(Color.black.opacity(0.65)) : AnyShapeStyle(Theme.accent.wash))
         .padding(.horizontal, 5).padding(.vertical, 2)
@@ -1216,9 +1216,9 @@ private struct SetRow: View {
     private func tensionBadge(_ seconds: TimeInterval) -> some View {
         HStack(spacing: 2) {
             Image(systemName: "stopwatch")
-                .font(.system(size: 8, weight: .black))
+                .gtIcon(size: 8, weight: .black, relativeTo: .caption2, maxScale: 1.5)
             Text(seconds.clockString)
-                .font(Theme.number(10, weight: .bold))
+                .gtFont(size: 10, weight: .bold, monospacedDigits: true, relativeTo: .caption2, maxScale: 1.5)
         }
         .foregroundStyle(isPR ? AnyShapeStyle(Color.black.opacity(0.65)) : AnyShapeStyle(Theme.textSecondary))
         .padding(.horizontal, 5).padding(.vertical, 2)
@@ -1254,9 +1254,9 @@ private struct SetRow: View {
         let tint: Color = gain.up ? Theme.positive : Theme.textTertiary
         return HStack(spacing: 2) {
             Image(systemName: gain.up ? "arrow.up" : "arrow.down")
-                .font(.system(size: 7, weight: .black))
+                .gtIcon(size: 7, weight: .black, relativeTo: .caption2, maxScale: 1.5)
             Text(gain.text)
-                .font(Theme.number(10, weight: .bold))
+                .gtFont(size: 10, weight: .bold, monospacedDigits: true, relativeTo: .caption2, maxScale: 1.5)
         }
         .foregroundStyle(isPR ? AnyShapeStyle(Color.black.opacity(0.65)) : AnyShapeStyle(tint))
         .padding(.horizontal, 5).padding(.vertical, 2)
@@ -1274,7 +1274,7 @@ private struct SetRow: View {
         HStack(spacing: 10) {
             indexBadge(filled: false)
             Text(targetLabel)
-                .font(Theme.rounded(14, weight: .semibold))
+                .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
             if let previous {
@@ -1830,7 +1830,7 @@ struct RestTimerBar: View {
             Button(action: onClear) {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 10, weight: .black))
+                        .gtIcon(size: 10, weight: .black, relativeTo: .caption)
                     Text("Undo")
                         .font(Theme.rounded(12, weight: .bold))
                 }
@@ -1873,7 +1873,7 @@ struct EffortPicker: View {
                         Text(feel.label)
                             .font(Theme.rounded(13, weight: .bold))
                         Text(feel.detail)
-                            .font(Theme.rounded(9, weight: .semibold))
+                            .gtFont(size: 9, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                             .opacity(0.7)
                     }
                     .lineLimit(1)
@@ -1946,7 +1946,7 @@ private struct LoadNudgeRow: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: nudge.isBackOff ? "arrow.down.right.circle.fill" : "arrow.up.forward.circle.fill")
-                .font(.system(size: 15))
+                .gtIcon(size: 15, relativeTo: .subheadline)
                 .foregroundStyle(tint)
                 .accessibilityHidden(true)
 
@@ -2021,7 +2021,7 @@ private struct NudgeTakenRow: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 15))
+                .gtIcon(size: 15, relativeTo: .subheadline)
                 .foregroundStyle(Theme.positive)
                 .accessibilityHidden(true)
 
@@ -2039,7 +2039,7 @@ private struct NudgeTakenRow: View {
             Button(action: onUndo) {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 10, weight: .black))
+                        .gtIcon(size: 10, weight: .black, relativeTo: .caption)
                     Text("Undo")
                         .font(Theme.rounded(12, weight: .bold))
                 }
@@ -2089,7 +2089,7 @@ struct LiveHeartRatePill: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: "heart.fill")
-                .font(.system(size: 9, weight: .bold))
+                .gtIcon(size: 9, weight: .bold, relativeTo: .caption2)
                 .foregroundStyle(Theme.negative)
                 .scaleEffect(isBeating ? 1.18 : 1)
                 .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: isBeating)

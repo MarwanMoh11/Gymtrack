@@ -577,13 +577,6 @@ enum TrainingStats {
         }
     }
 
-    /// The summary's record rows for a session, given the history to compare
-    /// against: one walk through it. Callers hold the answer rather than asking
-    /// again, since the history cannot change under an open summary.
-    static func summaryRecords(for session: WorkoutSession, history: [WorkoutSession]) -> [SetLog] {
-        summaryRecords(from: recordSets(in: session, history: history))
-    }
-
     /// A set as it should be printed. Seconds for a hold, bare reps when no
     /// load was logged (it used to read "0 kg × 15", a weight nobody entered),
     /// and an added load marked as added.

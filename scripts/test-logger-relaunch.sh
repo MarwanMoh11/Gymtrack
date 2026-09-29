@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-mkdir -p build/logger-corrections
-cp GymTrack/Resources/exercises.json build/logger-corrections/exercises.json
-xcrun swiftc -parse-as-library -module-cache-path build/logger-corrections/module-cache \
+mkdir -p build/logger-relaunch
+cp GymTrack/Resources/exercises.json build/logger-relaunch/exercises.json
+xcrun swiftc -parse-as-library -module-cache-path build/logger-relaunch/module-cache \
     GymTrackShared/Theme.swift GymTrackShared/Units.swift GymTrackShared/SharedStore.swift \
     GymTrackShared/LoadScale.swift GymTrackShared/SetFeel.swift \
     GymTrackShared/WatchSetRating.swift GymTrackShared/WatchLink.swift \
@@ -15,6 +15,6 @@ xcrun swiftc -parse-as-library -module-cache-path build/logger-corrections/modul
     GymTrack/Services/SetHeartRate.swift GymTrack/Services/LoadScaleBook.swift \
     GymTrack/Services/TrainingStats.swift GymTrack/Services/ActiveWorkout.swift GymTrack/Services/SessionPosition.swift \
     GymTrack/Services/WatchCommandCenter.swift \
-    GymTrack/Services/WatchSessionRecovery.swift Tests/ActiveWorkoutStructureStubs.swift Tests/LoggerCorrectionTests.swift \
-    -o build/logger-corrections/check
-build/logger-corrections/check
+    GymTrack/Services/WatchSessionRecovery.swift Tests/ActiveWorkoutStructureStubs.swift Tests/LoggerRelaunchTests.swift \
+    -o build/logger-relaunch/check
+build/logger-relaunch/check

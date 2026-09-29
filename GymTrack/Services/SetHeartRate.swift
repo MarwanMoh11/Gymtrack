@@ -834,6 +834,13 @@ struct CleanupAttemptLedger: Codable, Equatable {
     struct GivenUp: Codable, Equatable {
         var workoutID: UUID
         var sessionID: UUID
+        /// The workout the session should point at once this one is gone, kept
+        /// so a Retry puts it back on the entry. An entry given up because its
+        /// session could not be relinked has not been relinked yet, and a Retry
+        /// that dropped this would delete the old workout and leave the session
+        /// pointing at nothing. Absent for every other entry, and not stored
+        /// then; lists saved before it existed still decode.
+        var preferredWorkoutID: UUID?
         var at: Date
     }
 
@@ -842,12 +849,22 @@ struct CleanupAttemptLedger: Codable, Equatable {
         /// Health no longer holds the workout, whether this call removed it or
         /// it was not there.
         case gone
-        /// Health, or the permission behind it, said no.
+        /// Health, or the workout's own link, said no: Health refused the
+        /// delete or failed it, or the session could not be pointed at its
+        /// successor first.
         case refused
         /// Health could not be asked, because a locked phone keeps its
-        /// database closed. Not the workout's fault: it costs no attempt and
-        /// is retried when the phone unlocks.
+        /// database closed, or because something the attempt needs is not
+        /// there yet, such as the store the relink writes to. Not the
+        /// workout's fault: it costs no attempt and is retried when the
+        /// phone unlocks or at the next foreground.
         case deferred
+        /// The user has withdrawn Health write access. A delete cannot be
+        /// tried, let alone fail, so it costs no attempt: someone who turns
+        /// sharing off for a while would otherwise lose the cleanup for good.
+        /// The entry waits, and the foreground pass takes it up again once
+        /// access is back; there is no signal short of that to wait for.
+        case awaitingAccess
     }
 
     private(set) var struggling: [Struggling] = []
@@ -856,13 +873,14 @@ struct CleanupAttemptLedger: Codable, Equatable {
     /// Notes one delete attempt, and returns whether the entry should now
     /// leave the cleanup list: because the workout is gone, or because the
     /// list has stopped trying and it is kept in `givenUp` instead.
-    mutating func record(_ outcome: Outcome, workoutID: UUID, sessionID: UUID, at now: Date) -> Bool {
+    mutating func record(_ outcome: Outcome, workoutID: UUID, sessionID: UUID,
+                         preferredWorkoutID: UUID? = nil, at now: Date) -> Bool {
         switch outcome {
         case .gone:
             struggling.removeAll { $0.workoutID == workoutID }
             givenUp.removeAll { $0.workoutID == workoutID }
             return true
-        case .deferred:
+        case .deferred, .awaitingAccess:
             return false
         case .refused:
             var entry = struggling.first { $0.workoutID == workoutID }
@@ -877,7 +895,8 @@ struct CleanupAttemptLedger: Codable, Equatable {
                 return false
             }
             givenUp.removeAll { $0.workoutID == workoutID }
-            givenUp.append(GivenUp(workoutID: workoutID, sessionID: sessionID, at: now))
+            givenUp.append(GivenUp(workoutID: workoutID, sessionID: sessionID,
+                                   preferredWorkoutID: preferredWorkoutID, at: now))
             if givenUp.count > Self.remembered { givenUp.removeFirst(givenUp.count - Self.remembered) }
             return true
         }

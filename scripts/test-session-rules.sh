@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-mkdir -p build/watch-command-reliability
-cp GymTrack/Resources/exercises.json build/watch-command-reliability/exercises.json
-xcrun swiftc -parse-as-library -module-cache-path build/watch-command-reliability/module-cache \
+mkdir -p build/session-rules
+cp GymTrack/Resources/exercises.json build/session-rules/exercises.json
+xcrun swiftc -parse-as-library -module-cache-path build/session-rules/module-cache \
     GymTrackShared/Theme.swift GymTrackShared/Units.swift GymTrackShared/SharedStore.swift \
     GymTrackShared/LoadScale.swift GymTrackShared/SetFeel.swift \
     GymTrackShared/WatchSetRating.swift GymTrackShared/WatchLink.swift \
@@ -13,6 +13,6 @@ xcrun swiftc -parse-as-library -module-cache-path build/watch-command-reliabilit
     GymTrack/Models/CatalogExercise.swift GymTrack/Models/Entities.swift \
     GymTrack/Models/SessionClosing.swift GymTrack/Services/SetHeartRate.swift \
     GymTrack/Services/LoadScaleBook.swift Tests/TrainingStatsSettingsStub.swift \
-    Tests/WatchCommandReliabilityTests.swift \
-    -o build/watch-command-reliability/check
-build/watch-command-reliability/check
+    Tests/SessionRulesTests.swift \
+    -o build/session-rules/check
+build/session-rules/check

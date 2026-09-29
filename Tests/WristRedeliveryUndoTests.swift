@@ -16,7 +16,7 @@ struct WristRedeliveryUndoTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
-        DroppedSetMemory.shared = DroppedSetMemory(defaults: defaults)
+        DroppedSetMemory.shared.replaceStore(with: defaults)
 
         let now = Date.now
         let center = WatchCommandCenter.shared

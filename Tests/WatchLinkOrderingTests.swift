@@ -34,7 +34,7 @@ struct WatchLinkOrderingTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
-        DroppedSetMemory.shared = DroppedSetMemory(defaults: defaults)
+        DroppedSetMemory.shared.replaceStore(with: defaults)
 
         try checkWireFormat()
         try checkDuplicateLogs()

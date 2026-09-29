@@ -147,7 +147,7 @@ struct MiscLeftoverTests {
         try context.save()
 
         let history = try context.fetch(FetchDescriptor<WorkoutSession>())
-        let whole = TrainingStats.summaryRecords(for: today, history: history).map(\.id)
+        let whole = TrainingStats.summaryRecords(from: TrainingStats.recordSets(in: today, history: history)).map(\.id)
         let scoped = try SummaryRecords.sets(for: today, in: context).map(\.id)
         expect(!whole.isEmpty, "the fixture must produce records, or the comparison proves nothing")
         expect(scoped == whole, "the scoped fetch must name the same record rows as the whole walk")

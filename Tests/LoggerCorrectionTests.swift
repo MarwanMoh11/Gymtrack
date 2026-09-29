@@ -139,12 +139,12 @@ struct LoggerCorrectionTests {
         row("offer-test", order: 0, index: 2, in: session, context: context, kg: 40, reps: 8)
         let workout = ActiveWorkout(session: session, context: context, history: [])
         workout.rate(source, feel: .easy)
-        guard workout.pendingNudge?.setID == source.id else {
+        guard workout.pendingNudge(for: source.catalogID)?.setID == source.id else {
             preconditionFailure("Setup: twelve easy reps at the top of 8-12 offers more weight")
         }
 
         workout.correct(source, weightKg: 40, reps: 9, seconds: 0)
-        precondition(workout.pendingNudge == nil,
+        precondition(workout.pendingNudge(for: source.catalogID) == nil,
                      "An offer read off the typed numbers goes when they are corrected")
         precondition(source.rpe == SetFeel.easy.rawValue, "The answer itself stays")
         precondition(source.loadNudgeOutcome == nil,

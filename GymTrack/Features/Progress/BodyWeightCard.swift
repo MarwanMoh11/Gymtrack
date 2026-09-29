@@ -77,7 +77,7 @@ struct BodyWeightCard: View {
                     .font(Theme.number(30))
                     .foregroundStyle(Theme.textPrimary)
                 Text(unit.short)
-                    .font(Theme.rounded(14, weight: .bold))
+                    .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 1) {

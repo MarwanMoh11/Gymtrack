@@ -176,7 +176,7 @@ final class WatchBridge: NSObject {
 /// the newer one first and dropped the older, or a wrist log landed after the
 /// Finish that closed its session. The main queue runs its blocks in the order
 /// they were submitted.
-private func onMain(_ body: @escaping @MainActor () -> Void) {
+private func onMain(_ body: @escaping @MainActor @Sendable () -> Void) {
     DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
 }
 
@@ -210,39 +210,46 @@ extension WatchBridge: WCSessionDelegate {
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        // Read on the session's queue, where the callback is, so the answer is
+        // the one the callback announced and not whatever it is after the hop.
+        let reachable = session.isReachable
         onMain {
             self.refreshStatus()
             // A watch that just came back may have missed everything.
-            if session.isReachable { self.push() }
+            if reachable { self.push() }
         }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        onMain { self.handle(message) }
+        let delivered = WatchDelivered(message)
+        onMain { self.handle(delivered.value) }
     }
 
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
+        let delivered = WatchDelivered(message)
+        let reply = WatchDelivered(replyHandler)
         onMain {
-            self.handle(message)
+            self.handle(delivered.value)
             // A watch can wake a suspended phone to start a workout. Return
             // the workout on that same conversation instead of relying on a
             // separate push to get the watch off its start screen.
             // With nothing established the reply is a bare acknowledgement,
             // which the watch decodes as no mirror at all rather than as none
             // running.
-            var reply = self.mirrorPayload()
-            let carriesMirror = !reply.isEmpty
-            reply[WatchLink.ackKey] = true
-            replyHandler(reply)
+            var payload = self.mirrorPayload()
+            let carriesMirror = !payload.isEmpty
+            payload[WatchLink.ackKey] = true
+            reply.value(payload)
             if carriesMirror { self.lastMirrorSentAt = .now }
         }
     }
 
     /// Queued delivery — what a set logged out of range arrives on.
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
-        onMain { self.handle(userInfo) }
+        let delivered = WatchDelivered(userInfo)
+        onMain { self.handle(delivered.value) }
     }
 }
 

@@ -373,7 +373,7 @@ final class WatchConnector: NSObject {
 /// the newer one first and dropped the older, or a wrist log landed after the
 /// Finish that closed its session. The main queue runs its blocks in the order
 /// they were submitted.
-private func onMain(_ body: @escaping @MainActor () -> Void) {
+private func onMain(_ body: @escaping @MainActor @Sendable () -> Void) {
     DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
 }
 
@@ -384,16 +384,19 @@ extension WatchConnector: WCSessionDelegate {
     nonisolated func session(_ session: WCSession,
                              activationDidCompleteWith state: WCSessionActivationState,
                              error: Error?) {
+        // Read on the session's queue, where the callback is, so the hop
+        // carries what the callback announced.
+        let reachable = session.isReachable
+        let context = WatchDelivered(session.receivedApplicationContext)
         onMain {
-            self.isReachable = session.isReachable
+            self.isReachable = reachable
             // Whatever arrived while the app was closed is waiting in the
             // application context. If the phone is reachable, wait for its
             // current reply before letting that cached context start Health.
-            if let cached = WatchMirror.fromWatchPayload(session.receivedApplicationContext,
-                                                        key: WatchLink.mirrorKey),
+            if let cached = WatchMirror.fromWatchPayload(context.value, key: WatchLink.mirrorKey),
                cached.sentAt >= self.mirror.sentAt {
-                self.waitingForFreshMirror = session.isReachable
-                self.receive(session.receivedApplicationContext, fromCache: true)
+                self.waitingForFreshMirror = reachable
+                self.receive(context.value, fromCache: true)
             }
             if state == .activated {
                 for entry in self.ratings.entries.values { self.send(.rateSet(entry.rating)) }
@@ -403,22 +406,26 @@ extension WatchConnector: WCSessionDelegate {
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        let reachable = session.isReachable
         onMain {
-            self.isReachable = session.isReachable
-            if !session.isReachable { self.waitingForFreshMirror = false }
-            if session.isReachable { self.requestMirror() }
+            self.isReachable = reachable
+            if !reachable { self.waitingForFreshMirror = false }
+            if reachable { self.requestMirror() }
         }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
-        onMain { self.receive(context) }
+        let delivered = WatchDelivered(context)
+        onMain { self.receive(delivered.value) }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        onMain { self.receive(message) }
+        let delivered = WatchDelivered(message)
+        onMain { self.receive(delivered.value) }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
-        onMain { self.receive(userInfo) }
+        let delivered = WatchDelivered(userInfo)
+        onMain { self.receive(delivered.value) }
     }
 }

@@ -161,7 +161,7 @@ struct RecordRankingTests {
         let todayB = set("plank", "Plank", seconds: 75, index: 1, tracking: .duration)
         let history = finished(on: day(1), [priorPlank])
         let today = finished(on: day(2), [todayA, todayB])
-        let summary = TrainingStats.summaryRecords(for: today, history: [today, history])
+        let summary = TrainingStats.summaryRecords(from: TrainingStats.recordSets(in: today, history: [today, history]))
         precondition(summary.map(\.id) == [todayB.id], "Today's plank record is the 75 s hold")
 
         // LOG-13: typing in the note does not change what the summary is keyed

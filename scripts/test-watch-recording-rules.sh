@@ -6,7 +6,7 @@ xcrun swiftc -parse-as-library -module-cache-path build/watch-recording-rules/mo
     GymTrackShared/Theme.swift GymTrackShared/Units.swift \
     GymTrackShared/LoadScale.swift GymTrackShared/SetFeel.swift \
     GymTrackShared/WatchSetRating.swift GymTrackShared/WatchLink.swift \
-    GymTrackShared/WatchSessionTombstone.swift \
+    GymTrackShared/WatchSessionTombstone.swift GymTrackShared/SharedStore.swift \
     GymTrackWatch/WatchRecordingRules.swift \
     Tests/WatchRecordingRulesTests.swift -o build/watch-recording-rules/check
 build/watch-recording-rules/check

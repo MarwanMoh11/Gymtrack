@@ -116,13 +116,13 @@ struct ActiveWorkoutStructureTests {
         }
         let nudged = ActiveWorkout(session: rated, context: context, history: [])
         nudged.rate(source, feel: .easy)
-        guard let firstOffer = nudged.pendingNudge else { preconditionFailure("Missing upward offer") }
+        guard let firstOffer = nudged.pendingNudge(for: source.catalogID) else { preconditionFailure("Missing upward offer") }
         nudged.apply(firstOffer)
         source.reps = 5
         nudged.rate(source, feel: .allOut)
-        guard let secondOffer = nudged.pendingNudge else { preconditionFailure("Missing downward offer") }
+        guard let secondOffer = nudged.pendingNudge(for: source.catalogID) else { preconditionFailure("Missing downward offer") }
         nudged.apply(secondOffer)
-        nudged.undoTakenNudge()
+        nudged.undoTakenNudge(nudged.takenNudge(for: source.catalogID)!)
         precondition(rated.sets.filter { !$0.isCompleted }.allSatisfy { $0.weightKg == 40 },
                      "Undo must restore the load from before either take")
         precondition(source.loadNudgeOutcome == nil)

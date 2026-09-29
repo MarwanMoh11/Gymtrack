@@ -31,6 +31,11 @@ final class WatchCommandCenter {
     /// actor, so sharing costs nothing and there is a single set of rows.
     private var context: ModelContext?
 
+    /// Where the logger keeps what it would lose to a relaunch. Read here for
+    /// the undo of a set the phone's logger carried, and cleared for a session
+    /// this path ends. Tests hand it a suite of their own.
+    var loggerMemory = LoggerMemoryStore.standard
+
     private init() {}
 
     /// Called once at launch, before the first watch message can arrive.
@@ -60,15 +65,25 @@ final class WatchCommandCenter {
         applyHeadless(command)
     }
 
-    /// Clears the starts already stored that no set could have filled, once.
-    /// See `SetLog.dropImplausibleStoredStarts`. A flag rather than a check on
-    /// every launch: the rule now holds on every path that writes a start, so
-    /// once the old ones are gone nothing makes new ones.
+    /// Clears the starts already stored that no set could have filled, and the
+    /// ones another set's log overtook, once each. See
+    /// `SetLog.dropImplausibleStoredStarts` and `SetLog.dropOvertakenStoredStarts`.
+    /// A flag apiece rather than a check on every launch: the rules now hold on
+    /// every path that writes a start, so once the old ones are gone nothing
+    /// makes new ones. Two flags, not one, because the first pass has already
+    /// run on every phone that has been updated before, and a second rule
+    /// sharing its flag would never run on them.
     func repairStoredStartsOnce(in context: ModelContext, defaults: UserDefaults = .standard) {
-        let key = "implausibleStartsRepaired"
-        guard !defaults.bool(forKey: key) else { return }
-        SetLog.dropImplausibleStoredStarts(in: context)
-        defaults.set(true, forKey: key)
+        let implausibleKey = "implausibleStartsRepaired"
+        if !defaults.bool(forKey: implausibleKey) {
+            SetLog.dropImplausibleStoredStarts(in: context)
+            defaults.set(true, forKey: implausibleKey)
+        }
+        let overtakenKey = "overtakenStartsRepaired"
+        if !defaults.bool(forKey: overtakenKey) {
+            SetLog.dropOvertakenStoredStarts(in: context)
+            defaults.set(true, forKey: overtakenKey)
+        }
     }
 
     /// A wrist log the running logger took, remembered as the headless path
@@ -428,7 +443,7 @@ final class WatchCommandCenter {
             pushMirror(context: context)
             return
         }
-        let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
+        let plans = allPlans(in: context)
         WatchBridge.shared.update(idle: WatchMirrorBuilder.idle(plans: plans, sessions: sessions))
     }
 
@@ -448,6 +463,10 @@ final class WatchCommandCenter {
         // The same close as the phone UI, after the wrist's last unconfirmed
         // actions have been applied. Only untouched rows are discarded.
         session.close(at: moment, in: context)
+        // The logger's memory of this session goes with it: no logger is left
+        // to clear it, and a key that outlived its session would be the one
+        // thing in the app still remembering sets nobody holds any more.
+        loggerMemory.forget(session.id)
         apply(metrics, to: session, final: true, context: context)
         save(context)
         WorkoutLiveActivity.shared.end(with: nil)
@@ -462,6 +481,7 @@ final class WatchCommandCenter {
         // Read before the delete: a deleted model is not something to read.
         let sessionID = session.id
         context.delete(session)
+        loggerMemory.forget(sessionID)
         save(context)
         WorkoutLiveActivity.shared.end(with: nil)
         WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: sessionID, reason: .discarded))
@@ -498,19 +518,38 @@ final class WatchCommandCenter {
     }
 
     /// What each set's carry overwrote, by the set that carried, so the wrist's
-    /// undo can put the rows back as the phone's own does. In memory only, as
-    /// there: a row that outlives a relaunch keeps the load that was carried,
-    /// and a carry done by the phone's logger is that logger's to take back.
+    /// undo can put the rows back as the phone's own does. In memory only: a
+    /// carry this path made and then lost to a relaunch is not remembered. A
+    /// carry the phone's logger made is in `loggerMemory` instead, and
+    /// `restorePrefill` reads both.
     private var carriedPrefills: [UUID: [UUID: ActiveWorkout.Prefill]] = [:]
 
     /// The other half of `carryLoadForward`. Without it a mis-tapped wrist log
     /// left the rows below opening at the weight of a set never lifted, which
     /// the phone's undo never did. A row the lifter has typed into since keeps
     /// what they typed.
+    ///
+    /// A set logged on the phone and undone from the wrist has no record here,
+    /// its carry having been made by the logger, which kept it in
+    /// `LoggerMemoryStore` for exactly the case of nobody being left to ask.
+    /// That record is used the same way, and spent: it is taken out of the
+    /// store, so it can't put a weight back a second time.
     private func restorePrefill(carriedBy set: SetLog) {
-        guard let memory = carriedPrefills.removeValue(forKey: set.id),
-              let session = set.session else { return }
+        guard let session = set.session else { return }
+        let memory = carriedPrefills.removeValue(forKey: set.id) ?? storedPrefill(carriedBy: set, in: session)
+        guard let memory else { return }
         ActiveWorkout.Prefill.restore(memory, onto: Array(session.sets))
+    }
+
+    private func storedPrefill(carriedBy set: SetLog, in session: WorkoutSession) -> [UUID: ActiveWorkout.Prefill]? {
+        guard var stored = loggerMemory.load(for: session.id),
+              let carried = stored.carries.first(where: { $0.setID == set.id }) else { return nil }
+        stored.carries.removeAll { $0.setID == set.id }
+        loggerMemory.save(stored, for: session.id)
+        return Dictionary(carried.rows.map { row in
+            (row.rowID, ActiveWorkout.Prefill(kg: row.kg, seconds: row.seconds,
+                                              carriedKg: row.carriedKg, carriedSeconds: row.carriedSeconds))
+        }, uniquingKeysWith: { first, _ in first })
     }
 
     /// The headless twin of `ActiveWorkout.recordToHealth`.
@@ -555,14 +594,14 @@ final class WatchCommandCenter {
     /// workout finished on the wrist with the phone in a bag goes on showing as
     /// running there until somebody next opens the app.
     private func publishWidgets(context: ModelContext, sessions: [WorkoutSession]? = nil) {
-        let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
+        let plans = allPlans(in: context)
         WidgetPublisher.publish(plans: plans, sessions: sessions ?? allSessions(in: context), running: nil)
     }
 
     private func pushMirror(context: ModelContext) {
         closeStaleSession(in: context)
         let sessions = allSessions(in: context)
-        let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
+        let plans = allPlans(in: context)
         // The session before the idle screen. Each update can go out on its
         // own, and the idle one sent first carried whatever session the bridge
         // held before — nothing at all in a fresh process, which a watch
@@ -637,6 +676,8 @@ final class WatchCommandCenter {
     @discardableResult
     func retire(_ session: WorkoutSession, in context: ModelContext) -> WatchSessionEnd? {
         guard let end = session.retireIfStale(in: context) else { return nil }
+        // Finished or deleted, either way the logger's memory of it is over.
+        loggerMemory.forget(end.sessionID)
         save(context)
         if end.reason == .finished { recordToHealth(session, context: context) }
         return end
@@ -687,9 +728,19 @@ final class WatchCommandCenter {
         activeSession(in: context)?.sets.first { $0.id == id }
     }
 
+    /// The plan Today is showing; see `Plan.displayed(among:)`. What a Start
+    /// from the wrist begins has to be that plan, whichever order the store
+    /// hands the plans back in.
     private func activePlan(in context: ModelContext) -> Plan? {
-        let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
-        return plans.first(where: \.isActive) ?? plans.first
+        Plan.displayed(among: allPlans(in: context))
+    }
+
+    /// Every plan, oldest first, the order Today's own query reads them in.
+    /// The idle mirror takes its plan as the first the rule finds in this list,
+    /// so an unsorted fetch here put a different routine on the wrist than the
+    /// one on the phone.
+    private func allPlans(in context: ModelContext) -> [Plan] {
+        (try? context.fetch(FetchDescriptor<Plan>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
     }
 
     private func planItems(for session: WorkoutSession, in context: ModelContext) -> [String: PlanItem] {
@@ -846,5 +897,48 @@ struct WatchMirrorState {
             healthEnabled: healthEnabled,
             endedSession: endedSession
         )
+    }
+}
+
+extension SetLog {
+    /// Drops the start of every logged set that another set's log falls
+    /// strictly inside, and returns how many went.
+    ///
+    /// The live rule (`WorkoutSession.dropOvertakenStarts`) clears the start of
+    /// an unlogged set when another set is logged after it: nobody lifts two
+    /// sets at once. Sets stored before it, or logged behind a delivery that
+    /// arrived out of order, kept the start, and paired with their own log it
+    /// is a time under tension that includes somebody else's whole set,
+    /// exported as measured.
+    ///
+    /// The store cannot say which message arrived first, and that is not
+    /// needed. Arrival order only decides whether the live rule met the row
+    /// still unlogged; the contradiction itself is in the stamps: a set that
+    /// was started at `s` and logged at `c` cannot have had another set logged
+    /// at `t` with `s < t < c`, whichever order the phone heard the three in.
+    /// Only the start goes, as in the first repair; a start proven false is
+    /// dropped, never shortened to fit.
+    ///
+    /// Strictly inside, so two logs stamped the same instant leave both starts
+    /// alone: there it is the arrival order that would decide, and that is the
+    /// one thing not stored.
+    @discardableResult
+    static func dropOvertakenStoredStarts(in context: ModelContext) -> Int {
+        let withStart = FetchDescriptor<SetLog>(
+            predicate: #Predicate { $0.isCompleted && $0.startedAt != nil })
+        var dropped = 0
+        for set in (try? context.fetch(withStart)) ?? [] {
+            guard let start = set.startedAt, let logged = set.completedAt,
+                  let session = set.session else { continue }
+            let overtaken = session.sets.contains { other in
+                guard other.id != set.id, other.isCompleted, let moment = other.completedAt else { return false }
+                return start < moment && moment < logged
+            }
+            guard overtaken else { continue }
+            set.startedAt = nil
+            dropped += 1
+        }
+        if dropped > 0 { try? context.save() }
+        return dropped
     }
 }

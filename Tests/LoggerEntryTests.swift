@@ -80,8 +80,8 @@ struct LoggerEntryTests {
         opener.reps = 10
         workout.complete(opener, restSeconds: nil)
         workout.rate(opener, feel: .easy)
-        precondition(workout.pendingNudge?.setID == opener.id, "An easy top-of-range set is offered a rung")
-        precondition(workout.pendingNudge?.setCount == 2)
+        precondition(workout.pendingNudge(for: "bench-test")?.setID == opener.id, "An easy top-of-range set is offered a rung")
+        precondition(workout.pendingNudge(for: "bench-test")?.setCount == 2)
         return opener
     }
 
@@ -91,12 +91,12 @@ struct LoggerEntryTests {
     static func otherExercisesAndDropRowsLeaveTheOfferStanding() throws {
         let workout = try freshWorkout()
         let opener = offerAfterEasyOpener(in: workout)
-        let rung = workout.pendingNudge!.toKg
+        let rung = workout.pendingNudge(for: "bench-test")!.toKg
 
         workout.complete(sets("row-test", in: workout)[0], restSeconds: nil)
         precondition(opener.loadNudgeOutcome == nil,
                      "A superset partner's set is no answer to the bench offer")
-        precondition(workout.pendingNudge?.setID == opener.id, "The offer stands over its own card")
+        precondition(workout.pendingNudge(for: "bench-test")?.setID == opener.id, "The offer stands over its own card")
 
         workout.continueSet(opener)
         let drop = sets("bench-test", in: workout)[1]
@@ -104,21 +104,21 @@ struct LoggerEntryTests {
         drop.weightKg = 80
         workout.complete(drop, restSeconds: nil)
         precondition(opener.loadNudgeOutcome == nil, "A drop row is no answer to the offer either")
-        precondition(workout.pendingNudge?.setID == opener.id)
+        precondition(workout.pendingNudge(for: "bench-test")?.setID == opener.id)
 
         let next = sets("bench-test", in: workout)[2]
         precondition(!next.isContinuation && next.weightKg == 100)
         workout.complete(next, restSeconds: nil)
         precondition(opener.loadNudgeOutcome == .declined && opener.loadNudgeToKg == rung,
                      "The next working set at the weight that stood is a decline")
-        precondition(workout.pendingNudge == nil)
+        precondition(workout.pendingNudge(for: "bench-test") == nil)
     }
 
     @MainActor
     static func aLiftAtTheOfferedRungCountsAsTaken() throws {
         let workout = try freshWorkout()
         let opener = offerAfterEasyOpener(in: workout)
-        let rung = workout.pendingNudge!.toKg
+        let rung = workout.pendingNudge(for: "bench-test")!.toKg
         let second = sets("bench-test", in: workout)[1]
         // Typed in pounds and converted back, as a lifter on a pound-marked
         // bench would dial it: the same rung, not necessarily the same bits.
@@ -126,7 +126,7 @@ struct LoggerEntryTests {
         workout.complete(second, restSeconds: nil)
         precondition(opener.loadNudgeOutcome == .taken && opener.loadNudgeToKg == rung,
                      "A set dialled to the offered rung by hand took the offer")
-        precondition(workout.pendingNudge == nil)
+        precondition(workout.pendingNudge(for: "bench-test") == nil)
     }
 
     @MainActor
@@ -134,7 +134,7 @@ struct LoggerEntryTests {
         for takesTheRung in [false, true] {
             let workout = try freshWorkout()
             let opener = offerAfterEasyOpener(in: workout)
-            let offered = workout.pendingNudge
+            let offered = workout.pendingNudge(for: "bench-test")
             let second = sets("bench-test", in: workout)[1]
             let lifted = takesTheRung ? offered!.toKg : second.weightKg
             second.weightKg = lifted
@@ -144,7 +144,7 @@ struct LoggerEntryTests {
             workout.uncomplete(second)
             precondition(opener.loadNudgeOutcome == nil && opener.loadNudgeToKg == nil,
                          "Undoing the set that answered the offer leaves no answer behind (\(lifted) kg)")
-            precondition(workout.pendingNudge == offered,
+            precondition(workout.pendingNudge(for: "bench-test") == offered,
                          "The offer stands again, exactly as it did (\(lifted) kg)")
         }
     }
@@ -153,24 +153,24 @@ struct LoggerEntryTests {
     static func aTakenOffersUndoOutlivesOtherExercises() throws {
         let workout = try freshWorkout()
         let opener = offerAfterEasyOpener(in: workout)
-        workout.apply(workout.pendingNudge!)
-        precondition(workout.takenNudge != nil && opener.loadNudgeOutcome == .taken)
+        workout.apply(workout.pendingNudge(for: "bench-test")!)
+        precondition(workout.takenNudge(for: "bench-test") != nil && opener.loadNudgeOutcome == .taken)
 
         workout.complete(sets("row-test", in: workout)[0], restSeconds: nil)
-        precondition(workout.takenNudge != nil, "Another exercise's set leaves the undo open")
+        precondition(workout.takenNudge(for: "bench-test") != nil, "Another exercise's set leaves the undo open")
 
         let second = sets("bench-test", in: workout)[1]
         precondition(second.weightKg == opener.loadNudgeToKg)
         workout.complete(second, restSeconds: nil)
-        precondition(workout.takenNudge == nil, "Lifting a moved set closes the undo")
+        precondition(workout.takenNudge(for: "bench-test") == nil, "Lifting a moved set closes the undo")
         precondition(opener.loadNudgeOutcome == .taken)
 
         workout.uncomplete(second)
-        precondition(workout.takenNudge != nil, "Undoing that set opens it again")
-        workout.undoTakenNudge()
+        precondition(workout.takenNudge(for: "bench-test") != nil, "Undoing that set opens it again")
+        workout.undoTakenNudge(workout.takenNudge(for: "bench-test")!)
         precondition(sets("bench-test", in: workout)[1...].allSatisfy { $0.weightKg == 100 },
                      "Undoing the take puts back every weight, including the set logged and undone")
-        precondition(opener.loadNudgeOutcome == nil && workout.pendingNudge?.setID == opener.id)
+        precondition(opener.loadNudgeOutcome == nil && workout.pendingNudge(for: "bench-test")?.setID == opener.id)
     }
 
     // MARK: - DATA-04, source side
@@ -238,9 +238,9 @@ struct LoggerEntryTests {
         workout.complete(curls[0], restSeconds: nil)
         precondition(!curls[0].hitTopOfRange && !curls[0].fellShortOfRange)
         workout.rate(curls[0], feel: .allOut)
-        precondition(workout.pendingNudge == nil, "No target, so nothing fell short of one")
+        precondition(workout.pendingNudge(for: "curl-test") == nil, "No target, so nothing fell short of one")
         workout.rate(curls[0], feel: .easy)
-        precondition(workout.pendingNudge?.setID == curls[0].id && workout.pendingNudge?.toKg == curls[0].loadScale.step(kg: 20, by: 1))
+        precondition(workout.pendingNudge(for: "curl-test")?.setID == curls[0].id && workout.pendingNudge(for: "curl-test")?.toKg == curls[0].loadScale.step(kg: 20, by: 1))
     }
 
     // MARK: - XC-01

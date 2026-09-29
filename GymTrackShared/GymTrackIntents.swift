@@ -61,13 +61,13 @@ import AppIntents
 
 @available(iOS 17.0, *)
 struct StartTodayWorkoutIntent: AppIntent {
-    static var title: LocalizedStringResource = "Start Today's Workout"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Start Today's Workout"
+    static let description = IntentDescription(
         "Starts the session your routine has scheduled for today. On a rest day, or with no routine set up, it starts a freestyle session instead."
     )
     /// The app has to come forward: this finishes in the logger, with the first
     /// set already loaded.
-    static var openAppWhenRun = true
+    static let openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
         PendingActionHandoff.hand(.startToday)
@@ -77,11 +77,11 @@ struct StartTodayWorkoutIntent: AppIntent {
 
 @available(iOS 17.0, *)
 struct StartFreestyleWorkoutIntent: AppIntent {
-    static var title: LocalizedStringResource = "Start a Freestyle Workout"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Start a Freestyle Workout"
+    static let description = IntentDescription(
         "Starts an empty session you fill in as you go, whatever your routine says about today."
     )
-    static var openAppWhenRun = true
+    static let openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
         PendingActionHandoff.hand(.startFreestyle)
@@ -91,11 +91,11 @@ struct StartFreestyleWorkoutIntent: AppIntent {
 
 @available(iOS 17.0, *)
 struct OpenWorkoutIntent: AppIntent {
-    static var title: LocalizedStringResource = "Open My Workout"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Open My Workout"
+    static let description = IntentDescription(
         "Opens the session you have running, on the set you're about to do."
     )
-    static var openAppWhenRun = true
+    static let openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
         PendingActionHandoff.hand(.openSession)

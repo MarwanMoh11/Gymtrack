@@ -58,7 +58,15 @@ enum ScreenAwakeRules {
 /// `@AppStorage` and non-view code can read them statically.
 @Observable
 final class AppSettings {
-    static let shared = AppSettings()
+    /// `nonisolated(unsafe)` because the compiler cannot see why this is safe.
+    /// Every write is on the main actor (Settings, onboarding, a backup
+    /// restore). The readers that are not, the model's rest fallback, the
+    /// stats and the Health gates, take one flag or number at a time and act on
+    /// it once, so a read racing a toggle sees the old value or the new one and
+    /// the lifter who flipped it a moment ago cannot tell which. Isolating the
+    /// type to the main actor would put `await` into the pure model and stats
+    /// code for nothing.
+    nonisolated(unsafe) static let shared = AppSettings()
 
     private let defaults = UserDefaults.standard
 

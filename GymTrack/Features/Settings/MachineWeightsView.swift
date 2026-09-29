@@ -100,7 +100,7 @@ struct MachineWeightsView: View {
     private func defaultRow(_ label: String, key: String? = nil) -> some View {
         HStack {
             Text(label)
-                .font(Theme.rounded(14, weight: .medium))
+                .gtFont(size: 14, weight: .medium, relativeTo: .subheadline)
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
             Text(LoadScale(unit: settings.weightUnit,

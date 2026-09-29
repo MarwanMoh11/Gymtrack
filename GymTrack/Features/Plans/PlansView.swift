@@ -211,7 +211,7 @@ struct PlansView: View {
                 planPendingDeletion = plan
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 13))
+                    .gtIcon(size: 13, relativeTo: .footnote)
                     .foregroundStyle(Theme.textTertiary)
             }
             .buttonStyle(.plain)

@@ -72,9 +72,9 @@ extension WorkoutSession {
         for id in touched {
             guard let set = rows[id], !set.isGoneFromStore else { continue }
             if set.isCompleted, let moment = set.completedAt {
-                settleStartsAfterReplay(of: set, at: moment)
+                settleStarts(afterLogging: set, at: moment)
             } else if let start = set.startedAt {
-                clearStarts(overtakenBy: set, at: start)
+                dropOvertakenStarts(besides: set, at: start)
             }
         }
     }
@@ -110,7 +110,11 @@ extension WorkoutSession {
     /// How long a session may stay open before the app stops believing anybody
     /// is still lifting in it. The watch refuses to draw a session older than
     /// this, so the phone has to stop offering one at the same point.
-    static let staleAfter: TimeInterval = 12 * 3600
+    ///
+    /// Read from the snapshot the widgets are built from, which compiles
+    /// without this model: the widget has to stop showing a workout at the same
+    /// moment the app closes it, and two copies of the number could drift.
+    static let staleAfter: TimeInterval = GymTrackSnapshot.Running.staleAfter
 
     /// True for a session still open more than `staleAfter` past its start —
     /// one the lifter walked away from without finishing.
@@ -266,7 +270,7 @@ extension WorkoutSession {
         set.takeWristLog(weightKg: weightKg, reps: reps, seconds: seconds, at: moment)
         // The start the phone heard is held to the rules a live one is: a start
         // remembered from before the close can be as old as any abandoned one.
-        settleStartsAfterReplay(of: set, at: moment)
+        settleStarts(afterLogging: set, at: moment)
         // `close` cut this link if the row above didn't make the record, and
         // it still may not have: its own log can be later in the queue, or
         // never have been made.
@@ -301,7 +305,12 @@ extension WorkoutSession {
         // now refuses exactly that log wherever it turns up, so the row can
         // stay for a re-log to find. Forgotten here, a log, an undo and a
         // re-log that all arrived late lost the re-log. An undo with no stamp
-        // cannot say which log it answers, and so takes the row with it.
+        // cannot say which log it answers, and so takes the row with it. That
+        // loses a re-log that followed it; keeping the row instead would let
+        // the log the undo answered put back a set the lifter took back, which
+        // is false detail where the other is missing detail. Only a watch
+        // older than stamped undos sends one, and the watch ships inside the
+        // phone app, so the choice is left on the side the record can afford.
         if completion != nil {
             memory.markUnrestored(setID)
         } else {
@@ -396,46 +405,86 @@ extension SetLog {
     }
 }
 
-// MARK: - The rules a start is held to, as a replay applies them
+// MARK: - The rules an announced start is held to
 
-/// `SetLog.startStillDescribes`, `WorkoutSession.settleStarts` and
-/// `dropOvertakenStarts` restated for the code in this file. It is compiled
-/// without the logger (`ActiveWorkout.swift`) in some harnesses and so cannot
-/// call it, and a wrist Finish is applied here whichever of the two it meets.
-/// The two must give the same answers, so `test-late-wrist-log-repairs.sh`
-/// compares them; changing the cap in one place fails it until the other
-/// follows.
+// The one statement of them. `ActiveWorkout` (the logger) and the wrist's log
+// applied with no logger running both call these, and so does the replay of a
+// wrist Finish below, so there is a single copy to change. It lives in this
+// file, not the logger's, because some harnesses compile this file without the
+// logger, and a rule that only the logger could see would have to be restated
+// for them: that restatement existed, and had to be pinned equal to the
+// original by a test.
 extension SetLog {
-
-    /// Whether the start on this set describes it once it is logged at
-    /// `moment`: it exists, does not come after the log, and is close enough
-    /// for one set to have filled. Over the bound it is dropped, never
-    /// shortened; see `longestPlausibleLength`.
-    func startFits(loggedAt moment: Date) -> Bool {
-        guard let startedAt else { return false }
+    /// The longest an announced start can sit ahead of the log that closes the
+    /// set and still be believed as this set's start.
+    ///
+    /// A start nobody closed is not a slow set. The lifter tapped Start, found
+    /// the bench taken, lifted something else and logged this one after the
+    /// detour, and the pair then reported a time under tension of however long
+    /// the detour took, exported as something measured. So the gap has to be one
+    /// a set could fill, and the bound is set by what the set was: ten seconds a
+    /// rep, slower than any tempo anybody lifts a working set at, for a
+    /// counted set; twice the hold for a timed one; and a minute either way for
+    /// the unracking and settling the count-in doesn't cover. Never under three
+    /// minutes, because the lifter dials the numbers after the set and before
+    /// the tap on Log, and a short set is not a reason to disbelieve a slow tap.
+    ///
+    /// Over the bound the start is dropped, not shortened. A shortened one
+    /// would be a moment made up to fit, and the record would say the set
+    /// began then.
+    var longestPlausibleLength: TimeInterval {
         let working = tracking == .duration ? TimeInterval(seconds) * 2 : TimeInterval(reps) * 10
+        return max(180, working + 60)
+    }
+
+    /// Whether the start on this set still describes it once it is logged at
+    /// `moment`: it exists, it isn't in the future of the log (logged inside
+    /// the count-in, the start it counted towards never came), and the two are
+    /// close enough for one set to have filled.
+    func startStillDescribes(loggedAt moment: Date) -> Bool {
+        guard let startedAt else { return false }
         let length = moment.timeIntervalSince(startedAt)
-        return length >= 0 && length <= max(180, working + 60)
+        return length >= 0 && length <= longestPlausibleLength
     }
 }
 
 extension WorkoutSession {
-
-    /// What a log replayed at `moment` does to the starts around it, as
-    /// `settleStarts(afterLogging:at:)` does for a log taken live.
-    func settleStartsAfterReplay(of set: SetLog, at moment: Date) {
-        if !set.startFits(loggedAt: moment) { set.startedAt = nil }
-        clearStarts(overtakenBy: set, at: moment)
+    /// What logging `set` at `moment` does to the starts announced on it and on
+    /// the sets around it. Shared by the logger and by the wrist's log applied
+    /// with no logger running, so the two can't disagree about a start.
+    func settleStarts(afterLogging set: SetLog, at moment: Date) {
+        if !set.startStillDescribes(loggedAt: moment) { set.startedAt = nil }
+        dropOvertakenStarts(besides: set, at: moment)
     }
 
-    /// Clears the start of every unlogged set other than `set` that began
-    /// before `moment`: nobody lifts two sets at once, so such a start was
-    /// abandoned. The same as `dropOvertakenStarts(besides:at:)`.
-    func clearStarts(overtakenBy set: SetLog, at moment: Date) {
-        for other in sets where other.id != set.id && !other.isCompleted
-            && !other.isGoneFromStore && (other.startedAt ?? .distantFuture) < moment {
+    /// Clears the announced start of every unlogged set other than `set` that
+    /// began before `moment`, and returns which sets they were.
+    ///
+    /// A start that a later log, or a later start, has overtaken cannot still
+    /// be under way: nobody lifts two sets at once. The rest gap and the heart
+    /// rate window already refuse a start that another set's log has passed;
+    /// the set's own length and the exported stamp did not, and an abandoned
+    /// start paired with a log twenty minutes on.
+    @discardableResult
+    func dropOvertakenStarts(besides set: SetLog, at moment: Date) -> [UUID] {
+        dropStarts { $0.id != set.id && ($0.startedAt ?? .distantFuture) < moment }
+    }
+
+    /// Clears the announced start of every unlogged set of another exercise
+    /// than `catalogID`, for a lifter who has moved onto it.
+    @discardableResult
+    func dropStarts(awayFrom catalogID: String) -> [UUID] {
+        dropStarts { $0.catalogID != catalogID }
+    }
+
+    private func dropStarts(where abandoned: (SetLog) -> Bool) -> [UUID] {
+        var dropped: [UUID] = []
+        for other in sets where !other.isCompleted && other.startedAt != nil
+            && !other.isGoneFromStore && abandoned(other) {
             other.startedAt = nil
+            dropped.append(other.id)
         }
+        return dropped
     }
 }
 
@@ -452,8 +501,11 @@ extension SetLog {
     /// be run over the history and give the same answer every time. Only the
     /// start goes: a start proven false is dropped, never shortened to fit.
     ///
-    /// The overtaken rule is not applied here. It needs the order the
-    /// messages arrived in, which the store never kept.
+    /// The overtaken rule is not applied here. `WatchCommandCenter` runs it as
+    /// its own one-time repair (`overtakenStartsRepaired`), and only where the
+    /// stored stamps prove it: another set logged strictly between this one's
+    /// start and its log. A tie would need the order the messages arrived in,
+    /// which the store never kept, so a tied start is left alone.
     @discardableResult
     static func dropImplausibleStoredStarts(in context: ModelContext) -> Int {
         let withStart = FetchDescriptor<SetLog>(
@@ -461,7 +513,7 @@ extension SetLog {
         var dropped = 0
         for set in (try? context.fetch(withStart)) ?? [] {
             guard let completedAt = set.completedAt,
-                  !set.startFits(loggedAt: completedAt) else { continue }
+                  !set.startStillDescribes(loggedAt: completedAt) else { continue }
             set.startedAt = nil
             dropped += 1
         }
@@ -549,15 +601,25 @@ struct DroppedSetRow: Codable, Equatable {
 ///
 /// It also keeps the other thing a late wrist log is checked against: the
 /// undos that named it. See `rememberTakenBack`.
-final class DroppedSetMemory {
+///
+/// Locked, because the model methods that reach it (`close`, the late-log
+/// restore) are not main-actor isolated and nothing but convention keeps them
+/// there. It keeps in-memory state (`settledByWrist`) beside a
+/// read-modify-write over `UserDefaults`, which two threads could interleave
+/// into a lost entry; every public method holds the lock for the whole of its
+/// read and write, and none calls another. `shared` is a constant: it used to
+/// be a `var` so tests could swap it, which let any code replace the object
+/// other code was holding.
+final class DroppedSetMemory: @unchecked Sendable {
 
-    static var shared = DroppedSetMemory(defaults: .standard)
+    static let shared = DroppedSetMemory(defaults: .standard)
 
     static let lifetime: TimeInterval = 7 * 24 * 3600
     static let capacity = 200
     private static let key = "droppedSetRows"
 
-    private let defaults: UserDefaults
+    private let lock = NSLock()
+    private var defaults: UserDefaults
     /// Sessions whose closing follows the wrist's own Finish batch, which
     /// already settled every row the wrist logged. In memory only: the close
     /// comes straight after, in the same process.
@@ -567,43 +629,59 @@ final class DroppedSetMemory {
         self.defaults = defaults
     }
 
+    /// Points the memory at another store and drops what it held in memory,
+    /// which is what a test that used to swap `shared` needs now that it is a
+    /// constant.
+    func replaceStore(with defaults: UserDefaults) {
+        lock.withLock {
+            self.defaults = defaults
+            settledByWrist = []
+        }
+    }
+
     func row(for setID: UUID, now: Date = .now) -> DroppedSetRow? {
-        load(now: now).first { $0.id == setID }
+        lock.withLock { load(now: now).first { $0.id == setID } }
     }
 
     func remember(_ rows: [DroppedSetRow], closing sessionID: UUID, now: Date = .now) {
-        guard settledByWrist.remove(sessionID) == nil, !rows.isEmpty else { return }
-        let incoming = Set(rows.map(\.id))
-        store(load(now: now).filter { !incoming.contains($0.id) } + rows)
+        lock.withLock {
+            guard settledByWrist.remove(sessionID) == nil, !rows.isEmpty else { return }
+            let incoming = Set(rows.map(\.id))
+            store(load(now: now).filter { !incoming.contains($0.id) } + rows)
+        }
     }
 
     func settle(_ sessionID: UUID) {
-        settledByWrist.insert(sessionID)
+        lock.withLock { _ = settledByWrist.insert(sessionID) }
     }
 
     func markRestored(_ setID: UUID, at moment: Date = .now) {
-        store(load(now: moment).map { row in
-            guard row.id == setID else { return row }
-            var restored = row
-            restored.restoredAt = moment
-            return restored
-        })
+        lock.withLock {
+            store(load(now: moment).map { row in
+                guard row.id == setID else { return row }
+                var restored = row
+                restored.restoredAt = moment
+                return restored
+            })
+        }
     }
 
     func forget(_ setID: UUID) {
-        store(load(now: .now).filter { $0.id != setID })
+        lock.withLock { store(load(now: .now).filter { $0.id != setID }) }
     }
 
     /// Puts a row back to being only remembered, after the row it restored was
     /// taken out again. The next log for the set is owed a row as much as the
     /// first was.
     func markUnrestored(_ setID: UUID) {
-        store(load(now: .now).map { row in
-            guard row.id == setID, row.restoredAt != nil else { return row }
-            var remembered = row
-            remembered.restoredAt = nil
-            return remembered
-        })
+        lock.withLock {
+            store(load(now: .now).map { row in
+                guard row.id == setID, row.restoredAt != nil else { return row }
+                var remembered = row
+                remembered.restoredAt = nil
+                return remembered
+            })
+        }
     }
 
     // MARK: Logs the wrist took back
@@ -627,12 +705,12 @@ final class DroppedSetMemory {
     private static let heardKey = "heardWristLogs"
 
     func rememberTakenBack(_ setID: UUID, completedAt: Date?, now: Date = .now) {
-        remember(setID, completedAt: completedAt, key: Self.takenBackKey, now: now)
+        lock.withLock { remember(setID, completedAt: completedAt, key: Self.takenBackKey, now: now) }
     }
 
     /// Whether a wrist log stamped at this moment was already taken back.
     func wasTakenBack(_ setID: UUID, loggedAt: Date?, now: Date = .now) -> Bool {
-        holds(setID, loggedAt: loggedAt, key: Self.takenBackKey, now: now)
+        lock.withLock { holds(setID, loggedAt: loggedAt, key: Self.takenBackKey, now: now) }
     }
 
     /// A wrist log the phone applied, by the stamp it carried. The phone has no
@@ -642,12 +720,12 @@ final class DroppedSetMemory {
     /// and a log with no entry here is the late one the row was kept for.
     /// Kept as long as a dropped row, for the same reason.
     func rememberHeardLog(_ setID: UUID, completedAt: Date?, now: Date = .now) {
-        remember(setID, completedAt: completedAt, key: Self.heardKey, now: now)
+        lock.withLock { remember(setID, completedAt: completedAt, key: Self.heardKey, now: now) }
     }
 
     /// Whether the phone already applied a wrist log stamped at this moment.
     func wasHeardLog(_ setID: UUID, loggedAt: Date?, now: Date = .now) -> Bool {
-        holds(setID, loggedAt: loggedAt, key: Self.heardKey, now: now)
+        lock.withLock { holds(setID, loggedAt: loggedAt, key: Self.heardKey, now: now) }
     }
 
     private func remember(_ setID: UUID, completedAt: Date?, key: String, now: Date) {

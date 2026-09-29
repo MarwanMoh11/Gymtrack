@@ -33,6 +33,7 @@ struct WidgetSnapshotTests {
         let context = ModelContext(container)
         doneCardFollowsTheScheduledDay(context)
         fieldsSurvive(context)
+        planChoiceIgnoresFetchOrder(context)
         if failures > 0 { print("\(failures) failure(s)"); exit(1) }
         print("widget snapshot: all checks passed")
     }
@@ -108,6 +109,45 @@ struct WidgetSnapshotTests {
 
     /// The card still carries what the widgets draw: the set count, the
     /// volume, the end time, and the rest of the snapshot is untouched.
+    /// A routine named for its one day, pinned to today's weekday, so the
+    /// snapshot's `todayTitle` says which routine it described.
+    static func routine(day dayName: String, createdAt: Date, isActive: Bool,
+                        in context: ModelContext) -> Plan {
+        let plan = Plan(name: "\(dayName) routine", isActive: isActive)
+        plan.createdAt = createdAt
+        context.insert(plan)
+        let day = PlanDay(name: dayName, order: 0, weekday: cal.component(.weekday, from: now))
+        context.insert(day)
+        day.plan = plan
+        let item = PlanItem(catalogID: "plank", name: "Plank", order: 0)
+        context.insert(item)
+        item.day = day
+        return plan
+    }
+
+    /// Today picks its plan from a list sorted by `createdAt`: the active one,
+    /// else the oldest. The headless watch path hands the widgets plans it
+    /// fetched with no sort, so with no plan active the widget has to reach
+    /// the same plan from any order, or the Home Screen describes a different
+    /// routine from the one Today is showing.
+    static func planChoiceIgnoresFetchOrder(_ context: ModelContext) {
+        let older = routine(day: "Legs", createdAt: at(hours: -48), isActive: false, in: context)
+        let newer = routine(day: "Push", createdAt: at(hours: -24), isActive: false, in: context)
+        for plans in [[older, newer], [newer, older]] {
+            let snapshot = WidgetPublisher.snapshot(plans: plans, sessions: [], running: nil,
+                                                    calendar: cal, now: now)
+            expect(snapshot.todayTitle == "Legs",
+                   "with no plan active the widget takes the oldest plan, in any fetch order")
+        }
+
+        newer.isActive = true
+        for plans in [[older, newer], [newer, older]] {
+            let snapshot = WidgetPublisher.snapshot(plans: plans, sessions: [], running: nil,
+                                                    calendar: cal, now: now)
+            expect(snapshot.todayTitle == "Push", "the active plan wins over an older one")
+        }
+    }
+
     static func fieldsSurvive(_ context: ModelContext) {
         let (plan, legs, _) = plan(in: context)
         let trained = session(legs, from: at(hours: 0.3), lasting: 45 * 60, in: context)

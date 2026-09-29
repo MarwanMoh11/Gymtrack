@@ -2,6 +2,11 @@ import UIKit
 
 /// Thin wrapper so haptics can be muted globally from Settings without
 /// sprinkling checks through the views.
+///
+/// Main-actor because the feedback generators are UIKit objects that only
+/// play from the main thread, and every caller is a view, a button action or
+/// a main-actor model.
+@MainActor
 enum Haptics {
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: SettingsKey.haptics) as? Bool ?? true

@@ -25,7 +25,7 @@ struct LiftTrendsCard: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(lift.name)
-                    .font(Theme.rounded(14, weight: .semibold))
+                    .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text("\(lift.sessionCount) sessions")
@@ -35,7 +35,7 @@ struct LiftTrendsCard: View {
             Spacer(minLength: 4)
             HStack(spacing: 4) {
                 Image(systemName: symbol(lift.trend))
-                    .font(.system(size: 10, weight: .black))
+                    .gtIcon(size: 10, weight: .black, relativeTo: .caption)
                 Text(title(lift.trend))
                     .font(Theme.rounded(12, weight: .bold))
             }

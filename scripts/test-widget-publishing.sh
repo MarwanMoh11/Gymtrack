@@ -14,7 +14,7 @@ xcrun swiftc -parse-as-library -module-cache-path build/widget-publishing/module
     "$ROOT/GymTrackShared/RestProgress.swift" \
     "$ROOT/GymTrack/Models/Muscle.swift" "$ROOT/GymTrack/Models/NoteTag.swift" \
     "$ROOT/GymTrack/Models/ExerciseSearch.swift" "$ROOT/GymTrack/Models/SetContinuation.swift" \
-    "$ROOT/GymTrack/Models/CatalogExercise.swift" "$ROOT/GymTrack/Models/Entities.swift" \
+    "$ROOT/GymTrack/Models/CatalogExercise.swift" "$ROOT/GymTrack/Models/Entities.swift" "$ROOT/GymTrack/Models/PlanChoice.swift" \
     "$ROOT/GymTrack/Models/SessionClosing.swift" \
     "$ROOT/GymTrack/Services/SetHeartRate.swift" "$ROOT/GymTrack/Services/LoadScaleBook.swift" \
     "$ROOT/GymTrack/Services/TrainingStats.swift" "$ROOT/GymTrack/Services/ActiveWorkout.swift" \

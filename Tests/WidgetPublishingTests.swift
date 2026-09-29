@@ -156,7 +156,8 @@ struct WidgetPublishingTests {
               "The turn itself is not stale, which is why the entry sits a second after it")
     }
 
-    /// The widgets can't see `WorkoutSession`, so they repeat its number.
+    /// `WorkoutSession.staleAfter` reads the snapshot's number; this fails if
+    /// somebody hard-codes a second one again.
     static func staleRuleIsTheModelsRule() {
         check(GymTrackSnapshot.Running.staleAfter == WorkoutSession.staleAfter,
               "The widgets and the app must agree how long a session may stay open")

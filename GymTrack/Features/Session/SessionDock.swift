@@ -94,7 +94,7 @@ struct SessionDockBar: View {
                         .opacity(isPulsing ? 0.35 : 1)
                         .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: isPulsing)
                     Text(workout.session.title)
-                        .font(Theme.rounded(14, weight: .bold))
+                        .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                 }
@@ -112,7 +112,7 @@ struct SessionDockBar: View {
             headlineClock
 
             Image(systemName: "chevron.up")
-                .font(.system(size: 12, weight: .black))
+                .gtIcon(size: 12, weight: .black, relativeTo: .caption)
                 .foregroundStyle(Theme.textTertiary)
         }
         .padding(.horizontal, 12)

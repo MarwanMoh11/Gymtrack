@@ -77,7 +77,7 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("What should we call you?")
-                    .font(Theme.rounded(14, weight: .semibold))
+                    .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(Theme.textSecondary)
                 TextField("Your name", text: $name)
                     .textFieldStyle(.plain)
@@ -121,7 +121,7 @@ struct OnboardingView: View {
                             }
                             Spacer()
                             Image(systemName: unit == option ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 22))
+                                .gtIcon(size: 22, relativeTo: .title2)
                                 .foregroundStyle(unit == option ? Theme.accent : Theme.textTertiary)
                         }
                         .gtCard(padding: 18, selected: unit == option)
@@ -218,7 +218,7 @@ struct OnboardingView: View {
                 .foregroundStyle(Theme.ink)
                 .multilineTextAlignment(.center)
             Text(subtitle)
-                .font(Theme.rounded(14, weight: .medium))
+                .gtFont(size: 14, weight: .medium, relativeTo: .subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -241,7 +241,7 @@ struct OnboardingView: View {
 
             if step > 0 {
                 Button("Back") { withAnimation { step -= 1 } }
-                    .font(Theme.rounded(14, weight: .semibold))
+                    .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(Theme.textTertiary)
             }
         }

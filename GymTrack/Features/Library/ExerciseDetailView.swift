@@ -99,7 +99,7 @@ struct ExerciseDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         SectionHeader("How to do it")
                         Text(details)
-                            .font(Theme.rounded(14, weight: .medium))
+                            .gtFont(size: 14, weight: .medium, relativeTo: .subheadline)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -388,7 +388,7 @@ struct ExerciseDetailView: View {
         return HStack(spacing: 4) {
             if continuation != nil {
                 Image(systemName: SetContinuation.symbol)
-                    .font(.system(size: 9, weight: .bold))
+                    .gtIcon(size: 9, weight: .bold, relativeTo: .caption)
                     .foregroundStyle(Theme.accent)
             }
             Text(value)

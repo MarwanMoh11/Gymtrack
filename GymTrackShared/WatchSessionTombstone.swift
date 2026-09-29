@@ -66,7 +66,7 @@ struct WatchSessionTombstone: Equatable, Sendable {
         // next launch. Its old application context can reach this watch first,
         // and treating that snapshot as live would start a new Health workout
         // for yesterday's session before the phone has a chance to correct it.
-        guard session.startedAt.timeIntervalSince(now) > -12 * 3600 else { return nil }
+        guard session.startedAt.timeIntervalSince(now) > -GymTrackSnapshot.Running.staleAfter else { return nil }
         guard admits(session.sessionID) else { return nil }
         return session
     }

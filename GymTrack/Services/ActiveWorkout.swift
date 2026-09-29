@@ -246,9 +246,23 @@ final class ActiveWorkout {
     /// something the body is watching from there is the loop SwiftUI warns of.
     @ObservationIgnored private var lastPerformances: [String: [SetLog]] = [:]
 
-    init(session: WorkoutSession, context: ModelContext, history: [WorkoutSession]) {
+    /// Where this logger keeps what it would otherwise lose to a relaunch; see
+    /// `LoggerMemoryStore`. Tests hand it a suite of their own.
+    private let memory: LoggerMemoryStore
+
+    /// What was last written to `memory`, so a save that changed none of it
+    /// costs no write.
+    @ObservationIgnored private var storedMemory: LoggerMemory?
+
+    /// Set once the session is finished or discarded. A save that lands after
+    /// that must not write the memory back, or the key outlives its session.
+    @ObservationIgnored private var isClosed = false
+
+    init(session: WorkoutSession, context: ModelContext, history: [WorkoutSession],
+         memory: LoggerMemoryStore = .standard) {
         self.session = session
         self.context = context
+        self.memory = memory
         self.history = history.filter { $0.id != session.id }
 
         if session.isActive && session.normalizeExerciseSlots() {
@@ -264,6 +278,7 @@ final class ActiveWorkout {
         lastPerformances = SessionFactory.lastPerformances(
             of: Set(session.sets.map(\.catalogID)), in: self.history, excluding: session.id
         )
+        restoreLoggerMemory()
 
         // A rest starting, being extended or running out changes what the Lock
         // Screen should say, and none of those go through `save()`.
@@ -710,9 +725,10 @@ final class ActiveWorkout {
     }
 
     /// What each logged set's carry overwrote, by the set that carried.
-    /// In memory only: a row that outlives a relaunch keeps the load that was
-    /// carried, which is what it has always done. Nothing here is exported,
-    /// since unlogged rows are dropped when the session closes.
+    /// Kept across a relaunch by `LoggerMemoryStore`, or a set taken back after
+    /// one would leave the rows below it holding a weight nobody lifted.
+    /// Nothing here is exported, since unlogged rows are dropped when the
+    /// session closes and the store goes with them.
     @ObservationIgnored private var carriedPrefills: [UUID: [UUID: Prefill]] = [:]
 
     /// The other half of `carryLoadForward`: the set is being taken back, so
@@ -850,6 +866,9 @@ final class ActiveWorkout {
         if set.tracking == .duration { set.seconds = max(0, seconds) }
         reassessRecords(for: set.catalogID)
         standingOffers.removeAll { $0.setID == set.id }
+        // Not left to the settle a beat from now: a relaunch inside it would
+        // stand back up an offer that was read off the number just corrected.
+        persistLoggerMemory()
         numbersChanged()
     }
 
@@ -1160,13 +1179,6 @@ final class ActiveWorkout {
         standingOffers.first { $0.catalogID == catalogID }
     }
 
-    /// The offer the logger is showing: the exercise the session is on, else the
-    /// newest. Callers that draw one card ask `pendingNudge(for:)` instead.
-    var pendingNudge: LoadNudge? {
-        if let preferred = session.preferredExerciseID, let offer = pendingNudge(for: preferred) { return offer }
-        return standingOffers.last
-    }
-
     /// Reads the set just rated the way the progression would read it next
     /// week, and applies that reading to the sets still in front of you.
     ///
@@ -1229,12 +1241,6 @@ final class ActiveWorkout {
         openTakes.first { $0.nudge.catalogID == catalogID }
     }
 
-    /// The take the logger is showing, chosen as `pendingNudge` is.
-    var takenNudge: TakenNudge? {
-        if let preferred = session.preferredExerciseID, let taken = takenNudge(for: preferred) { return taken }
-        return openTakes.last
-    }
-
     /// Takes the offer: every set of that exercise still to come moves onto the
     /// new rung.
     func apply(_ nudge: LoadNudge) {
@@ -1262,13 +1268,8 @@ final class ActiveWorkout {
     }
 
     /// Puts every weight back where it was and stands the offer back up, so the
-    /// screen reads exactly as it did before the button was pressed.
-    func undoTakenNudge() {
-        guard let taken = takenNudge else { return }
-        undoTakenNudge(taken)
-    }
-
-    /// Undoes one exercise's take, whichever card it is drawn on.
+    /// screen reads exactly as it did before the button was pressed. One
+    /// exercise's take, whichever card it is drawn on.
     func undoTakenNudge(_ taken: TakenNudge) {
         guard openTakes.contains(where: { $0.nudge.setID == taken.nudge.setID }) else { return }
         restoreWeights(of: taken)
@@ -1291,11 +1292,6 @@ final class ActiveWorkout {
             set.weightKg = weight
         }
         openTakes.removeAll { $0.nudge.setID == taken.nudge.setID }
-    }
-
-    func dismissNudge() {
-        guard let nudge = pendingNudge else { return }
-        dismissNudge(nudge)
     }
 
     /// Turns down one exercise's offer, whichever card it is drawn on.
@@ -1546,6 +1542,7 @@ final class ActiveWorkout {
         // no longer exists.
         pendingEdit?.cancel()
         session.close(at: moment, in: context)
+        forgetLoggerMemory(of: session.id)
         adoptWatchMetrics()
         restTimer.onChange = nil
         restTimer.stop()
@@ -1567,6 +1564,7 @@ final class ActiveWorkout {
         // empty Finish now comes through here as well as Discard.
         let sessionID = session.id
         context.delete(session)
+        forgetLoggerMemory(of: sessionID)
         writeThrough()
         WorkoutLiveActivity.shared.end(with: nil)
         WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: sessionID, reason: .discarded))
@@ -1647,6 +1645,7 @@ final class ActiveWorkout {
         pendingEdit?.cancel()
         pendingEdit = nil
         writeThrough()
+        persistLoggerMemory()
         pushLiveActivity()
         pushToWatch()
         WidgetPublisher.updateSession(self)
@@ -1890,41 +1889,7 @@ enum LoadNudgeOutcome: String, Sendable {
     case declined
 }
 
-// MARK: - Announced starts
-
-extension SetLog {
-    /// The longest an announced start can sit ahead of the log that closes the
-    /// set and still be believed as this set's start.
-    ///
-    /// A start nobody closed is not a slow set. The lifter tapped Start, found
-    /// the bench taken, lifted something else and logged this one after the
-    /// detour, and the pair then reported a time under tension of however long
-    /// the detour took, exported as something measured. So the gap has to be one
-    /// a set could fill, and the bound is set by what the set was: ten seconds a
-    /// rep, slower than any tempo anybody lifts a working set at, for a
-    /// counted set; twice the hold for a timed one; and a minute either way for
-    /// the unracking and settling the count-in doesn't cover. Never under three
-    /// minutes, because the lifter dials the numbers after the set and before
-    /// the tap on Log, and a short set is not a reason to disbelieve a slow tap.
-    ///
-    /// Over the bound the start is dropped, not shortened. A shortened one
-    /// would be a moment made up to fit, and the record would say the set
-    /// began then.
-    var longestPlausibleLength: TimeInterval {
-        let working = tracking == .duration ? TimeInterval(seconds) * 2 : TimeInterval(reps) * 10
-        return max(180, working + 60)
-    }
-
-    /// Whether the start on this set still describes it once it is logged at
-    /// `moment`: it exists, it isn't in the future of the log (logged inside
-    /// the count-in, the start it counted towards never came), and the two are
-    /// close enough for one set to have filled.
-    func startStillDescribes(loggedAt moment: Date) -> Bool {
-        guard let startedAt else { return false }
-        let length = moment.timeIntervalSince(startedAt)
-        return length >= 0 && length <= longestPlausibleLength
-    }
-}
+// MARK: - Rows that lean on a set
 
 extension WorkoutSession {
     /// The logged rows whose claim to have been taken without rest leans on
@@ -1941,42 +1906,276 @@ extension WorkoutSession {
             .sorted { $0.setIndex < $1.setIndex }
         return Array(below.prefix { $0.isContinuation && $0.isCompleted })
     }
+}
 
-    /// What logging `set` at `moment` does to the starts announced on it and on
-    /// the sets around it. Shared by the logger and by the wrist's log applied
-    /// with no logger running, so the two can't disagree about a start.
-    func settleStarts(afterLogging set: SetLog, at moment: Date) {
-        if !set.startStillDescribes(loggedAt: moment) { set.startedAt = nil }
-        dropOvertakenStarts(besides: set, at: moment)
+// MARK: - Surviving a relaunch
+
+/// What the logger keeps only in memory and would lose when iOS reclaims the
+/// app in the middle of a workout: the load offers standing over each card, the
+/// takes still open to undo, and what logging and undoing a set overwrote.
+///
+/// Without it a lifter who put the phone down between sets came back to a
+/// logger that had forgotten every offer, and undoing a set taken before the
+/// relaunch left the rows below it at a weight nobody lifted — the record
+/// disagreeing with the screen in exactly the direction the undo rules exist
+/// to prevent.
+///
+/// Numbers and IDs only, never model objects: a stored ID that no longer names
+/// a row is dropped on the way back in, and nothing here can keep a deleted
+/// `SetLog` alive. It is not the export's business either. It lives in
+/// `UserDefaults`, not the store, so an undone action is never on the record,
+/// and `LoggerMemoryStore` removes it the moment its session closes.
+struct LoggerMemory: Codable, Equatable {
+    /// One `ActiveWorkout.LoadNudge`.
+    struct Offer: Codable, Equatable {
+        var setID: UUID
+        var fromIndex: Int
+        var catalogID: String
+        var fromKg: Double
+        var toKg: Double
+        var setCount: Int
+        /// `SetFeel.rawValue`.
+        var feel: Double
     }
 
-    /// Clears the announced start of every unlogged set other than `set` that
-    /// began before `moment`, and returns which sets they were.
-    ///
-    /// A start that a later log, or a later start, has overtaken cannot still
-    /// be under way: nobody lifts two sets at once. The rest gap and the heart
-    /// rate window already refuse a start that another set's log has passed;
-    /// the set's own length and the exported stamp did not, and an abandoned
-    /// start paired with a log twenty minutes on.
-    @discardableResult
-    func dropOvertakenStarts(besides set: SetLog, at moment: Date) -> [UUID] {
-        dropStarts { $0.id != set.id && ($0.startedAt ?? .distantFuture) < moment }
+    /// A row's weight before a take moved it.
+    struct Weight: Codable, Equatable {
+        var rowID: UUID
+        var kg: Double
     }
 
-    /// Clears the announced start of every unlogged set of another exercise
-    /// than `catalogID`, for a lifter who has moved onto it.
-    @discardableResult
-    func dropStarts(awayFrom catalogID: String) -> [UUID] {
-        dropStarts { $0.catalogID != catalogID }
+    /// One `ActiveWorkout.TakenNudge`.
+    struct Take: Codable, Equatable {
+        var offer: Offer
+        var previous: [Weight]
     }
 
-    private func dropStarts(where abandoned: (SetLog) -> Bool) -> [UUID] {
-        var dropped: [UUID] = []
-        for other in sets where !other.isCompleted && other.startedAt != nil
-            && !other.isGoneFromStore && abandoned(other) {
-            other.startedAt = nil
-            dropped.append(other.id)
+    /// One settled offer, as `ActiveWorkout` keeps it to take back the answer
+    /// a logged set gave.
+    struct Answer: Codable, Equatable {
+        var loggedSetID: UUID
+        var standing: Offer?
+        var taken: Take?
+        /// `LoadNudgeOutcome.rawValue`, for the outcome the log filed.
+        var recorded: String?
+        var priorOutcome: String?
+        var priorToKg: Double?
+    }
+
+    /// One row a logged set's load was carried onto, and what it held before.
+    struct Carry: Codable, Equatable {
+        var rowID: UUID
+        var kg: Double
+        var seconds: Int
+        var carriedKg: Double
+        var carriedSeconds: Int
+    }
+
+    /// Everything one logged set carried forward.
+    struct Carried: Codable, Equatable {
+        var setID: UUID
+        var rows: [Carry]
+    }
+
+    var offers: [Offer] = []
+    var takes: [Take] = []
+    var answers: [Answer] = []
+    var carries: [Carried] = []
+
+    /// Nothing to remember, which is what a session nobody used the offers or
+    /// the undo in looks like. That stores no key at all.
+    var isEmpty: Bool { offers.isEmpty && takes.isEmpty && answers.isEmpty && carries.isEmpty }
+}
+
+/// Where `LoggerMemory` is kept between launches: one key per session, so it
+/// can be dropped the moment that session closes.
+///
+/// A key that outlived its session would be the one thing in the app still
+/// remembering a set nobody was left holding, so a closed or discarded session
+/// removes its own, and `prune` sweeps the ones a path with no logger left
+/// behind — the wrist finishing a session while the app was suspended.
+struct LoggerMemoryStore {
+    static let standard = LoggerMemoryStore(defaults: .standard)
+    static let keyPrefix = "activeWorkout.loggerMemory."
+
+    let defaults: UserDefaults
+
+    func key(for sessionID: UUID) -> String { Self.keyPrefix + sessionID.uuidString }
+
+    /// What was stored for the session. A value that will not decode is removed
+    /// rather than tried again on every launch.
+    func load(for sessionID: UUID) -> LoggerMemory? {
+        guard let data = defaults.data(forKey: key(for: sessionID)) else { return nil }
+        guard let memory = try? JSONDecoder().decode(LoggerMemory.self, from: data) else {
+            forget(sessionID)
+            return nil
         }
-        return dropped
+        return memory
+    }
+
+    /// Stores it, or removes the key when there is nothing to keep.
+    func save(_ memory: LoggerMemory, for sessionID: UUID) {
+        guard !memory.isEmpty, let data = try? JSONEncoder().encode(memory) else {
+            forget(sessionID)
+            return
+        }
+        defaults.set(data, forKey: key(for: sessionID))
+    }
+
+    func forget(_ sessionID: UUID) {
+        defaults.removeObject(forKey: key(for: sessionID))
+    }
+
+    /// Every session that has a key.
+    var storedSessionIDs: Set<UUID> {
+        Set(defaults.dictionaryRepresentation().keys.compactMap { key in
+            key.hasPrefix(Self.keyPrefix) ? UUID(uuidString: String(key.dropFirst(Self.keyPrefix.count))) : nil
+        })
+    }
+
+    /// Drops the memory of every session not in `live`, and any key under the
+    /// prefix that names no session at all.
+    func prune(keeping live: Set<UUID>) {
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.keyPrefix) {
+            if let id = UUID(uuidString: String(key.dropFirst(Self.keyPrefix.count))), live.contains(id) { continue }
+            defaults.removeObject(forKey: key)
+        }
+    }
+}
+
+extension LoggerMemory.Offer {
+    init(_ nudge: ActiveWorkout.LoadNudge) {
+        self.init(setID: nudge.setID, fromIndex: nudge.fromIndex, catalogID: nudge.catalogID,
+                  fromKg: nudge.fromKg, toKg: nudge.toKg, setCount: nudge.setCount, feel: nudge.feel.rawValue)
+    }
+}
+
+extension LoggerMemory.Take {
+    init(_ taken: ActiveWorkout.TakenNudge) {
+        self.init(offer: .init(taken.nudge),
+                  previous: taken.previousKg.map { LoggerMemory.Weight(rowID: $0.key, kg: $0.value) }
+                      .sorted { $0.rowID.uuidString < $1.rowID.uuidString })
+    }
+}
+
+extension ActiveWorkout.LoadNudge {
+    /// Nil for a feel this build does not know.
+    init?(_ stored: LoggerMemory.Offer) {
+        guard let feel = SetFeel(rawValue: stored.feel) else { return nil }
+        self.init(setID: stored.setID, fromIndex: stored.fromIndex, catalogID: stored.catalogID,
+                  fromKg: stored.fromKg, toKg: stored.toKg, setCount: stored.setCount, feel: feel)
+    }
+}
+
+extension ActiveWorkout {
+    /// The memory as it stands. Sorted wherever the source is a dictionary, so
+    /// that a save which changed nothing compares equal and writes nothing.
+    fileprivate var loggerMemory: LoggerMemory {
+        LoggerMemory(
+            offers: standingOffers.map(LoggerMemory.Offer.init),
+            takes: openTakes.map(LoggerMemory.Take.init),
+            answers: settledOffers.map { answer in
+                LoggerMemory.Answer(loggedSetID: answer.loggedSetID,
+                                    standing: answer.standing.map(LoggerMemory.Offer.init),
+                                    taken: answer.taken.map(LoggerMemory.Take.init),
+                                    recorded: answer.recorded?.rawValue,
+                                    priorOutcome: answer.priorOutcome?.rawValue,
+                                    priorToKg: answer.priorToKg)
+            },
+            carries: carriedPrefills.map { setID, rows in
+                LoggerMemory.Carried(setID: setID, rows: rows.map { rowID, before in
+                    LoggerMemory.Carry(rowID: rowID, kg: before.kg, seconds: before.seconds,
+                                       carriedKg: before.carriedKg, carriedSeconds: before.carriedSeconds)
+                }.sorted { $0.rowID.uuidString < $1.rowID.uuidString })
+            }.sorted { $0.setID.uuidString < $1.setID.uuidString }
+        )
+    }
+
+    /// Writes the memory after a change, and only then. Called wherever the
+    /// logger saves, so the store never runs further behind the record than the
+    /// one save a force-quit can interrupt.
+    fileprivate func persistLoggerMemory() {
+        guard !isClosed else { return }
+        let now = loggerMemory
+        guard now != storedMemory else { return }
+        memory.save(now, for: session.id)
+        storedMemory = now
+    }
+
+    /// The session is over: nothing about it is worth keeping, and a save that
+    /// lands afterwards must not write it back.
+    fileprivate func forgetLoggerMemory(of sessionID: UUID) {
+        isClosed = true
+        storedMemory = LoggerMemory()
+        memory.forget(sessionID)
+    }
+
+    /// Brings back what the last launch was holding, checked against the record
+    /// it is read against. Each piece is kept only while the sets it names are
+    /// still what it was made about: an offer whose set has since been taken
+    /// back, a take whose rows are gone, an answer whose logged set no longer
+    /// is. A piece that fails that is dropped rather than repaired, because the
+    /// worst a dropped one costs is an offer or an undo the lifter didn't need.
+    fileprivate func restoreLoggerMemory() {
+        guard session.isActive else {
+            memory.forget(session.id)
+            return
+        }
+        // Another session's memory is stale by construction — only sessions
+        // still open can be resumed, and one closed with no logger to say so
+        // (the wrist's Finish while the app slept) never cleared its own.
+        let open = (try? context.fetch(FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { $0.endedAt == nil }))) ?? []
+        memory.prune(keeping: Set(open.map(\.id)).union([session.id]))
+        guard let stored = memory.load(for: session.id) else { return }
+        storedMemory = stored
+
+        let rows = Dictionary(session.sets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func weights(_ kept: [LoggerMemory.Weight]) -> [UUID: Double] {
+            Dictionary(kept.filter { rows[$0.rowID] != nil }.map { ($0.rowID, $0.kg) }, uniquingKeysWith: { first, _ in first })
+        }
+        func taken(_ stored: LoggerMemory.Take) -> TakenNudge? {
+            guard let nudge = LoadNudge(stored.offer) else { return nil }
+            let previous = weights(stored.previous)
+            return previous.isEmpty ? nil : TakenNudge(nudge: nudge, previousKg: previous)
+        }
+
+        for offer in stored.offers {
+            // Read again rather than trusted: the count of sets it would move,
+            // and whether it would still be made, are the record's to say.
+            guard let old = LoadNudge(offer), let subject = rows[old.setID], subject.isCompleted,
+                  subject.loadNudgeOutcome == nil, pendingNudge(for: old.catalogID) == nil,
+                  let fresh = nudge(after: subject), fresh.toKg == old.toKg, fresh.feel == old.feel
+            else { continue }
+            standingOffers.append(fresh)
+        }
+        for take in stored.takes {
+            guard let kept = taken(take), let subject = rows[kept.nudge.setID], subject.isCompleted,
+                  subject.loadNudgeOutcome == .taken, subject.loadNudgeToKg == kept.nudge.toKg,
+                  kept.previousKg.keys.contains(where: { rows[$0]?.isCompleted == false }),
+                  takenNudge(for: kept.nudge.catalogID) == nil
+            else { continue }
+            openTakes.append(kept)
+        }
+        for entry in stored.answers {
+            guard rows[entry.loggedSetID]?.isCompleted == true else { continue }
+            let standing = entry.standing.flatMap(LoadNudge.init)
+            let take = entry.taken.flatMap(taken)
+            guard standing != nil || take != nil else { continue }
+            var answer = SettledOffer(loggedSetID: entry.loggedSetID, standing: standing, taken: take)
+            answer.recorded = entry.recorded.flatMap(LoadNudgeOutcome.init(rawValue:))
+            answer.priorOutcome = entry.priorOutcome.flatMap(LoadNudgeOutcome.init(rawValue:))
+            answer.priorToKg = entry.priorToKg
+            settledOffers.append(answer)
+        }
+        for carried in stored.carries {
+            guard rows[carried.setID]?.isCompleted == true else { continue }
+            let kept = carried.rows.filter { rows[$0.rowID] != nil }.map {
+                ($0.rowID, Prefill(kg: $0.kg, seconds: $0.seconds,
+                                   carriedKg: $0.carriedKg, carriedSeconds: $0.carriedSeconds))
+            }
+            if !kept.isEmpty { carriedPrefills[carried.setID] = Dictionary(kept, uniquingKeysWith: { first, _ in first }) }
+        }
+        persistLoggerMemory()
     }
 }

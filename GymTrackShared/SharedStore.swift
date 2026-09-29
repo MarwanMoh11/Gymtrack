@@ -112,10 +112,9 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
         }
 
         /// How long a session can stay open before the app treats it as
-        /// abandoned and closes it: `WorkoutSession.staleAfter`, which the
-        /// widgets can't see. The two must stay equal (the widget tests pin it),
-        /// and `WorkoutSession.staleAfter` should read this so there is one
-        /// definition.
+        /// abandoned and closes it. The one definition: `WorkoutSession.staleAfter`
+        /// reads this, because the widgets can't see the model and the two must
+        /// never differ.
         static let staleAfter: TimeInterval = 12 * 3600
 
         /// Whether the app would close this session by `moment`. Nothing wakes

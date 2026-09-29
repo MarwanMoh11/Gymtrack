@@ -46,6 +46,17 @@ final class LoadScaleBook: @unchecked Sendable {
     @ObservationIgnored private let lock = NSLock()
     @ObservationIgnored private var storedOverrides: [String: LoadScale] = [:]
 
+    /// Changes one entry under a single hold of the lock. `overrides[key] = x`
+    /// through the property is a locked read of the whole dictionary followed
+    /// by a separate locked write of it, and a second writer between the two
+    /// would have its change overwritten. Every writer is on the main thread
+    /// today; this keeps the lock's promise from depending on that.
+    private func updateOverrides(_ change: (inout [String: LoadScale]) -> Void) {
+        withMutation(keyPath: \.overrides) {
+            lock.withLock { change(&storedOverrides) }
+        }
+    }
+
     /// Its own context: these rows are read from everywhere — the logger, the
     /// watch bridge, a progression suggestion — and belong to no one screen.
     ///
@@ -116,7 +127,7 @@ final class LoadScaleBook: @unchecked Sendable {
     /// and an older spelling can't outlive the correction that replaced it.
     func set(_ scale: LoadScale, for catalogID: String) {
         let key = Self.key(catalogID)
-        overrides[key] = scale
+        updateOverrides { $0[key] = scale }
         guard let context else { return }
         let rows = storedRows(for: key, in: context)
         let kept = rows.first { $0.catalogID == key }
@@ -136,7 +147,7 @@ final class LoadScaleBook: @unchecked Sendable {
     /// way to reach it.
     func clear(_ catalogID: String) {
         let key = Self.key(catalogID)
-        overrides[key] = nil
+        updateOverrides { $0[key] = nil }
         guard let context else { return }
         for row in storedRows(for: key, in: context) { context.delete(row) }
         try? context.save()

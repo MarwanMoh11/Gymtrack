@@ -152,7 +152,7 @@ struct SessionSummaryView: View {
                     GlyphTile(symbol: "trophy.fill", tint: Theme.accent, size: 30, solid: true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(set.exerciseName)
-                            .font(Theme.rounded(14, weight: .bold))
+                            .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                             .foregroundStyle(Theme.ink)
                         Text(TrainingStats.setLabel(set))
                             .font(Theme.number(12, weight: .semibold))
@@ -171,7 +171,7 @@ struct SessionSummaryView: View {
             ForEach(session.exerciseGroups) { group in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(group.name)
-                        .font(Theme.rounded(14, weight: .bold))
+                        .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                         .foregroundStyle(Theme.ink)
                     if let note = session.note(for: group.catalogID), !note.isEmpty {
                         NoteReadout(text: note.text, tags: note.tags)
@@ -248,7 +248,7 @@ struct HealthMetricsCard: View {
                 if session.healthWorkoutID != nil {
                     HStack(spacing: 8) {
                         Image(systemName: "heart.text.square.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .gtIcon(size: 13, weight: .semibold, relativeTo: .caption)
                             .foregroundStyle(Theme.negative.wash)
                         Text("Saved to Health as a strength workout")
                             .font(Theme.rounded(12, weight: .medium))
@@ -275,7 +275,7 @@ struct HealthMetricsCard: View {
             GlyphTile(symbol: "bolt.heart.fill", tint: Theme.negative, size: 30, solid: true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(set.exerciseName), set \(setNumber(of: set))")
-                    .font(Theme.rounded(14, weight: .bold))
+                    .gtFont(size: 14, weight: .bold, relativeTo: .subheadline)
                     .foregroundStyle(Theme.ink)
                 Text(peakCaption(for: set))
                     .font(Theme.rounded(12, weight: .medium))
@@ -333,7 +333,7 @@ struct SetHeartRateBadge: View {
             let bpm = Int(peak.rounded())
             HStack(spacing: 3) {
                 Image(systemName: "heart.fill")
-                    .font(.system(size: 8, weight: .bold))
+                    .gtIcon(size: 8, weight: .bold, relativeTo: .caption2)
                 Text(isMeasured ? "\(bpm)" : "~\(bpm)")
                     .font(Theme.number(11, weight: .semibold))
             }
@@ -487,7 +487,7 @@ private struct HistorySetRow: View {
             }
             if let feel = set.feel {
                 Text(feel.label)
-                    .font(Theme.rounded(10, weight: .bold))
+                    .gtFont(size: 10, weight: .bold, relativeTo: .caption2, maxScale: 1.5)
                     .foregroundStyle(feel.tint)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(feel.tint.opacity(0.14), in: Capsule())

@@ -263,7 +263,7 @@ struct PlanItemEditor: View {
 
                         HStack {
                             Text("Marked in")
-                                .font(Theme.rounded(14, weight: .medium))
+                                .gtFont(size: 14, weight: .medium, relativeTo: .subheadline)
                                 .foregroundStyle(Theme.textSecondary)
                             Spacer()
                             // A custom exercise deleted since it was added has no
@@ -276,7 +276,7 @@ struct PlanItemEditor: View {
                                 }
                             } else {
                                 Text(scale.shortLabel)
-                                    .font(Theme.rounded(10, weight: .semibold))
+                                    .gtFont(size: 10, weight: .semibold, relativeTo: .caption2, maxScale: 1.5)
                                     .foregroundStyle(Theme.textTertiary)
                             }
                         }

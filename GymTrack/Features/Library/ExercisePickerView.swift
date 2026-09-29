@@ -30,7 +30,7 @@ struct ExercisePickerView: View {
                             HStack {
                                 ExerciseRow(exercise: exercise)
                                 Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 19))
+                                    .gtIcon(size: 19, relativeTo: .title3)
                                     .foregroundStyle(Theme.accent)
                             }
                         }

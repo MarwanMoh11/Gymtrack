@@ -410,6 +410,7 @@ final class HealthKitService {
                 load: pendingWorkouts,
                 save: savePendingWorkouts,
                 prepare: relinkSession,
+                linkFailed: { self.settleFailedLink(of: $0) },
                 delete: { await self.deleteForCleanup(id: $0) })
         } while cleanupGate.wantsAnotherPass
     }
@@ -426,7 +427,22 @@ final class HealthKitService {
             return outcome == .gone
         }
         var ledger = loadAttemptLedger()
-        let leaves = ledger.record(outcome, workoutID: id, sessionID: entry.sessionID, at: .now)
+        let leaves = ledger.record(outcome, workoutID: id, sessionID: entry.sessionID,
+                                   preferredWorkoutID: entry.preferredWorkoutID, at: .now)
+        saveAttemptLedger(ledger)
+        return leaves
+    }
+
+    /// Counts a session that could not be pointed at its successor against the
+    /// same cap as a refused delete, and returns whether the entry should leave
+    /// the list. Without a store connected yet nothing was tried, so that costs
+    /// no attempt.
+    private func settleFailedLink(of entry: PendingWorkoutCleanup) -> Bool {
+        guard pendingWorkouts().contains(where: { $0.workoutID == entry.workoutID }) else { return false }
+        var ledger = loadAttemptLedger()
+        let leaves = ledger.record(cleanupContainer == nil ? .deferred : .refused,
+                                   workoutID: entry.workoutID, sessionID: entry.sessionID,
+                                   preferredWorkoutID: entry.preferredWorkoutID, at: .now)
         saveAttemptLedger(ledger)
         return leaves
     }
@@ -442,7 +458,7 @@ final class HealthKitService {
         for item in reopened {
             queue = HealthCleanupQueue.enqueue(
                 PendingWorkoutCleanup(workoutID: item.workoutID, sessionID: item.sessionID,
-                                      preferredWorkoutID: nil),
+                                      preferredWorkoutID: item.preferredWorkoutID),
                 into: queue)
         }
         savePendingWorkouts(queue)
@@ -576,8 +592,8 @@ final class HealthKitService {
     private func deleteOutcome(id: UUID) async -> CleanupAttemptLedger.Outcome {
         guard isAvailable else { return .refused }
         guard canWriteWorkouts else {
-            log.info("Health refused to remove a workout: write access is off")
-            return .refused
+            log.info("Health write access is off; the workout will be removed once it is back")
+            return .awaitingAccess
         }
         let predicate = HKQuery.predicateForObject(with: id)
         do {
@@ -596,9 +612,11 @@ final class HealthKitService {
         } catch let error as HKError where error.code == .errorDatabaseInaccessible {
             log.info("Health is locked; the workout will be removed after the next unlock")
             return .deferred
-        } catch let error as HKError where error.code == .errorAuthorizationDenied {
-            log.error("Health refused to remove a workout: \(error.localizedDescription, privacy: .public)")
-            return .refused
+        } catch let error as HKError where error.code == .errorAuthorizationDenied
+                    || error.code == .errorAuthorizationNotDetermined {
+            // Access was withdrawn between the check above and the delete.
+            log.info("Health write access is off; the workout will be removed once it is back")
+            return .awaitingAccess
         } catch {
             log.error("Couldn't remove workout from Health: \(error.localizedDescription, privacy: .public)")
             return .refused
@@ -676,7 +694,10 @@ final class HealthKitService {
     /// back is empty for whatever was too thin.
     func vitals(from start: Date, to end: Date) async -> VitalsEvidence {
         guard isAvailable, AppSettings.shared.healthReadVitals, end > start else { return VitalsEvidence() }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [.strictStartDate])
+        // Never mutated, and both reads are main-actor methods that only hand it
+        // to an HKSampleQuery, so there is nothing to race. NSPredicate just
+        // isn't marked Sendable, which the two async lets would otherwise flag.
+        nonisolated(unsafe) let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [.strictStartDate])
         let beats = HKUnit.count().unitDivided(by: .minute())
 
         async let heart = vitalsSamples(identifier: .heartRate, unit: beats, predicate: predicate)
