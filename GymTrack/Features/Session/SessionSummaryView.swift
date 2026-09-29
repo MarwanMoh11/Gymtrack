@@ -6,23 +6,23 @@ struct SessionSummaryView: View {
     let session: WorkoutSession
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
-    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var allSessions: [WorkoutSession]
+    @Environment(\.scenePhase) private var scenePhase
 
-    /// One row per exercise — a session where you worked up to a top set would
-    /// otherwise list every rung of the ladder as its own record.
-    private var prs: [SetLog] {
-        let all = TrainingStats.recordSets(in: session, history: allSessions)
-        return Dictionary(grouping: all, by: \.catalogID)
-            .compactMap { _, sets in sets.max { $0.estimatedOneRepMax < $1.estimatedOneRepMax } }
-            .sorted { $0.exerciseOrder < $1.exerciseOrder }
-    }
+    /// One row per exercise and kind that set a record today: a session where
+    /// you worked up to a top set would otherwise list every rung of the ladder
+    /// as its own record.
+    ///
+    /// Worked out once, in `.task`, rather than read from the history on each
+    /// draw. Typing in the session note saves on every character, and a draw
+    /// that walked a year of sessions per keystroke made the one field on this
+    /// screen lag.
+    @State private var prs: [SetLog] = []
+
+    /// Changes only when the session's own sets do; see `SummaryRecordsKey`.
+    private var recordsKey: TrainingStats.SummaryRecordsKey { .init(session) }
 
     var body: some View {
-        // Once per pass rather than once per mention. Typing into the session
-        // note saves as it goes, every save redraws this screen, and each read
-        // of `prs` walks the history.
-        let prs = self.prs
-        return NavigationStack {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     headline
@@ -36,12 +36,18 @@ struct SessionSummaryView: View {
             }
             .scrollIndicators(.hidden)
             .gtScreenBackground()
-            // Health can take a moment to receive the watch's samples, so the
-            // numbers are asked for again when the summary opens rather than
-            // only at the instant the session ended.
-            .task {
+            // Health can take a moment to receive the watch's samples, and a
+            // phone locked in a bag can't read them at all, so the numbers are
+            // asked for again when the summary opens and each time the app
+            // comes back to it, rather than only at the instant the session
+            // ended.
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return }
                 await HealthKitService.shared.backfillVitals(for: session)
                 try? context.save()
+            }
+            .task(id: recordsKey) {
+                prs = (try? SummaryRecords.sets(for: session, in: context)) ?? []
             }
             .navigationTitle("Session complete")
             .navigationBarTitleDisplayMode(.inline)
@@ -148,9 +154,7 @@ struct SessionSummaryView: View {
                         Text(set.exerciseName)
                             .font(Theme.rounded(14, weight: .bold))
                             .foregroundStyle(Theme.ink)
-                        Text(set.tracking == .duration
-                             ? "\(set.seconds)s"
-                             : "\(set.weightLabel) × \(set.reps)")
+                        Text(TrainingStats.setLabel(set))
                             .font(Theme.number(12, weight: .semibold))
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -262,10 +266,10 @@ struct HealthMetricsCard: View {
     /// reason per-set heart rate is worth attributing at all.
     ///
     /// The caption says which kind of number it is, the way the rest tile does.
-    /// A peak read over the set the lifter announced and a peak read over the
-    /// seconds this app guessed the set occupied are different claims, and a
-    /// row that read the same either way would borrow the credibility of the
-    /// measured one for both.
+    /// A peak read over the set the lifter announced, over the set as the heart
+    /// rate drew it, and over the seconds this app guessed the set occupied are
+    /// three different claims, and a row that read the same either way would
+    /// lend the measured one's credibility to the others.
     private func hardestSetRow(_ set: SetLog) -> some View {
         HStack(spacing: 10) {
             GlyphTile(symbol: "bolt.heart.fill", tint: Theme.negative, size: 30, solid: true)
@@ -273,9 +277,7 @@ struct HealthMetricsCard: View {
                 Text("\(set.exerciseName), set \(setNumber(of: set))")
                     .font(Theme.rounded(14, weight: .bold))
                     .foregroundStyle(Theme.ink)
-                Text(set.heartRateWindow == .measured
-                     ? "Peak \(Int((set.maxHeartRate ?? 0).rounded())) bpm, measured over the set"
-                     : "Peak \(Int((set.maxHeartRate ?? 0).rounded())) bpm, over an estimated window")
+                Text(peakCaption(for: set))
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
             }
@@ -287,6 +289,23 @@ struct HealthMetricsCard: View {
         }
         .gtCard(padding: 12)
         .accessibilityElement(children: .combine)
+    }
+
+    /// The hardest set's peak, and what it was read over. A window read off the
+    /// heart rate also says how long the set took — the number nobody tapped
+    /// for — so the caption says it too.
+    private func peakCaption(for set: SetLog) -> String {
+        let peak = "Peak \(Int((set.maxHeartRate ?? 0).rounded())) bpm"
+        switch set.heartRateWindow {
+        case .measured:
+            return "\(peak), measured over the set"
+        case .detected:
+            // A restored backup can name the window without carrying it.
+            guard let length = set.detectedDuration else { return "\(peak), read off your heart rate" }
+            return "\(peak) over a \(Int(length.rounded())) s set, read off your heart rate"
+        case .inferred, nil:
+            return "\(peak), over an estimated window"
+        }
     }
 
     /// What the set is called on the card it belongs to — 1, 2, 3 down the
@@ -301,9 +320,10 @@ struct HealthMetricsCard: View {
 ///
 /// The peak and not the average, because the peak is the thing a set is asked
 /// about — how hard did this go — and because a peak survives a slightly wrong
-/// window where an average doesn't. A window this app inferred is drawn with a
-/// tilde and spelled out in full for VoiceOver: the number is real, the seconds
-/// it was read over are this app's best guess, and a reader is owed that
+/// window where an average doesn't. A window this app worked out — read off the
+/// heart rate or estimated from the reps — is drawn with a tilde and spelled
+/// out in full for VoiceOver: the number is real, the seconds it was read over
+/// are this app's reading rather than anybody's tap, and a reader is owed that
 /// distinction whether they're looking or listening.
 struct SetHeartRateBadge: View {
     let set: SetLog
@@ -311,18 +331,31 @@ struct SetHeartRateBadge: View {
     var body: some View {
         if let peak = set.maxHeartRate {
             let bpm = Int(peak.rounded())
-            let measured = set.heartRateWindow == .measured
             HStack(spacing: 3) {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 8, weight: .bold))
-                Text(measured ? "\(bpm)" : "~\(bpm)")
+                Text(isMeasured ? "\(bpm)" : "~\(bpm)")
                     .font(Theme.number(11, weight: .semibold))
             }
             .foregroundStyle(Theme.negative.opacity(0.75))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(measured
-                                ? "Peak \(bpm) beats per minute"
-                                : "Peak about \(bpm) beats per minute, over an estimated window")
+            .accessibilityLabel(spoken(bpm))
+        }
+    }
+
+    private var isMeasured: Bool { self.set.heartRateWindow == .measured }
+
+    private func spoken(_ bpm: Int) -> String {
+        switch set.heartRateWindow {
+        case .measured:
+            return "Peak \(bpm) beats per minute"
+        case .detected:
+            guard let length = set.detectedDuration else {
+                return "Peak about \(bpm) beats per minute, over a window read off your heart rate"
+            }
+            return "Peak about \(bpm) beats per minute, over a \(Int(length.rounded())) second set read off your heart rate"
+        case .inferred, nil:
+            return "Peak about \(bpm) beats per minute, over an estimated window"
         }
     }
 }
@@ -333,6 +366,7 @@ struct SessionDetailView: View {
     let session: WorkoutSession
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingDeleteConfirm = false
 
     var body: some View {
@@ -373,6 +407,16 @@ struct SessionDetailView: View {
         }
         .scrollIndicators(.hidden)
         .gtScreenBackground()
+        // The summary is shown at the instant a session ends, and a wrist
+        // finish with the phone locked shows none at all, so this page is
+        // where a session's late heart rate gets its next chance. Health is
+        // asked only for what is still missing, or was read here off a trace
+        // that may since have filled in.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await HealthKitService.shared.backfillVitals(for: session)
+            try? context.save()
+        }
         .navigationTitle(session.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -381,23 +425,34 @@ struct SessionDetailView: View {
                     Image(systemName: "trash")
                         .foregroundStyle(Theme.negative)
                 }
+                .accessibilityLabel("Delete session")
             }
         }
         .confirmationDialog("Delete this session?", isPresented: $showingDeleteConfirm, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
-                // Health keeps its own copy; removing the session here should
-                // remove that too rather than leaving an orphan in Fitness.
-                if let workoutID = session.healthWorkoutID {
-                    Task { await HealthKitService.shared.deleteWorkout(id: workoutID) }
-                }
-                context.delete(session)
-                try? context.save()
-                dismiss()
-            }
+            Button("Delete", role: .destructive) { deleteSession() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Its sets are removed from your history and stats. This can't be undone.")
         }
+    }
+
+    /// Deletes the session, and hands its Health workout to the durable
+    /// cleanup list rather than firing one delete and forgetting it. Health
+    /// keeps its own copy, and it is usually the watch's, which the phone may
+    /// be unable to see or remove on the first try; the list retries it.
+    ///
+    /// The workout is queued only once the delete has reached disk. Queued
+    /// first, a failed save would remove the workout of a session still in
+    /// the list.
+    private func deleteSession() {
+        let workoutID = session.healthWorkoutID
+        let sessionID = session.id
+        context.delete(session)
+        let saved = (try? context.save()) != nil
+        if saved, let workoutID {
+            HealthKitService.shared.discardWorkout(workoutID, ofDeletedSession: sessionID)
+        }
+        dismiss()
     }
 }
 
@@ -442,9 +497,7 @@ private struct HistorySetRow: View {
             // Before the weight, so the weights stay in one hard-right column
             // down the card whether or not the watch was on that day.
             SetHeartRateBadge(set: set)
-            Text(set.tracking == .duration
-                 ? "\(set.seconds)s"
-                 : "\(set.weightLabel) × \(set.reps)")
+            Text(TrainingStats.setLabel(set))
                 .font(Theme.number(13, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
         }

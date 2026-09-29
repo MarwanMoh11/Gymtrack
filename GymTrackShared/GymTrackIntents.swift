@@ -1,3 +1,51 @@
+import Foundation
+
+/// How an intent tells the app that it has left a note.
+///
+/// The note alone is not enough. With `openAppWhenRun` the system brings the
+/// app forward and runs `perform()` in the same process, and it makes no
+/// promise about which comes first. The app used to read the note only when it
+/// became active, so an intent that ran second wrote to an inbox nobody was
+/// about to check: "Start my GymTrack workout" opened the app and did nothing,
+/// and the note started a workout unprompted the next time the app came
+/// forward, or aged out.
+///
+/// Announcing every note in-process makes the order stop mattering. It stays
+/// in-process on purpose: the announcement reaches nothing when an intent runs
+/// in another process, and there the note left for the next activation is still
+/// the only channel.
+enum PendingActionHandoff {
+    static let didRequest = Notification.Name("com.marwanmohamed.gymtrack.pendingActionRequested")
+
+    /// Writes the note first and announces it second, so whoever hears the
+    /// announcement finds the note already there. Announcing first would hand a
+    /// listener an empty inbox, which is the race this exists to remove.
+    static func hand(_ action: SharedStore.PendingAction, center: NotificationCenter = .default) {
+        SharedStore.request(action)
+        center.post(name: didRequest, object: nil)
+    }
+
+    /// The app's end of it: whoever reads the note goes through here.
+    ///
+    /// Closed at launch. An announcement can arrive before the app has adopted
+    /// the session it was left with, and a start acted on then would begin a
+    /// second workout beside the unfinished one. While closed the note is left
+    /// where it is, untouched and unread, and the read that follows opening
+    /// finds it. Taking is `SharedStore.takeAction`, which clears as it reads,
+    /// so a note announced and then met again on activation starts one
+    /// workout, not two.
+    @MainActor
+    final class Inbox {
+        private var isOpen = false
+
+        func open() { isOpen = true }
+
+        func take() -> SharedStore.PendingAction? {
+            isOpen ? SharedStore.takeAction() : nil
+        }
+    }
+}
+
 #if os(iOS)
 import AppIntents
 
@@ -22,7 +70,7 @@ struct StartTodayWorkoutIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
-        SharedStore.request(.startToday)
+        PendingActionHandoff.hand(.startToday)
         return .result()
     }
 }
@@ -36,7 +84,7 @@ struct StartFreestyleWorkoutIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
-        SharedStore.request(.startFreestyle)
+        PendingActionHandoff.hand(.startFreestyle)
         return .result()
     }
 }
@@ -50,7 +98,7 @@ struct OpenWorkoutIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
-        SharedStore.request(.openSession)
+        PendingActionHandoff.hand(.openSession)
         return .result()
     }
 }

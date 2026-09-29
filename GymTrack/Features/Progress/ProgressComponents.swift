@@ -236,6 +236,7 @@ struct MetricTile: View {
 /// not look identical.
 struct ConsistencyGrid: View {
     let volumeByDay: [Date: Double]
+    let trainedDays: Set<Date>
     let weeks: Int
     @Binding var selectedDay: Date?
 
@@ -245,10 +246,20 @@ struct ConsistencyGrid: View {
 
     private var today: Date { calendar.startOfDay(for: .now) }
 
+    /// Every date in the grid is stepped with `TrainingStats.startOfDay`, so
+    /// each cell is the same key the day's sessions are bucketed under. A
+    /// plain day step from a day that starts at 01:00, as Cairo's spring
+    /// forward does, gave cells at 01:00 that matched no session all day.
+    ///
+    /// Columns open on the calendar's first weekday. The grid began every
+    /// column on Sunday, so a Monday-first or Saturday-first week was cut
+    /// across two columns.
     private var firstDay: Date {
-        let offset = calendar.component(.weekday, from: today) - 1
-        let lastColumnStart = calendar.date(byAdding: .day, value: -offset, to: today)!
-        return calendar.date(byAdding: .day, value: -7 * (weeks - 1), to: lastColumnStart)!
+        TrainingStats.gridStart(weeks: weeks, calendar: calendar, now: .now)
+    }
+
+    private func day(_ offset: Int) -> Date {
+        TrainingStats.startOfDay(offset, from: firstDay, calendar: calendar)
     }
 
     private var peak: Double {
@@ -270,8 +281,8 @@ struct ConsistencyGrid: View {
     private var weekdayLabels: some View {
         VStack(alignment: .trailing, spacing: gap) {
             Color.clear.frame(height: 11)      // aligns with the month row
-            ForEach(0..<7, id: \.self) { index in
-                Text(index % 2 == 1 ? String(calendar.veryShortWeekdaySymbols[index]) : " ")
+            ForEach(Array(TrainingStats.gridWeekdayIndices(calendar: calendar).enumerated()), id: \.offset) { row, symbol in
+                Text(row % 2 == 1 ? String(calendar.veryShortWeekdaySymbols[symbol]) : " ")
                     .font(Theme.rounded(8, weight: .bold))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(height: cell)
@@ -298,11 +309,10 @@ struct ConsistencyGrid: View {
 
     private var monthStarts: [(column: Int, name: String)] {
         (0..<weeks).compactMap { week in
-            let start = calendar.date(byAdding: .day, value: week * 7, to: firstDay)!
-            guard let first = (0..<7).compactMap({ offset -> Date? in
-                guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
-                return calendar.component(.day, from: date) == 1 ? date : nil
-            }).first else { return nil }
+            guard let first = (0..<7).lazy
+                .map({ day(week * 7 + $0) })
+                .first(where: { calendar.component(.day, from: $0) == 1 })
+            else { return nil }
             return (week, first.formatted(.dateTime.month(.abbreviated)))
         }
     }
@@ -312,8 +322,7 @@ struct ConsistencyGrid: View {
             ForEach(0..<weeks, id: \.self) { week in
                 VStack(spacing: gap) {
                     ForEach(0..<7, id: \.self) { weekday in
-                        let date = calendar.date(byAdding: .day, value: week * 7 + weekday, to: firstDay)!
-                        cellView(date)
+                        cellView(day(week * 7 + weekday))
                     }
                 }
             }
@@ -323,10 +332,11 @@ struct ConsistencyGrid: View {
     private func cellView(_ date: Date) -> some View {
         let isFuture = date > today
         let volume = volumeByDay[date] ?? 0
+        let wasTrained = trainedDays.contains(date)
         let isSelected = selectedDay == date
 
         return RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-            .fill(fill(volume: volume, isFuture: isFuture))
+            .fill(fill(volume: volume, wasTrained: wasTrained, isFuture: isFuture))
             .overlay {
                 // The hardest days get the far end of the gradient too, so the
                 // grid shades through the phase colour rather than through one
@@ -352,11 +362,18 @@ struct ConsistencyGrid: View {
                 }
                 Haptics.tick()
             }
+            // A future square is only there to finish the grid, so VoiceOver
+            // skips it rather than announcing a hundred unlabelled buttons.
+            .accessibilityElement()
+            .accessibilityHidden(isFuture)
+            .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
+            .accessibilityValue(wasTrained ? "Trained" : "Rest day")
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
-    private func fill(volume: Double, isFuture: Bool) -> Color {
+    private func fill(volume: Double, wasTrained: Bool, isFuture: Bool) -> Color {
         if isFuture { return Color.white.opacity(0.02) }
-        guard volume > 0 else { return Color.white.opacity(0.06) }
+        guard wasTrained else { return Color.white.opacity(0.06) }
         let share = min(volume / peak, 1)
         return Theme.accent.opacity(0.34 + 0.66 * share)
     }

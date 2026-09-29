@@ -14,19 +14,26 @@ struct TodayView: View {
     @State private var pastSession: WorkoutSession?
 
     private var activePlan: Plan? { plans.first(where: \.isActive) ?? plans.first }
-    private var scheduledDay: PlanDay? { activePlan?.day(for: .now) }
+    private var scheduledDay: PlanDay? { activePlan?.nextDay(on: .now, after: finishedSessions) }
+    /// Nothing is pinned to today, so the card is offering the next day of a
+    /// rotation. Calling that "today's session" would state a schedule the
+    /// plan never set.
+    private var isNextInRotation: Bool { activePlan?.day(for: .now) == nil }
     private var finishedSessions: [WorkoutSession] { sessions.filter { !$0.isActive } }
-    /// The latest real workout finished today. An empty session is not a day
-    /// trained — closing a freestyle session without logging anything should
-    /// not turn the home screen into a victory card.
-    private var completedToday: WorkoutSession? { TrainingStats.finishedToday(in: sessions) }
+    /// The workout that trained a day of the plan today, the scheduled one
+    /// first. A freestyle session or the tail of one that started last night
+    /// leaves the scheduled day on the card as if nothing had been done, so a
+    /// ten-minute arm pump doesn't turn Leg Day into a victory card. An empty
+    /// session is not a day trained either.
+    private var completedToday: WorkoutSession? {
+        TrainingStats.completedToday(in: sessions, plan: activePlan)
+    }
     private var streak: TrainingStats.Streak { TrainingStats.streak(from: finishedSessions) }
 
-    /// Sessions logged since Monday of the current week.
+    /// Sessions trained since the start of the current week. One closed with
+    /// nothing logged is left out, as the week strip and the calendar leave it.
     private var thisWeek: [WorkoutSession] {
-        let calendar = Calendar.current
-        guard let weekStart = calendar.dateInterval(of: .weekOfYear, for: .now)?.start else { return [] }
-        return finishedSessions.filter { $0.startedAt >= weekStart }
+        TrainingStats.sessionsThisWeek(finishedSessions)
     }
 
     var body: some View {
@@ -54,6 +61,7 @@ struct TodayView: View {
                         Image(systemName: "gearshape.fill")
                             .foregroundStyle(Theme.textSecondary)
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
@@ -309,7 +317,7 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("TODAY'S SESSION")
+                    Text(isNextInRotation ? "NEXT UP" : "TODAY'S SESSION")
                         .font(Theme.eyebrow)
                         .tracking(1.4)
                         .foregroundStyle(Theme.textTertiary)
@@ -409,16 +417,21 @@ struct TodayView: View {
 
     private var weekStrip: some View {
         let calendar = Calendar.current
-        let start = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .now
-        let trained = Set(finishedSessions.map { calendar.startOfDay(for: $0.startedAt) })
+        let start = TrainingStats.weekInterval(containing: .now, calendar: calendar).start
+        let trained = TrainingStats.trainedDays(in: finishedSessions.filter { $0.startedAt >= start },
+                                                calendar: calendar)
+        let offeredToday = scheduledDay != nil
 
         return HStack(spacing: 6) {
             ForEach(0..<7, id: \.self) { offset in
-                let date = calendar.date(byAdding: .day, value: offset, to: start)!
-                let day = calendar.startOfDay(for: date)
+                let date = TrainingStats.startOfDay(offset, from: start, calendar: calendar)
                 let isToday = calendar.isDateInToday(date)
-                let didTrain = trained.contains(day)
-                let isScheduled = activePlan?.day(for: date) != nil
+                let didTrain = trained.contains(date)
+                // Only today can be marked from the rotation. It moves on when
+                // a day is trained, not when the date changes, so marking every
+                // later unpinned day would promise sessions nobody scheduled.
+                // Other days keep to what is pinned.
+                let isScheduled = isToday ? offeredToday : activePlan?.day(for: date) != nil
 
                 VStack(spacing: 6) {
                     Text(calendar.veryShortWeekdaySymbols[calendar.component(.weekday, from: date) - 1])
@@ -464,7 +477,7 @@ struct TodayView: View {
         HStack(spacing: 10) {
             StatTile(value: "\(thisWeek.count)", label: "This week",
                      caption: activePlan.map { "of \($0.trainingDayCount) planned" })
-            StatTile(value: TrainingStats.totalVolume(thisWeek).compactVolume,
+            StatTile(value: AppSettings.shared.weightUnit.fromKg(TrainingStats.totalVolume(thisWeek)).compactVolume,
                      label: "Volume \(AppSettings.shared.weightUnit.short)",
                      caption: "this week")
             StatTile(value: "\(streak.longest)", label: "Best streak", caption: "days")

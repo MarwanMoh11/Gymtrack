@@ -31,9 +31,9 @@ final class WatchBridge: NSObject {
     private(set) var liveMetrics: WatchWorkoutMetrics?
     private(set) var lastMirrorSentAt: Date?
 
-    private var revision = 0
-    private var idle: WatchIdleSnapshot = .empty
-    private var sessionSnapshot: WatchSessionSnapshot?
+    /// Sends nothing until `WatchCommandCenter.configure` has read the store —
+    /// see `WatchMirrorState` for the mid-workout recording this protects.
+    @ObservationIgnored private var mirrorState = WatchMirrorState()
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack", category: "WatchBridge")
 
     private override init() {
@@ -75,18 +75,23 @@ final class WatchBridge: NSObject {
 
     /// The idle screen's contents — today's session, streak, last workout.
     func update(idle snapshot: WatchIdleSnapshot) {
-        guard idle != snapshot else { return }
-        idle = snapshot
+        guard mirrorState.update(idle: snapshot) else { return }
         push()
     }
 
     /// The running session, or `nil` once it ends.
-    func update(session snapshot: WatchSessionSnapshot?) {
-        guard sessionSnapshot != snapshot else { return }
+    func update(session snapshot: WatchSessionSnapshot?, ended end: WatchSessionEnd? = nil) {
         // A session ending is also the moment the watch should stop its own
         // workout, so that transition is always worth a push.
-        sessionSnapshot = snapshot
+        guard mirrorState.update(session: snapshot, ended: end) else { return }
         if snapshot == nil { liveMetrics = nil }
+        push()
+    }
+
+    /// Restamps a finished mirror if the phone wrote the Health fallback after
+    /// its first end push. A delayed watch must then discard its own samples.
+    func notePhoneHealthWorkout(_ workoutID: UUID, for sessionID: UUID) {
+        guard mirrorState.notePhoneHealthWorkout(workoutID, for: sessionID) else { return }
         push()
     }
 
@@ -114,15 +119,10 @@ final class WatchBridge: NSObject {
 
     /// Replies carry the same state as pushes, stamped after the command has
     /// finished so an earlier idle context cannot undo a successful start.
+    /// Empty until the phone has said what is running.
     private func mirrorPayload() -> [String: Any] {
-        revision += 1
-        let mirror = WatchMirror(
-            revision: revision,
-            sentAt: .now,
-            idle: idle,
-            session: sessionSnapshot,
-            healthEnabled: AppSettings.shared.healthWriteWorkouts
-        )
+        guard let mirror = mirrorState.nextMirror(healthEnabled: AppSettings.shared.healthWriteWorkouts)
+        else { return [:] }
         return mirror.watchPayload(key: WatchLink.mirrorKey)
     }
 
@@ -130,28 +130,54 @@ final class WatchBridge: NSObject {
 
     private func handle(_ payload: [String: Any]) {
         guard let command = WatchCommand.fromWatchPayload(payload, key: WatchLink.commandKey) else { return }
-        if case .metrics(let metrics) = command {
-            liveMetrics = merge(metrics)
+        // Judged before anything reads it, headless or not: this is the one
+        // place both routes share. A refused command still costs a mirror, so
+        // the wrist is put back on what the phone actually has open instead of
+        // being left waiting for a start that will never happen.
+        let verdict = WatchCommandDelivery(payload: payload)
+            .verdict(for: command, openSessionID: mirrorState.session?.sessionID)
+        guard verdict == .apply else {
+            log.debug("Watch command refused: \(String(describing: verdict), privacy: .public)")
+            push()
+            return
         }
-        if case .finish(let metrics) = command, let metrics {
-            liveMetrics = merge(metrics)
+        if case .metrics(let metrics) = command,
+           metrics.sessionID == mirrorState.session?.sessionID {
+            adoptLive(metrics)
+        }
+        if case .finish(let metrics) = command, let metrics,
+           metrics.sessionID == mirrorState.session?.sessionID {
+            adoptLive(metrics)
+        }
+        if case .finishSession(let batch, let metrics) = command, let metrics,
+           metrics.sessionID == batch.sessionID,
+           metrics.sessionID == mirrorState.session?.sessionID {
+            adoptLive(metrics)
         }
         commandHandler?(command)
     }
 
-    /// The watch sends whatever it has to hand; keep the best of both so a
-    /// payload carrying only a current heart rate doesn't wipe the average.
-    private func merge(_ incoming: WatchWorkoutMetrics) -> WatchWorkoutMetrics {
-        var result = liveMetrics ?? WatchWorkoutMetrics()
-        if let value = incoming.currentHeartRate { result.currentHeartRate = value }
-        if let value = incoming.averageHeartRate { result.averageHeartRate = value }
-        if let value = incoming.maxHeartRate { result.maxHeartRate = max(value, result.maxHeartRate ?? 0) }
-        if let value = incoming.activeEnergyKcal { result.activeEnergyKcal = value }
-        if let value = incoming.healthWorkoutID { result.healthWorkoutID = value }
-        return result
+    /// Assigns only a reading that changes what is held; see
+    /// `WatchWorkoutMetrics.merged`.
+    private func adoptLive(_ metrics: WatchWorkoutMetrics) {
+        guard let merged = WatchWorkoutMetrics.merged(metrics, into: liveMetrics) else { return }
+        liveMetrics = merged
     }
 
     func clearMetrics() { liveMetrics = nil }
+}
+
+/// Hands a WatchConnectivity delegate callback to the main actor in the order
+/// it arrived.
+///
+/// The callbacks come in on the session's own queue, and a `Task` per callback
+/// promises no order between two of them: a live message and the queued one
+/// behind it could apply the wrong way round, so the mirror ordering guard saw
+/// the newer one first and dropped the older, or a wrist log landed after the
+/// Finish that closed its session. The main queue runs its blocks in the order
+/// they were submitted.
+private func onMain(_ body: @escaping @MainActor () -> Void) {
+    DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
 }
 
 // MARK: - WCSessionDelegate
@@ -161,8 +187,10 @@ extension WatchBridge: WCSessionDelegate {
     nonisolated func session(_ session: WCSession,
                              activationDidCompleteWith state: WCSessionActivationState,
                              error: Error?) {
-        Task { @MainActor in
+        onMain {
             self.refreshStatus()
+            // Sends nothing if the store has not been read yet; the empty
+            // state a fresh process starts with is not something to report.
             if state == .activated { self.push() }
         }
     }
@@ -175,14 +203,14 @@ extension WatchBridge: WCSessionDelegate {
     }
 
     nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
-        Task { @MainActor in
+        onMain {
             self.refreshStatus()
             self.push()
         }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
-        Task { @MainActor in
+        onMain {
             self.refreshStatus()
             // A watch that just came back may have missed everything.
             if session.isReachable { self.push() }
@@ -190,27 +218,31 @@ extension WatchBridge: WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        Task { @MainActor in self.handle(message) }
+        onMain { self.handle(message) }
     }
 
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
-        Task { @MainActor in
+        onMain {
             self.handle(message)
             // A watch can wake a suspended phone to start a workout. Return
             // the workout on that same conversation instead of relying on a
             // separate push to get the watch off its start screen.
+            // With nothing established the reply is a bare acknowledgement,
+            // which the watch decodes as no mirror at all rather than as none
+            // running.
             var reply = self.mirrorPayload()
+            let carriesMirror = !reply.isEmpty
             reply[WatchLink.ackKey] = true
             replyHandler(reply)
-            self.lastMirrorSentAt = .now
+            if carriesMirror { self.lastMirrorSentAt = .now }
         }
     }
 
     /// Queued delivery — what a set logged out of range arrives on.
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
-        Task { @MainActor in self.handle(userInfo) }
+        onMain { self.handle(userInfo) }
     }
 }
 
@@ -236,10 +268,16 @@ enum WatchMirrorBuilder {
     static func idle(plans: [Plan], sessions: [WorkoutSession]) -> WatchIdleSnapshot {
         let finished = sessions.filter { !$0.isActive }
         let plan = plans.first(where: \.isActive) ?? plans.first
-        let today = plan?.day(for: .now)
+        let today = plan?.nextDay(on: .now, after: finished)
         let calendar = Calendar.current
         let weekStart = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .distantPast
-        let last = finished.max { $0.startedAt < $1.startedAt }
+        // A session closed with nothing logged is not the last thing trained,
+        // and not one of the week's sessions: the phone's week count and
+        // streak leave it out, and the wrist should agree with them.
+        let last = finished.sorted { $0.startedAt > $1.startedAt }.first(where: TrainingStats.isTrained)
+        // Asked of the plan the way the phone's Today card asks it, so the
+        // wrist never calls "Today" a day the phone calls "Next up".
+        let todayIsRotation = today != nil && plan?.day(for: .now) == nil
 
         return WatchIdleSnapshot(
             // What the rest of this describes. The watch compares it with its
@@ -252,10 +290,11 @@ enum WatchMirrorBuilder {
             todaySetCount: today?.totalSets ?? 0,
             todayMuscles: (today?.targetedMuscles.prefix(3).map(\.name)) ?? [],
             streak: TrainingStats.streak(from: finished).current,
-            sessionsThisWeek: finished.filter { $0.startedAt >= weekStart }.count,
+            sessionsThisWeek: finished.filter { $0.startedAt >= weekStart && TrainingStats.isTrained($0) }.count,
             lastSessionTitle: last?.title,
             lastSessionDate: last?.startedAt,
-            unit: AppSettings.shared.weightUnit
+            unit: AppSettings.shared.weightUnit,
+            todayIsRotation: todayIsRotation
         )
     }
 }

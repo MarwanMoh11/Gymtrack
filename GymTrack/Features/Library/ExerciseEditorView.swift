@@ -266,6 +266,10 @@ struct ExerciseEditorView: View {
                         operationError = "This exercise now has sets. Its tracking can't change without changing what those sets mean."
                         return
                     }
+                    try context.retrackPlanSlots(of: id, to: tracking)
+                }
+                if record.name != trimmedName {
+                    try context.renamePlanSlots(of: record.id, to: trimmedName)
                 }
                 record.apply(name: trimmedName,
                              muscles: muscles,

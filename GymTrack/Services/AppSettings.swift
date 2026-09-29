@@ -35,6 +35,25 @@ enum SettingsKey {
     static let watchAutoLaunch = "settings.watchAutoLaunch"
 }
 
+/// When the phone is kept from locking.
+///
+/// The setting used to be applied the moment it was read, at launch and on
+/// every toggle, so a phone left open on Progress or Today never locked: the
+/// battery drained and the last screen stayed readable on an unlocked phone.
+/// The preference is only half the answer. The screen is held awake for a
+/// lifter who is mid-workout and looking at the app, and for nobody else.
+enum ScreenAwakeRules {
+    /// Whether `isIdleTimerDisabled` should be on right now. `workoutOpen` is a
+    /// session that has begun and not been finished or discarded, whether or
+    /// not its logger is expanded: putting the logger away to look at the plan
+    /// does not end the workout. `appIsActive` is false in the background and
+    /// while the app is inactive (Control Center, an incoming call), where the
+    /// system's own timer should apply.
+    static func holdsScreenAwake(setting: Bool, workoutOpen: Bool, appIsActive: Bool) -> Bool {
+        setting && workoutOpen && appIsActive
+    }
+}
+
 /// App-wide preferences. Backed by `UserDefaults` so views can read them with
 /// `@AppStorage` and non-view code can read them statically.
 @Observable
@@ -55,11 +74,12 @@ final class AppSettings {
     var defaultRestSeconds: Int {
         didSet { defaults.set(defaultRestSeconds, forKey: SettingsKey.defaultRestSeconds) }
     }
+    /// Only the preference. Whether the screen is actually held awake is
+    /// `ScreenAwakeRules`' decision, made by `RootView` where the workout and
+    /// the scene are both known; applying it here would hold the phone awake
+    /// on Progress or Today for as long as the app was open.
     var keepScreenAwake: Bool {
-        didSet {
-            defaults.set(keepScreenAwake, forKey: SettingsKey.keepScreenAwake)
-            UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
-        }
+        didSet { defaults.set(keepScreenAwake, forKey: SettingsKey.keepScreenAwake) }
     }
     var userName: String {
         didSet { defaults.set(userName, forKey: SettingsKey.userName) }

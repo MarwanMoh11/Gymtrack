@@ -21,8 +21,30 @@ final class LoadScaleBook: @unchecked Sendable {
 
     static let shared = LoadScaleBook()
 
-    /// Corrections the user has made, by catalog ID.
-    private(set) var overrides: [String: LoadScale] = [:]
+    /// Corrections the user has made, by canonical catalog ID.
+    ///
+    /// Keyed through `ExerciseCatalog.canonicalID(for:)` because a merged
+    /// exercise has two spellings in play: the sheet saves under the survivor,
+    /// while a plan slot or a set made before the merge still asks with the
+    /// losing ID. Keyed raw, each missed the other's correction.
+    ///
+    /// Held behind a lock, because the book is read from model computed
+    /// properties that are not on any actor. The observation hooks are written
+    /// by hand for the same reason: the macro's own storage cannot be locked.
+    private(set) var overrides: [String: LoadScale] {
+        get {
+            access(keyPath: \.overrides)
+            return lock.withLock { storedOverrides }
+        }
+        set {
+            withMutation(keyPath: \.overrides) {
+                lock.withLock { storedOverrides = newValue }
+            }
+        }
+    }
+
+    @ObservationIgnored private let lock = NSLock()
+    @ObservationIgnored private var storedOverrides: [String: LoadScale] = [:]
 
     /// Its own context: these rows are read from everywhere — the logger, the
     /// watch bridge, a progression suggestion — and belong to no one screen.
@@ -43,27 +65,40 @@ final class LoadScaleBook: @unchecked Sendable {
         reload()
     }
 
+    /// Rows stored under a losing ID are read in place rather than rewritten
+    /// here. A correction saved between the 16th and the 19th of September, or
+    /// one brought back by a restore, then counts at once, and nothing in the
+    /// store changes until the user sets or clears that exercise. A migration
+    /// run on load would have to be re-run after every restore and after every
+    /// merge added later, and would write to the store on a path that only
+    /// reads.
     func reload() {
         guard let context,
               let rows = try? context.fetch(FetchDescriptor<ExerciseLoadPreference>())
         else { return }
-        overrides = Dictionary(rows.map { ($0.catalogID, $0.scale) }, uniquingKeysWith: { _, new in new })
+        var newest: [String: ExerciseLoadPreference] = [:]
+        for row in rows {
+            let key = Self.key(row.catalogID)
+            if let held = newest[key], !Self.supersedes(row, held, under: key) { continue }
+            newest[key] = row
+        }
+        overrides = newest.mapValues(\.scale)
     }
 
     // MARK: - Reading
 
     /// The scale in force for an exercise.
     func scale(for catalogID: String) -> LoadScale {
-        overrides[catalogID] ?? Self.derived(for: ExerciseCatalog.shared.exercise(id: catalogID))
+        overrides[Self.key(catalogID)] ?? Self.derived(for: ExerciseCatalog.shared.exercise(id: catalogID))
     }
 
     func scale(for exercise: CatalogExercise?) -> LoadScale {
         guard let exercise else { return Self.derived(for: nil) }
-        return overrides[exercise.id] ?? Self.derived(for: exercise)
+        return overrides[Self.key(exercise.id)] ?? Self.derived(for: exercise)
     }
 
     /// Whether the user has corrected this exercise themselves.
-    func isCustomised(_ catalogID: String) -> Bool { overrides[catalogID] != nil }
+    func isCustomised(_ catalogID: String) -> Bool { overrides[Self.key(catalogID)] != nil }
 
     /// Corrected exercises, named and sorted, for the settings list.
     var customised: [(exercise: CatalogExercise, scale: LoadScale)] {
@@ -76,26 +111,34 @@ final class LoadScaleBook: @unchecked Sendable {
 
     // MARK: - Writing
 
+    /// Saves under the survivor and drops any row kept under a losing ID, so
+    /// the store ends up with one row per movement once the user touches it,
+    /// and an older spelling can't outlive the correction that replaced it.
     func set(_ scale: LoadScale, for catalogID: String) {
-        overrides[catalogID] = scale
+        let key = Self.key(catalogID)
+        overrides[key] = scale
         guard let context else { return }
-        let existing = (try? context.fetch(FetchDescriptor<ExerciseLoadPreference>()))?
-            .first { $0.catalogID == catalogID }
-        if let existing {
-            existing.scale = scale
+        let rows = storedRows(for: key, in: context)
+        let kept = rows.first { $0.catalogID == key }
+        for row in rows where row !== kept { context.delete(row) }
+        if let kept {
+            kept.scale = scale
         } else {
-            context.insert(ExerciseLoadPreference(catalogID: catalogID, scale: scale))
+            context.insert(ExerciseLoadPreference(catalogID: key, scale: scale))
         }
         try? context.save()
     }
 
     /// Hands an exercise back to its equipment default.
+    ///
+    /// Deletes every spelling. Settings clears by the survivor's ID, and a
+    /// row left under the losing ID would keep the correction in force with no
+    /// way to reach it.
     func clear(_ catalogID: String) {
-        overrides[catalogID] = nil
-        guard let context,
-              let rows = try? context.fetch(FetchDescriptor<ExerciseLoadPreference>())
-        else { return }
-        for row in rows where row.catalogID == catalogID { context.delete(row) }
+        let key = Self.key(catalogID)
+        overrides[key] = nil
+        guard let context else { return }
+        for row in storedRows(for: key, in: context) { context.delete(row) }
         try? context.save()
     }
 
@@ -106,6 +149,27 @@ final class LoadScaleBook: @unchecked Sendable {
         else { return }
         for row in rows { context.delete(row) }
         try? context.save()
+    }
+
+    // MARK: - Merged IDs
+
+    private static func key(_ catalogID: String) -> String {
+        ExerciseCatalog.canonicalID(for: catalogID)
+    }
+
+    /// Every stored row for one movement, whichever spelling it was saved under.
+    private func storedRows(for key: String, in context: ModelContext) -> [ExerciseLoadPreference] {
+        let rows = (try? context.fetch(FetchDescriptor<ExerciseLoadPreference>())) ?? []
+        return rows.filter { Self.key($0.catalogID) == key }
+    }
+
+    /// Whether `row` should win over `held` when both spell the same movement.
+    /// The newer one is what the user last said. On an exact tie the row under
+    /// the survivor wins, because every save since the merge has gone there.
+    private static func supersedes(_ row: ExerciseLoadPreference, _ held: ExerciseLoadPreference,
+                                   under key: String) -> Bool {
+        if row.updatedAt != held.updatedAt { return row.updatedAt > held.updatedAt }
+        return row.catalogID == key
     }
 
     // MARK: - Defaults

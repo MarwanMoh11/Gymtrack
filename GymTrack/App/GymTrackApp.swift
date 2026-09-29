@@ -5,7 +5,14 @@ import SQLite3
 @main
 struct GymTrackApp: App {
 
-    let container: ModelContainer
+    @State private var storeState: StoreState
+
+    /// A failed open cannot borrow a temporary database: the logger would then
+    /// appear to save workouts that disappear as soon as the app restarts.
+    private enum StoreState {
+        case ready(ModelContainer)
+        case failed(String)
+    }
 
     /// Where the database lives, pinned rather than left to the default.
     ///
@@ -25,45 +32,60 @@ struct GymTrackApp: App {
         // column these rows are identified by.
         Self.dropWarmupSets()
 
+        let initialState = Self.openStore()
+        _storeState = State(initialValue: initialState)
+        if case .ready(let container) = initialState {
+            Self.configureServices(container: container)
+        }
+    }
+
+    private static func openStore() -> StoreState {
         do {
             // Core Data creates this directory itself, but not on every OS
             // version, and a missing one fails the open.
-            try? FileManager.default.createDirectory(
+            try FileManager.default.createDirectory(
                 at: .applicationSupportDirectory, withIntermediateDirectories: true
             )
-            container = try ModelContainer(
+            let container = try ModelContainer(
                 for: Plan.self, PlanDay.self, PlanItem.self,
                 WorkoutSession.self, SetLog.self, ExerciseNote.self,
                 CustomExerciseRecord.self, BodyMetric.self,
                 ExerciseLoadPreference.self, HiddenExerciseRecord.self,
                 configurations: ModelConfiguration(url: Self.storeURL)
             )
+            return .ready(container)
         } catch {
-            // A store that can't be opened is unrecoverable; falling back to an
-            // in-memory container keeps the app usable enough to export/reset.
-            let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            container = try! ModelContainer(
-                for: Plan.self, PlanDay.self, PlanItem.self,
-                WorkoutSession.self, SetLog.self, ExerciseNote.self,
-                CustomExerciseRecord.self, BodyMetric.self,
-                ExerciseLoadPreference.self, HiddenExerciseRecord.self,
-                configurations: config
-            )
+            return .failed(error.localizedDescription)
         }
+    }
 
-        Self.clearBakedRestOverrides(in: container)
+    private static func configureServices(container: ModelContainer) {
+        clearBakedRestOverrides(in: container)
+
+        // Here and not only in RootView, which never runs on a background
+        // launch. A watch command that starts a workout reads each slot's
+        // tracking and load scale from the catalog, and an unloaded custom
+        // exercise would be built into weight × reps rows it can never leave.
+        ExerciseCatalog.shared.loadLibrary(from: ModelContext(container))
 
         // How each machine is marked is read from everywhere — the logger, a
         // progression suggestion, the watch mirror — so the book is loaded once
         // here rather than fetched per screen.
         LoadScaleBook.shared.configure(container: container)
+        HealthKitService.shared.configure(container: container)
 
         // Before anything else can arrive: iOS wakes a terminated app in the
         // background to hand it a watch message, and the link has to be up and
         // able to apply it without a view hierarchy.
         WatchCommandCenter.shared.configure(container: container)
+    }
 
-        UIApplication.shared.isIdleTimerDisabled = AppSettings.shared.keepScreenAwake
+    private func retryStore() {
+        let retriedState = Self.openStore()
+        if case .ready(let container) = retriedState {
+            Self.configureServices(container: container)
+        }
+        storeState = retriedState
     }
 
     /// Sets logged as warm-ups, from when the app had a warm-up feature.
@@ -123,10 +145,55 @@ struct GymTrackApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .preferredColorScheme(.dark)
-                .tint(Theme.accent)
+            Group {
+                switch storeState {
+                case .ready(let container):
+                    RootView()
+                        .modelContainer(container)
+                case .failed(let detail):
+                    StoreRecoveryView(detail: detail, onRetry: retryStore)
+                }
+            }
+            .preferredColorScheme(.dark)
+            .tint(Theme.accent)
         }
-        .modelContainer(container)
+    }
+}
+
+/// Keeps every data-writing surface closed until the original store opens.
+private struct StoreRecoveryView: View {
+    let detail: String
+    let onRetry: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 42))
+                    .foregroundStyle(Theme.warning)
+
+                Text("Training data unavailable")
+                    .font(Theme.rounded(30, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+
+                Text("GymTrack couldn't open its saved data. Workout logging is paused so new sets won't appear saved and then disappear after a restart.")
+                    .foregroundStyle(Theme.textSecondary)
+
+                Text("The app has not reset your training database. Check that your iPhone has free storage, then try again. Keep GymTrack installed while you recover the data.")
+                    .foregroundStyle(Theme.textSecondary)
+
+                Button("Try again", action: onRetry)
+                    .buttonStyle(PrimaryButtonStyle())
+
+                Text("Error details: \(detail)")
+                    .font(Theme.rounded(12))
+                    .foregroundStyle(Theme.textTertiary)
+                    .textSelection(.enabled)
+            }
+            .padding(24)
+            .frame(maxWidth: 520, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .gtScreenBackground()
     }
 }

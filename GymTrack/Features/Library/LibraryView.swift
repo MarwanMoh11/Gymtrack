@@ -84,6 +84,7 @@ struct LibraryView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Add exercise")
                 }
             }
             .sheet(item: $editing) { subject in
@@ -142,19 +143,31 @@ struct LibraryView: View {
         .listRowBackground(Theme.surface)
     }
 
+    /// Whether the words typed reach something in the library that the muscle
+    /// and equipment filters are hiding. Offering to add the exercise then
+    /// would invite a duplicate of one that exists.
+    private var filtersHideAMatch: Bool {
+        !trimmedQuery.isEmpty && (muscle != nil || equipment != nil)
+            && ExerciseCatalog.shared.hasMatch(for: query)
+    }
+
     private var emptyState: some View {
-        EmptyStateView(
-            icon: trimmedQuery.isEmpty ? "magnifyingglass" : "plus.circle",
+        let offersCreate = !trimmedQuery.isEmpty && !filtersHideAMatch
+        return EmptyStateView(
+            icon: offersCreate ? "plus.circle" : "magnifyingglass",
             title: "Nothing matches",
-            message: trimmedQuery.isEmpty
-                ? "Try a different search, or clear the filters."
-                : "No exercise here is called \u{201C}\(trimmedQuery)\u{201D}. If that's what your gym calls it, add it.",
-            actionTitle: trimmedQuery.isEmpty ? "Clear filters" : "Add \u{201C}\(trimmedQuery)\u{201D}"
+            message: offersCreate
+                ? "No exercise here is called \u{201C}\(trimmedQuery)\u{201D}. If that's what your gym calls it, add it."
+                : (filtersHideAMatch
+                   ? "\u{201C}\(trimmedQuery)\u{201D} is in the library, but not under these filters."
+                   : "Try a different search, or clear the filters."),
+            actionTitle: offersCreate ? "Add \u{201C}\(trimmedQuery)\u{201D}" : "Clear filters"
         ) {
-            if trimmedQuery.isEmpty {
-                query = ""; muscle = nil; equipment = nil
-            } else {
+            if offersCreate {
                 editing = .new(name: trimmedQuery)
+            } else {
+                muscle = nil; equipment = nil
+                if trimmedQuery.isEmpty { query = "" }
             }
         }
     }

@@ -20,10 +20,13 @@ struct SessionDockBar: View {
     private var phase: SessionPhase { workout.phase }
 
     var body: some View {
+        // Once per pass: it is read for the label and again for the
+        // accessibility value, and each read walks the session's groups.
+        let status = statusText
         Button(action: onResume) {
             VStack(spacing: 0) {
                 progressLine
-                bar
+                bar(status: status)
             }
             .background {
                 ZStack {
@@ -54,9 +57,11 @@ struct SessionDockBar: View {
             }
             .tint(Theme.negative)
         }
+        // A fixed-height bar above the tab bar; it has nowhere to grow into.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(workout.session.title), workout in progress")
-        .accessibilityValue(statusText)
+        .accessibilityValue(status)
         .accessibilityHint("Double tap to go back to logging")
         .onAppear { isPulsing = true }
     }
@@ -76,7 +81,7 @@ struct SessionDockBar: View {
             .padding(.top, 5)
     }
 
-    private var bar: some View {
+    private func bar(status: String) -> some View {
         HStack(spacing: 11) {
             ring
 
@@ -93,7 +98,7 @@ struct SessionDockBar: View {
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                 }
-                Text(statusText)
+                Text(status)
                     .font(Theme.rounded(11, weight: .medium))
                     .foregroundStyle(phase == .working ? Theme.textSecondary : phase.tint)
                     .lineLimit(1)
@@ -119,8 +124,14 @@ struct SessionDockBar: View {
     /// answers whatever the current question is.
     private var ring: some View {
         ZStack {
-            ProgressRing(progress: isResting ? 1 - workout.restTimer.progress : workout.progress,
-                         lineWidth: 3.5, phase: phase)
+            if isResting {
+                // Its own schedule, so the ring moving does not draw the bar.
+                RestCountdown(timer: workout.restTimer, step: 0.25) { _, elapsed in
+                    ProgressRing(progress: 1 - elapsed, lineWidth: 3.5, phase: phase)
+                }
+            } else {
+                ProgressRing(progress: workout.progress, lineWidth: 3.5, phase: phase)
+            }
             Image(systemName: phase.glyph)
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(phase.tint.wash)
@@ -131,10 +142,12 @@ struct SessionDockBar: View {
     @ViewBuilder
     private var headlineClock: some View {
         if isResting {
-            Text(workout.restTimer.remaining.clockString)
-                .font(Theme.number(17))
-                .foregroundStyle(phase.tint)
-                .shadow(color: phase.glow, radius: 7)
+            RestCountdown(timer: workout.restTimer) { remaining, _ in
+                Text(remaining.clockString)
+                    .font(Theme.number(17))
+                    .foregroundStyle(phase.tint)
+                    .shadow(color: phase.glow, radius: 7)
+            }
         } else {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Text(workout.session.duration.clockString)
@@ -153,7 +166,35 @@ struct SessionDockBar: View {
             return "All \(workout.totalCount) sets logged — tap to finish"
         }
         guard let group = workout.currentGroup else { return "Tap to log a set" }
-        return "\(group.name) · set \(workout.nextSetNumber) of \(workout.currentSetTotal)"
+        return "\(group.name) · set \(workout.nextSetNumber(in: group)) of \(group.effortCount)"
+    }
+}
+
+/// The rest countdown, drawn off its own clock.
+///
+/// The rest timer holds no value that changes while it runs, so the views that
+/// mention it (the dock, the rest bar, the logger behind it) are not drawn
+/// again as it counts down. Only what is inside `content` is: it is handed the
+/// seconds left and how much of the rest is used, each time the timeline
+/// ticks. The schedule is anchored a hair off a whole second of the time left
+/// so that the clock flips where `clockString` rounds, as it did when a
+/// ticker wrote the value four times a second.
+struct RestCountdown<Content: View>: View {
+    let timer: RestTimer
+    /// Seconds between redraws: 1 for a clock face, 0.25 for a ring.
+    var step: TimeInterval = 1
+    @ViewBuilder let content: (_ remaining: TimeInterval, _ elapsed: Double) -> Content
+
+    var body: some View {
+        if let endsAt = timer.endsAt {
+            let total = Double(max(timer.totalSeconds, 1))
+            TimelineView(.periodic(from: endsAt.addingTimeInterval(-total - 0.499), by: step)) { context in
+                let remaining = max(0, endsAt.timeIntervalSince(context.date))
+                content(remaining, 1 - remaining / total)
+            }
+        } else {
+            content(0, 0)
+        }
     }
 }
 

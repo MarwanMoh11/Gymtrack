@@ -8,7 +8,7 @@ import WidgetKit
 /// than on one you have to go and find.
 struct StreakWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "GymTrackStreak", provider: SnapshotProvider()) { entry in
+        StaticConfiguration(kind: GymTrackWidgetKind.streak, provider: SnapshotProvider()) { entry in
             Group {
                 if let snapshot = entry.snapshot {
                     StreakWidgetView(snapshot: snapshot)
@@ -18,6 +18,9 @@ struct StreakWidget: Widget {
                     WidgetUnavailableView()
                 }
             }
+            // Theme fonts follow Dynamic Type, but these are laid out to the point and
+            // clip past the default size, so they stay where they were.
+            .dynamicTypeSize(...DynamicTypeSize.large)
             .containerBackground(for: .widget) {
                 WidgetBackground(phase: entry.snapshot?.widgetPhase(at: entry.date) ?? .working)
             }
@@ -128,7 +131,11 @@ private struct StreakWidgetView: View {
         // Done beats scheduled: "Today: Push Day" under a streak that Push Day
         // has just extended reads as a session still owed.
         if let finished = snapshot.finishedToday { return "Done today: \(finished.title)" }
-        if let title = snapshot.todayTitle { return "Today: \(title)" }
+        // A day the rotation chose is only next in turn, and "Today" would state
+        // a schedule the plan never set; see `todayIsRotation`.
+        if let title = snapshot.todayTitle {
+            return snapshot.todayIsRotation == true ? "Next up: \(title)" : "Today: \(title)"
+        }
         return count == 0 ? "Nothing logged this week" : "\(count) session\(count == 1 ? "" : "s") this week"
     }
 

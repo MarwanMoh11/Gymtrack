@@ -10,7 +10,9 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var name = ""
     @State private var unit: WeightUnit = .kg
-    @State private var selectedTemplate: PlanTemplate.ID = PlanTemplate.upperLower.id
+    /// `nil` is "start blank": an empty routine to build from, for someone who
+    /// already has a program and would only have a template to delete.
+    @State private var selectedTemplate: PlanTemplate.ID? = PlanTemplate.upperLower.id
     @State private var saveError: String?
 
     var body: some View {
@@ -113,7 +115,7 @@ struct OnboardingView: View {
                                 Text(option.label)
                                     .font(Theme.rounded(17, weight: .bold))
                                     .foregroundStyle(Theme.textPrimary)
-                                Text(option == .kg ? "Steps in 2.5 kg" : "Steps in 5 lb")
+                                Text("Each machine steps in its own increments")
                                     .font(Theme.rounded(13, weight: .medium))
                                     .foregroundStyle(Theme.textTertiary)
                             }
@@ -150,6 +152,14 @@ struct OnboardingView: View {
                         }
                         .buttonStyle(.plain)
                     }
+
+                    Button {
+                        selectedTemplate = nil
+                        Haptics.tick()
+                    } label: {
+                        blankRow
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.bottom, 12)
             }
@@ -176,6 +186,24 @@ struct OnboardingView: View {
                     Pill(text: template.level)
                 }
                 .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .gtCard(padding: 14, phase: isSelected ? .working : nil, selected: isSelected)
+    }
+
+    private var blankRow: some View {
+        let isSelected = selectedTemplate == nil
+        return HStack(spacing: 14) {
+            GlyphTile(symbol: "square.and.pencil", size: 44, solid: isSelected)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Start from blank")
+                    .font(Theme.rounded(16, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                Text("An empty routine. Add your own days and exercises.")
+                    .font(Theme.rounded(12, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
@@ -220,8 +248,12 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        let template = PlanTemplate.all.first { $0.id == selectedTemplate } ?? PlanTemplate.upperLower
-        template.materialise(in: context, makeActive: true)
+        if let selectedTemplate {
+            let template = PlanTemplate.all.first { $0.id == selectedTemplate } ?? PlanTemplate.upperLower
+            template.materialise(in: context, makeActive: true)
+        } else {
+            Plan.blank(in: context, makeActive: true)
+        }
         do {
             try context.save()
         } catch {

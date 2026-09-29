@@ -27,6 +27,14 @@ struct WatchIdleView: View {
     /// is a claim that today is a rest day.
     private var phase: SessionPhase { idle.todayTitle == nil && !isStale ? .done : .working }
 
+    /// "Next up" for a day the plan's rotation chose, because "Today" would
+    /// state a schedule the plan never set. The phone's Today card says the
+    /// same; a mirror from an older phone carries no flag and reads "Today".
+    private var todayEyebrow: String {
+        guard idle.todayTitle != nil else { return "REST DAY" }
+        return idle.todayIsRotation == true ? "NEXT UP" : "TODAY"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
@@ -57,7 +65,7 @@ struct WatchIdleView: View {
                 WatchGlyphTile(symbol: idle.todayTitle == nil ? "moon.zzz.fill"
                                                              : "figure.strengthtraining.traditional",
                                tint: phase.tint, size: 24)
-                Text(idle.todayTitle == nil ? "REST DAY" : "TODAY")
+                Text(todayEyebrow)
                     .font(Theme.eyebrow)
                     .tracking(1.2)
                     .foregroundStyle(phase.tint.opacity(0.9))
@@ -156,7 +164,7 @@ struct WatchIdleView: View {
             if isStarting {
                 Text(connector.isReachable
                      ? "Your phone is building the session."
-                     : "Your phone is out of reach. It starts the session as soon as it's back.")
+                     : "Your phone is out of reach. The session starts if it's back within two minutes.")
                     .font(Theme.rounded(11, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)

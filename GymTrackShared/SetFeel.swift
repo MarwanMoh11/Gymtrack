@@ -56,6 +56,27 @@ enum SetFeel: Double, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The word as the export spells it, stable across a relabel of the button.
+    /// Camel-cased like every other enumerated value in the file.
+    var exportKey: String {
+        switch self {
+        case .easy: "easy"
+        case .solid: "solid"
+        case .hard: "hard"
+        case .allOut: "allOut"
+        }
+    }
+
+    /// The answer a stored rating is, and nothing for a rating that isn't one.
+    ///
+    /// Exact where `nearest(to:)` is generous. A 7 or an 8.5 from the old
+    /// five-number strip is a number the lifter chose, and calling it "Solid"
+    /// would put a word in their mouth that they never pressed. Only the four
+    /// values this enum stores are answers to its question.
+    static func answer(forStored value: Double) -> SetFeel? {
+        allCases.first { $0.rawValue == value }
+    }
+
     /// The nearest word to a rating already on record. Sets rated 7 or 8.5 on
     /// the old strip still have to draw as something.
     static func nearest(to value: Double) -> SetFeel {

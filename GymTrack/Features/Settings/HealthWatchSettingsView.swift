@@ -16,11 +16,13 @@ struct HealthWatchSettingsView: View {
     @State private var isRequesting = false
     @State private var importedCount: Int?
     @State private var isImporting = false
+    @State private var isRetryingCleanup = false
 
     var body: some View {
         Form {
             healthSection
             if health.isAvailable { dataSection }
+            if health.isAvailable, health.givenUpCleanupCount > 0 { cleanupSection }
             watchSection
             howSection
         }
@@ -85,7 +87,11 @@ struct HealthWatchSettingsView: View {
         Section {
             Toggle("Save workouts to Health", isOn: Binding(
                 get: { settings.healthWriteWorkouts },
-                set: { settings.healthWriteWorkouts = $0; if $0 { connect() } }
+                set: {
+                    settings.healthWriteWorkouts = $0
+                    WatchBridge.shared.resend()
+                    if $0 { connect() }
+                }
             ))
             .tint(Theme.accent)
 
@@ -123,6 +129,40 @@ struct HealthWatchSettingsView: View {
             Text("What gets shared")
         } footer: {
             Text("A finished session is written as a traditional strength training workout, one activity per exercise, with your sets, reps and volume attached. Heart rate and energy come back from whatever your watch recorded during it.")
+        }
+        .listRowBackground(Theme.surface)
+    }
+
+    // MARK: - Workouts Health kept
+
+    /// Present only once the app has given up removing a deleted session's
+    /// workout from Health. Nothing here appears, asks or counts down while
+    /// every delete works, and nothing prompts: the line waits for the user to
+    /// open this screen.
+    private var cleanupSection: some View {
+        let count = health.givenUpCleanupCount
+        return Section {
+            Button {
+                retryCleanup()
+            } label: {
+                HStack {
+                    Label(count == 1 ? "1 workout couldn't be removed from Health"
+                                     : "\(count) workouts couldn't be removed from Health",
+                          systemImage: "exclamationmark.circle")
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    if isRetryingCleanup {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Retry")
+                            .font(Theme.rounded(14, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+            }
+            .disabled(isRetryingCleanup)
+        } footer: {
+            Text("Health refused to delete them after several tries. They stay in Fitness until you remove them there or Health lets go.")
         }
         .listRowBackground(Theme.surface)
     }
@@ -195,6 +235,14 @@ struct HealthWatchSettingsView: View {
             await health.requestAuthorization()
             isRequesting = false
             if shouldImport { importWeights() }
+        }
+    }
+
+    private func retryCleanup() {
+        isRetryingCleanup = true
+        Task {
+            await health.retryGivenUpCleanups()
+            isRetryingCleanup = false
         }
     }
 

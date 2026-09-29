@@ -64,6 +64,8 @@ negotiable:
 - `docs/AI_COACH.md` — the proposed local-first AI coaching workflow, its
   intervention rules, and the experiment needed before claiming it improves
   training or the logging experience. Read it before designing AI coach work.
+- `docs/CODE_REVIEW_ISSUES.md` — tracked review findings with stable IDs and
+  validation notes. Check it before taking a bug-fix task.
 - `Services/LoadScaleBook.swift` — what each machine is marked in and what one
   step on it is worth. Every weight the app suggests must be a rung the equipment
   actually has.

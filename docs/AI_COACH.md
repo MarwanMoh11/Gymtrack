@@ -102,20 +102,74 @@ a measured recovery score.
 
 `BackupService.Archive` is the natural read model. Version 2 already carries:
 
-- active and historical plans, including days, exercise order, target sets,
-  target rep ranges, target loads, rest intervals, and notes;
-- session start and end times, session and exercise notes, and note tags;
-- every logged set's exercise, load, reps, duration, targets, and timestamps;
-- optional set effort, expressed as RPE-compatible values;
+- active and historical plans, including days, exercise order, target sets and
+  rest intervals, with a rep range only on a slot counted in reps, a hold time
+  only on a timed slot, each only where it is above zero, a target load only
+  where one was set, and notes only where somebody wrote one;
+- session start and end times, and session notes, exercise notes and note tags
+  wherever any were written;
+- every logged set's exercise, load and completion time, with `reps` only on a
+  set counted in reps and `seconds` only on a timed one, never both; its rep
+  targets only where they are above zero; and its start only where the lifter
+  announced it;
+- optional set effort, as the answer the lifter gave. `effort` is one of `easy`
+  (three or more reps left), `solid` (two), `hard` (one) or `allOut`, and is
+  written only where the stored value is exactly one of those four answers. It
+  is the field to read. `rpe` sits beside it for restore and older readers, and
+  **it is a bucket code, not a point RPE**: `easy` is stored as 6, which by the
+  RPE definition would be four reps in reserve, but the lifter only said
+  "three or more". Treating `rpe: 6` as a measured RPE 6 understates how much
+  was left on an Easy set. The top-level `effortScale` (`rpe: "bucketCode"`,
+  with the four buckets and their codes) says so inside the file. Before
+  2026-09-19 the same key held five choices, 6 to 10, so a set with an `rpe`
+  and no `effort`, such as a 7 or an 8.5, is an older rating with no word
+  attached, and nothing here says what it was meant as. A set with neither key
+  was not rated. `settings.trackRPE` is whether the app was asking when the file
+  was written: the setting at export, not a history of it, so it cannot tell
+  a month of unanswered sets from a month with the question off;
 - measured versus inferred per-set heart-rate windows;
-- session heart rate, energy, Watch provenance, and body-weight history;
+- session heart rate, energy, Watch provenance, and body-weight history. The
+  source of the session numbers is stated where it is known: `heartRateSource`
+  and `energySource` are `watchWorkout` (the watch app recorded the workout) or
+  `healthSamples` (read back from Health, and kept only where at least a dozen
+  readings, one a minute on average, spanned at least half the session, and,
+  for energy, only what a wrist-worn device wrote). `heartRateReadings` counts
+  the readings behind the average and peak where the app counted them. Numbers
+  Health held too thinly to vouch for are not filed at all, and energy under
+  one kilocalorie is left out. A session **without a source key** is one of
+  unknown origin, such as any stored before this was recorded, and must not be
+  read as phone-only or as low effort;
 - load-nudge offers and whether they were taken or declined;
 - drop-set and cluster continuations, so one extended effort is not mistaken for
   several collapsing working sets;
-- exercise metadata and each machine's unit and legal increment.
+- exercise metadata and each machine's unit and legal increment, for every
+  exercise the plans and sessions name: `effectiveLoadScales` gives the rung the
+  logger uses, marked `correction` where the lifter set it and `derived` where
+  the app worked it out from the equipment, so a proposed load can be checked
+  against a step the machine really has. `loadScales` still lists corrections
+  only;
+- a stable ID on every set, and the plan day each session was started from
+  (`planDayID`, the same ID a plan day carries; absent where there was none),
+  so a proposal can cite a set and adherence can be computed without matching
+  free-text names. Restore keeps set IDs, so a citation survives a restore, and
+  a file that repeats one is refused;
+- where and when the file was written: `exportedAt`, `timeZone` (an IANA
+  identifier, such as `Africa/Cairo`), `appVersion` and `appBuild`. Every date
+  is UTC and a plan day's `weekday` is the lifter's local one, so the zone is
+  what puts a late-evening session on the right day. Each key is absent where
+  unknown.
+
+The file's order is defined: sessions by `startedAt` then ID, sets by exercise
+order then set index (so a `continues` row follows the set it continues),
+plans by `createdAt`, days and slots by `order`, and everything else by a
+stable key, with keys sorted. Two exports of an unchanged store differ only in
+`exportedAt`, so hash the file with that key set aside.
 
 The existing export rules remain non-negotiable: missing is not zero, inferred
-is not measured, and an undone action leaves no analytical trace.
+is not measured, and an undone action leaves no analytical trace. A reader must
+take an absent key as "not measured" or "not prescribed", never as zero: a
+squat has no `seconds`, a plank has no `reps`, and a slot with no target has no
+target key at all.
 
 Useful future signals should be added only when they are low-friction and have
 clear semantics. Candidates include pain or discomfort, the reason for an

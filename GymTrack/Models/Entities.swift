@@ -41,6 +41,56 @@ final class Plan {
     func day(onWeekday weekday: Int) -> PlanDay? {
         orderedDays.first { $0.weekday == weekday && !$0.isRest && !$0.items.isEmpty }
     }
+
+    /// The day to offer on `date`: the one pinned to its weekday, or else the
+    /// next day of the rotation.
+    ///
+    /// "Add day" leaves a day unpinned, and a routine built that way (Push,
+    /// Pull, Legs, trained in turn on whatever days the week allows) used to
+    /// have no day at all. Today called every day a rest day, and the widget,
+    /// Siri and the watch all started freestyle sessions without the
+    /// progression's prefilled loads. `nil` now means only that every training
+    /// day is pinned, and none of them to this weekday.
+    func nextDay(on date: Date, after sessions: [WorkoutSession], calendar: Calendar = .current) -> PlanDay? {
+        day(onWeekday: calendar.component(.weekday, from: date)) ?? nextInRotation(after: sessions)
+    }
+
+    /// The unpinned training day that follows, in `orderedDays` and wrapping
+    /// round, the last of this plan's days that was trained. The first
+    /// unpinned day when none has been.
+    ///
+    /// The last day is found by its place in the order, so a pinned day in
+    /// the middle still moves the rotation on past it. A freestyle session, or
+    /// one from another plan, is passed over rather than read as a fresh
+    /// start. So is a session closed with nothing logged: a mis-tap on Finish
+    /// is not a day trained, and reading it as one would skip the lifter past
+    /// a workout they never did.
+    func nextInRotation(after sessions: [WorkoutSession]) -> PlanDay? {
+        let order = orderedDays
+        guard let firstRotating = order.first(where: Self.rotates) else { return nil }
+        let positions = Dictionary(order.enumerated().map { ($1.id, $0) }) { first, _ in first }
+
+        // Newest first and stopping at the first hit, so only the one session
+        // that answers has its sets read; the rest are judged on their dates
+        // and day IDs alone.
+        let lastTrained = sessions
+            .filter { !$0.isActive && $0.planDayID.flatMap { positions[$0] } != nil }
+            .sorted { $0.startedAt > $1.startedAt }
+            .first { $0.sets.contains(where: \.isCompleted) }
+        guard let lastPosition = lastTrained?.planDayID.flatMap({ positions[$0] }) else {
+            return firstRotating
+        }
+        let wrapped = order[(lastPosition + 1)...] + order[...lastPosition]
+        return wrapped.first(where: Self.rotates)
+    }
+
+    /// A training day that isn't pinned to a weekday. A stored weekday outside
+    /// 1...7 counts as unpinned, the way `PlanDay.weekdayName` already reads it;
+    /// otherwise the day could never come round on any date.
+    private static func rotates(_ day: PlanDay) -> Bool {
+        let isPinned = day.weekday.map { (1...7).contains($0) } ?? false
+        return !isPinned && !day.isRest && !day.items.isEmpty
+    }
 }
 
 // MARK: - Plan day
@@ -73,14 +123,17 @@ final class PlanDay {
 
     var totalSets: Int { items.reduce(0) { $0 + $1.targetSets } }
 
-    var weekdayName: String? {
-        guard let weekday else { return nil }
-        return Calendar.current.weekdaySymbols[weekday - 1]
-    }
+    var weekdayName: String? { weekdaySymbol(in: Calendar.current.weekdaySymbols) }
 
-    var weekdayShortName: String? {
-        guard let weekday else { return nil }
-        return Calendar.current.shortWeekdaySymbols[weekday - 1]
+    var weekdayShortName: String? { weekdaySymbol(in: Calendar.current.shortWeekdaySymbols) }
+
+    /// Restore now turns away a weekday outside 1...7, but a store written
+    /// before that check can still hold one, and indexing with it trapped the
+    /// Today tab on every launch. Such a day reads as unpinned instead. The
+    /// range is checked before subtracting, so not even `Int.min` can trap.
+    private func weekdaySymbol(in symbols: [String]) -> String? {
+        guard let weekday, weekday >= 1, weekday <= symbols.count else { return nil }
+        return symbols[weekday - 1]
     }
 
     /// The muscles this day trains, ordered by how many sets hit each.
@@ -196,6 +249,21 @@ final class WorkoutSession {
     var activeEnergyKcal: Double?
     /// True when an Apple Watch was logging alongside the phone.
     var wasWatchDriven: Bool = false
+    /// Where the heart rate above came from, as a `VitalsSource` raw value.
+    /// `nil` on every session stored before this existed, and wherever nothing
+    /// could vouch for the numbers: a reader has to be able to tell a
+    /// workout-long recording from a handful of background readings, and a
+    /// guess written here would be false detail. Read through
+    /// `heartRateSource`, never off the string.
+    var heartRateSourceRaw: String?
+    /// The same for `activeEnergyKcal`. Kept apart because the two are read
+    /// separately, and one can be recorded by the wrist while the other is
+    /// filled in from Health afterwards.
+    var energySourceRaw: String?
+    /// How many individual heart-rate readings the average and the peak were
+    /// taken over, where this app counted them. A session average of 132 over
+    /// seven hundred readings is a workout; over a dozen it is a sample.
+    var heartRateReadings: Int?
 
     @Relationship(deleteRule: .cascade, inverse: \SetLog.session)
     var sets: [SetLog] = []
@@ -230,6 +298,13 @@ final class WorkoutSession {
     /// Not the list for anything that counts the work itself — see
     /// `totalVolumeKg`.
     var effortSets: [SetLog] { completedSets.filter { !$0.isContinuation } }
+
+    /// Sets in the session, logged or not, counted the way `effortSets` counts
+    /// the logged ones. Every "x of y sets" reads `effortSets.count` out of
+    /// this: the logger, the dock, the Live Activity and the widgets, headless
+    /// or not. When they counted rows, a drop read as a set of its own on the
+    /// Lock Screen while the card and the summary folded it into the one above.
+    var effortCount: Int { sets.filter { !$0.isContinuation }.count }
 
     /// Every kilogram that actually moved, continuations included.
     ///
@@ -323,14 +398,40 @@ final class WorkoutSession {
     var exerciseGroups: [SessionExerciseGroup] {
         let grouped = Dictionary(grouping: sets) { $0.catalogID }
         return grouped.map { key, value in
-            SessionExerciseGroup(
+            let ordered = value.sorted(by: SetLog.precedesInSession)
+            return SessionExerciseGroup(
                 catalogID: key,
-                name: value.first?.exerciseName ?? key,
-                order: value.map(\.exerciseOrder).min() ?? 0,
-                sets: value.sorted { $0.setIndex < $1.setIndex }
+                name: ordered.first?.exerciseName ?? key,
+                order: ordered.first?.exerciseOrder ?? 0,
+                sets: ordered
             )
         }
         .sorted { $0.order < $1.order }
+    }
+
+    /// Folds repeated slots of the same exercise into one ordered card. Older
+    /// planned sessions can have each slot beginning at set zero; normalizing
+    /// an active session before another edit keeps the wrist and every index-
+    /// based operation on the same sequence without rewriting finished logs.
+    @discardableResult
+    func normalizeExerciseSlots() -> Bool {
+        var changed = false
+        for rows in Dictionary(grouping: sets, by: \.catalogID).values {
+            let ordered = rows.sorted(by: SetLog.precedesInSession)
+            guard let first = ordered.first else { continue }
+            let order = first.exerciseOrder
+            for (index, set) in ordered.enumerated() {
+                if set.exerciseOrder != order {
+                    set.exerciseOrder = order
+                    changed = true
+                }
+                if set.setIndex != index {
+                    set.setIndex = index
+                    changed = true
+                }
+            }
+        }
+        return changed
     }
 
     var day: String {
@@ -379,6 +480,54 @@ final class WorkoutSession {
         averageHeartRate != nil || maxHeartRate != nil || (activeEnergyKcal ?? 0) >= 1
     }
 
+    /// The energy reading, or `nil` under a kilocalorie. The same floor as
+    /// `hasHealthMetrics`, applied where the value leaves the app: 0.4 kcal is
+    /// a sensor that woke up, and the export would otherwise hand it to a coach
+    /// as what a workout cost.
+    var reportableEnergyKcal: Double? {
+        guard let energy = activeEnergyKcal, energy >= 1 else { return nil }
+        return energy
+    }
+
+    /// Where the heart rate came from. Nothing when there is no heart rate, so
+    /// a provenance left behind by numbers since cleared can't describe values
+    /// that are no longer there.
+    var heartRateSource: VitalsSource? {
+        guard averageHeartRate != nil || maxHeartRate != nil else { return nil }
+        return heartRateSourceRaw.flatMap(VitalsSource.init(rawValue:))
+    }
+
+    /// Where the energy came from, under the same rule as `heartRateSource`.
+    var energySource: VitalsSource? {
+        guard reportableEnergyKcal != nil else { return nil }
+        return energySourceRaw.flatMap(VitalsSource.init(rawValue:))
+    }
+
+    /// The reading count, only alongside a source that a count describes.
+    var reportableHeartRateReadings: Int? {
+        guard heartRateSource != nil, let count = heartRateReadings, count > 0 else { return nil }
+        return count
+    }
+
+    /// Marks the numbers the watch just handed over as its own recording.
+    ///
+    /// Called with what the watch's report actually carried, not with what the
+    /// session now holds: a heart rate the watch read overwrites, but an energy
+    /// figure it left out may already be one Health supplied, and stamping that
+    /// as the wrist's would be a claim nobody measured. The values themselves
+    /// are written by `takeWatchMetrics`.
+    func stampWatchVitals(average: Double?, max: Double?, energy: Double?) {
+        if (average ?? 0) > 0 || (max ?? 0) > 0 {
+            heartRateSourceRaw = VitalsSource.watchWorkout.rawValue
+            // A count from an earlier Health read describes numbers that have
+            // just been replaced.
+            heartRateReadings = nil
+        }
+        if (energy ?? 0) > 0 {
+            energySourceRaw = VitalsSource.watchWorkout.rawValue
+        }
+    }
+
     /// The set that took the most out of you, by the peak your heart reached
     /// during it. `nil` until something has been attributed — a session the
     /// watch sat out has no hardest set, only a hardest set nobody measured.
@@ -390,6 +539,88 @@ final class WorkoutSession {
         completedSets
             .filter { $0.maxHeartRate != nil }
             .max { ($0.maxHeartRate ?? 0) < ($1.maxHeartRate ?? 0) }
+    }
+}
+
+// MARK: - Where a session's vitals came from
+
+/// Where a session's heart rate or energy came from, for the reader of the
+/// export. An absent source means nobody vouched for the numbers, which is what
+/// every session stored before this existed carries.
+enum VitalsSource: String, Sendable {
+    /// The watch app recorded the workout itself, so the readings run the whole
+    /// session and belong to it.
+    case watchWorkout
+    /// Read back from Health over the session's window, and only where enough
+    /// readings from a body sensor covered enough of it. See `VitalsEvidence`.
+    case healthSamples
+}
+
+/// One reading, or one slice of energy, that Health held inside a session's
+/// window. Plain values, so the decision below can be tested without HealthKit.
+struct VitalsSample: Equatable, Sendable {
+    var start: Date
+    var end: Date
+    /// Beats per minute for a heart-rate reading, kilocalories for energy.
+    var value: Double
+    /// Whether the sample was written by a device worn on the wrist. Health
+    /// also holds energy an iPhone estimates from its pedometer, which no
+    /// sensor measured against the workout, and a device it can't name is
+    /// treated the same way: unknown is not the wrist.
+    var isFromWrist: Bool
+}
+
+/// The numbers from Health a session may keep, and the evidence for each.
+struct VitalsEvidence: Equatable, Sendable {
+    var averageHeartRate: Double?
+    var maxHeartRate: Double?
+    var heartRateReadings: Int?
+    var activeEnergyKcal: Double?
+
+    /// Fewest readings that can stand as a session's heart rate. A watch that
+    /// is only worn takes a handful an hour; one recording a workout takes one
+    /// every few seconds.
+    static let minimumReadings = 12
+    /// The longest average gap between readings that still describes the whole
+    /// session rather than a few moments of it.
+    static let longestAverageGap: TimeInterval = 60
+    /// How much of the window the first and last reading must span.
+    static let minimumCoverage = 0.5
+
+    /// What of `heartRate` and `energy` may be written to the session.
+    ///
+    /// Thin data is no data: two background readings would export as an average
+    /// heart rate, and the coach would read an hour's session as very light.
+    /// Heart rate is taken from any source, since a chest strap on a phone app
+    /// is as good a measurement as a wrist; energy only from the wrist, because
+    /// the phone's own figure is an estimate from steps.
+    static func judge(heartRate: [VitalsSample], energy: [VitalsSample],
+                      window: DateInterval) -> VitalsEvidence {
+        var result = VitalsEvidence()
+        let readings = heartRate.filter { $0.value > 0 }
+        if covers(readings, window: window, minimumCount: minimumReadings, longestAverageGap: longestAverageGap) {
+            let beats = readings.map(\.value)
+            result.averageHeartRate = beats.reduce(0, +) / Double(beats.count)
+            result.maxHeartRate = beats.max()
+            result.heartRateReadings = readings.count
+        }
+        // No count floor: energy arrives in a few long slices, and the span
+        // check is what says whether they cover the session.
+        let wrist = energy.filter { $0.isFromWrist && $0.value > 0 }
+        let total = wrist.reduce(0) { $0 + $1.value }
+        if total >= 1, covers(wrist, window: window, minimumCount: 1, longestAverageGap: nil) {
+            result.activeEnergyKcal = total
+        }
+        return result
+    }
+
+    private static func covers(_ samples: [VitalsSample], window: DateInterval,
+                               minimumCount: Int, longestAverageGap: TimeInterval?) -> Bool {
+        guard window.duration > 0, samples.count >= minimumCount,
+              let first = samples.map(\.start).min(), let last = samples.map(\.end).max()
+        else { return false }
+        if let gap = longestAverageGap, window.duration / Double(samples.count) > gap { return false }
+        return last.timeIntervalSince(first) >= window.duration * minimumCoverage
     }
 }
 
@@ -456,6 +687,15 @@ final class SetLog {
     /// Position of this set within its exercise, 0-based.
     var setIndex: Int = 0
 
+    /// Old sessions may contain several plan slots for one exercise, each
+    /// starting at set zero. Their stored positions stay as logged, while
+    /// history and the summary read the slots in their original day order.
+    static func precedesInSession(_ lhs: SetLog, _ rhs: SetLog) -> Bool {
+        if lhs.exerciseOrder != rhs.exerciseOrder { return lhs.exerciseOrder < rhs.exerciseOrder }
+        if lhs.setIndex != rhs.setIndex { return lhs.setIndex < rhs.setIndex }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
     var weightKg: Double = 0
     var reps: Int = 0
     var seconds: Int = 0
@@ -479,7 +719,12 @@ final class SetLog {
     /// Never inferred. The moment a set is logged is measured; the moment it
     /// began is only known if somebody announced it, and writing a guess here
     /// would turn the one thing that separates rest from work into a number
-    /// that looks measured and isn't.
+    /// that looks measured and isn't. Where the heart rate showed the set
+    /// began, that reading lives in `detectedStartedAt`, under its own name.
+    ///
+    /// Stamped at the end of the count-in the tap starts (`SetLeadIn`), not at
+    /// the tap itself — the "go" both strips count down to, so it is still a
+    /// moment the lifter was shown rather than one inferred.
     var startedAt: Date?
 
     // MARK: Health
@@ -500,6 +745,18 @@ final class SetLog {
     /// window nobody can characterise is a number pretending to be a
     /// measurement.
     var heartRateWindowRaw: String?
+    /// Where the set itself began and ended by the heart rate's account — the
+    /// climb out of the rest before it, read off the watch's trace after the
+    /// session, for a set whose start nobody announced.
+    ///
+    /// Kept apart from `startedAt` because that field means somebody said so,
+    /// and a reader who finds a start there is entitled to treat the rest
+    /// before it as measured. Written and cleared together, only where the
+    /// trace showed one effort and nothing that could be taken for a second —
+    /// see `SetEffortDetection` — and absent, both of them, everywhere else,
+    /// which is most sets.
+    var detectedStartedAt: Date?
+    var detectedEndedAt: Date?
 
     // MARK: The offer this set's answer produced
 
@@ -643,6 +900,29 @@ final class SetLog {
         heartRateWindowRaw = nil
     }
 
+    /// The set as the heart rate showed it. `nil` unless both ends are there
+    /// and run forwards: half a window, or one running backwards, describes no
+    /// stretch of time anybody spent under a bar.
+    var detectedWindow: DetectedSetWindow? {
+        guard let detectedStartedAt, let detectedEndedAt, detectedEndedAt > detectedStartedAt else { return nil }
+        return DetectedSetWindow(start: detectedStartedAt, end: detectedEndedAt)
+    }
+
+    /// How long the set lasted by the heart rate's account.
+    var detectedDuration: TimeInterval? { detectedWindow?.duration }
+
+    /// Files where the trace put the set, both ends at once, so a reader never
+    /// finds a detected start with nothing to pair it with.
+    func recordDetectedWindow(_ window: DetectedSetWindow) {
+        detectedStartedAt = window.start
+        detectedEndedAt = window.end
+    }
+
+    func clearDetectedWindow() {
+        detectedStartedAt = nil
+        detectedEndedAt = nil
+    }
+
     // MARK: The load offer
 
     /// What became of the offer this set's answer produced, as the word rather
@@ -725,6 +1005,11 @@ final class SetLog {
         // being taken back — kept, they would sit on whatever gets logged in
         // its place and describe minutes nobody spent doing it.
         clearHeartRate()
+        // And where the heart rate said the set was. That reading was taken in
+        // the gap this set's log closed; logged again later, the gap is a
+        // different one, and a kept window would hand the new log a start and
+        // an end from an effort that no longer belongs to anything.
+        clearDetectedWindow()
         // The offer came out of the rating being cleared two lines up. With the
         // answer gone there was never a reading of this set to act on, so what
         // was done about it stops being a fact about anything.
@@ -855,6 +1140,12 @@ final class BodyMetric {
     /// Where the number came from, so an import from Health can tell itself
     /// apart from something the user typed.
     var source: String = Source.manual.rawValue
+    /// The sample GymTrack wrote to Health for this weigh-in, so a correction
+    /// or a delete can take the wrong number back out of Health as well.
+    /// Nil for a reading imported from another source, and for one Health
+    /// never got. It points into this phone's Health store, so it means
+    /// nothing anywhere else and the backup leaves it out.
+    var healthSampleID: UUID?
 
     init(date: Date = .now, weightKg: Double) {
         self.id = UUID()
@@ -867,6 +1158,22 @@ final class BodyMetric {
     }
 
     var isFromHealth: Bool { source == Source.health.rawValue }
+
+    /// The Health sample to remove when this entry is corrected or deleted.
+    /// Only a weigh-in typed here can name one. The source check is a second
+    /// lock behind the import never setting the ID: a scale's reading is a
+    /// real measurement, and deleting a mistyped entry must never take it out
+    /// of Health with it.
+    var writtenSampleID: UUID? {
+        source == Source.manual.rawValue ? healthSampleID : nil
+    }
+
+    /// The entry a weigh-in for `date` replaces. The card keeps one entry per
+    /// day, so a second weigh-in corrects the first rather than stacking up.
+    static func entry(sameDayAs date: Date, in metrics: [BodyMetric],
+                      calendar: Calendar = .current) -> BodyMetric? {
+        metrics.first { calendar.isDate($0.date, inSameDayAs: date) }
+    }
 }
 
 // MARK: - Per-exercise load scale

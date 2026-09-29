@@ -97,7 +97,7 @@ struct LoadScale: Codable, Hashable, Sendable {
 
     /// The most anyone will load, in display units — the ceiling on a stepper
     /// or the Digital Crown.
-    var displayCeiling: Double { unit == .kg ? 500 : 1_100 }
+    var displayCeiling: Double { unit == .kg ? 1_000 : 2_200 }
 
     // MARK: - Formatting
 

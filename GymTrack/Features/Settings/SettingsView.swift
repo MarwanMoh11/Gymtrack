@@ -12,8 +12,31 @@ struct SettingsView: View {
     @State private var settings = AppSettings.shared
     @State private var exportURL: URL?
     @State private var showingImporter = false
+    @State private var showingRestoreConfirm = false
     @State private var showingWipeConfirm = false
+    /// Counted when the erase dialog opens, so its Health button can say how
+    /// many workouts it would remove, and is left out when there are none.
+    @State private var linkedHealthWorkouts = 0
     @State private var alert: AlertPayload?
+    @State private var finishEraseAfterAlert = false
+    /// The backup, restore or erase that is running, or `nil`. Set before the
+    /// work starts and cleared when it ends, however it ends, so a second one
+    /// can't be started on top of it and the sheet can say what it is doing.
+    @State private var running: DataTask?
+
+    private enum DataTask {
+        case exporting, restoring, erasing
+
+        var label: String {
+            switch self {
+            case .exporting: "Preparing your backup"
+            case .restoring: "Restoring your backup"
+            case .erasing: "Erasing your data"
+            }
+        }
+    }
+
+    private var isBusy: Bool { running != nil }
 
     /// "3 set up" — enough to say whether anything has been corrected without
     /// opening the screen.
@@ -107,7 +130,7 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Theme.surface)
 
-                Section("Feel") {
+                Section {
                     Toggle("Haptics", isOn: Binding(
                         get: { settings.hapticsEnabled },
                         set: { settings.hapticsEnabled = $0 }
@@ -119,6 +142,10 @@ struct SettingsView: View {
                         set: { settings.keepScreenAwake = $0 }
                     ))
                     .tint(Theme.accent)
+                } header: {
+                    Text("Feel")
+                } footer: {
+                    Text("Keeps the phone from locking while a workout is running and GymTrack is on screen. With no workout running, or once you leave the app, the phone locks on its usual timer.")
                 }
                 .listRowBackground(Theme.surface)
 
@@ -145,11 +172,23 @@ struct SettingsView: View {
                     } label: {
                         Label("Export a backup", systemImage: "square.and.arrow.up")
                     }
+                    .disabled(isBusy)
 
                     Button {
-                        showingImporter = true
+                        showingRestoreConfirm = true
                     } label: {
                         Label("Restore from a backup", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(isBusy)
+
+                    if let running {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(running.label)
+                                .font(Theme.rounded(14, weight: .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
                 } header: {
                     Text("Your data")
@@ -160,12 +199,13 @@ struct SettingsView: View {
 
                 Section {
                     Button(role: .destructive) {
+                        linkedHealthWorkouts = BackupService.linkedHealthWorkoutCount(context: context)
                         showingWipeConfirm = true
                     } label: {
                         Label("Erase all data", systemImage: "trash")
                             .foregroundStyle(Theme.negative)
                     }
-                    .disabled(!openSessions.isEmpty)
+                    .disabled(!openSessions.isEmpty || isBusy)
                 } footer: {
                     if !openSessions.isEmpty {
                         Text("Finish or discard the workout that's running before erasing data.")
@@ -187,25 +227,60 @@ struct SettingsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .font(Theme.rounded(15, weight: .bold))
+                        .disabled(isBusy)
                 }
             }
+            .interactiveDismissDisabled(isBusy)
             .sheet(item: $exportURL) { url in
                 ShareSheet(items: [url])
             }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
                 handleImport(result)
             }
-            .confirmationDialog("Erase everything?", isPresented: $showingWipeConfirm, titleVisibility: .visible) {
-                Button("Erase all data", role: .destructive) { wipe() }
+            // Asked before the picker because picking a file is the last step:
+            // the restore runs the moment one is chosen, and it replaces
+            // everything in GymTrack.
+            .confirmationDialog("Replace everything with a backup?", isPresented: $showingRestoreConfirm,
+                                titleVisibility: .visible) {
+                Button("Choose a backup", role: .destructive) { showingImporter = true }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Every routine, session and record on this device is deleted. Export a backup first if you might want it back.")
+                Text("Every routine, session and record on this device is replaced by the backup's, and sessions the backup doesn't have are deleted. Workouts in Apple Health are left as they are.")
+            }
+            // Removing from Health is its own button, never a side effect of
+            // erasing: it reaches every device on the account, and the backup
+            // this dialog recommends holds only each workout's ID.
+            .confirmationDialog("Erase everything?", isPresented: $showingWipeConfirm, titleVisibility: .visible) {
+                Button("Erase all data", role: .destructive) { wipe(removingHealthWorkouts: false) }
+                if linkedHealthWorkouts > 0 {
+                    Button(removeFromHealthLabel, role: .destructive) { wipe(removingHealthWorkouts: true) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(wipeMessage)
             }
             .alert(item: $alert) { payload in
-                Alert(title: Text(payload.title), message: Text(payload.message), dismissButton: .default(Text("OK")))
+                Alert(title: Text(payload.title), message: Text(payload.message), dismissButton: .default(Text("OK")) {
+                    if finishEraseAfterAlert {
+                        finishEraseAfterAlert = false
+                        hasOnboarded = false
+                        dismiss()
+                    }
+                })
             }
         }
         .gtSheetBackground()
+    }
+
+    private var removeFromHealthLabel: String {
+        let noun = linkedHealthWorkouts == 1 ? "workout" : "workouts"
+        return "Erase and remove \(linkedHealthWorkouts) \(noun) from Health"
+    }
+
+    private var wipeMessage: String {
+        let local = "Every routine, session and record on this device is deleted. Export a backup first if you might want it back."
+        guard linkedHealthWorkouts > 0 else { return local }
+        return local + "\n\n\"Erase all data\" keeps the workouts GymTrack saved to Apple Health. Removing them from Health as well deletes them on every device that shares your Health data through iCloud, and no backup can bring them back."
     }
 
     /// A one-word read on the integration, so the row says something without
@@ -229,40 +304,72 @@ struct SettingsView: View {
 
     // MARK: - Actions
 
+    /// The state change has to reach the screen before the main-actor part of
+    /// the work starts, or the spinner would appear only after the freeze it
+    /// is there to explain. Returning to the run loop for a frame is enough.
+    private func showProgress(_ task: DataTask) async {
+        running = task
+        try? await Task.sleep(nanoseconds: 60_000_000)
+    }
+
     private func exportBackup() {
-        do {
-            exportURL = try BackupService.export(context: context)
-            Haptics.success()
-        } catch {
-            alert = AlertPayload(title: "Export failed", message: error.localizedDescription)
+        guard !isBusy else { return }
+        Task { @MainActor in
+            await showProgress(.exporting)
+            defer { running = nil }
+            do {
+                exportURL = try await BackupService.exportOffMain(context: context)
+                Haptics.success()
+            } catch {
+                alert = AlertPayload(title: "Export failed", message: error.localizedDescription)
+            }
         }
     }
 
     private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let url):
-            do {
-                try BackupService.restore(from: url, context: context)
-                Haptics.success()
-                alert = AlertPayload(title: "Restored", message: "Your routines and history are back.")
-            } catch {
-                // Report what actually went wrong — "couldn't be read" hid a
-                // decode error behind a message about the file being invalid.
-                alert = AlertPayload(title: "Restore failed", message: error.localizedDescription)
+            guard !isBusy else { return }
+            Task { @MainActor in
+                await showProgress(.restoring)
+                defer { running = nil }
+                do {
+                    try await BackupService.restoreOffMain(from: url, context: context)
+                    Haptics.success()
+                    alert = AlertPayload(title: "Restored", message: "Your routines and history are back.")
+                } catch {
+                    // Report what actually went wrong: "couldn't be read" hid a
+                    // decode error behind a message about the file being invalid.
+                    alert = AlertPayload(title: "Restore failed", message: error.localizedDescription)
+                }
             }
         case .failure(let error):
             alert = AlertPayload(title: "Restore failed", message: error.localizedDescription)
         }
     }
 
-    private func wipe() {
-        do {
-            try BackupService.wipe(context: context)
-            hasOnboarded = false
-            Haptics.warn()
-            dismiss()
-        } catch {
-            alert = AlertPayload(title: "Couldn't erase", message: error.localizedDescription)
+    private func wipe(removingHealthWorkouts: Bool) {
+        guard !isBusy else { return }
+        Task { @MainActor in
+            await showProgress(.erasing)
+            defer { running = nil }
+            do {
+                let cleanup = try await BackupService.wipe(context: context,
+                                                           removingHealthWorkouts: removingHealthWorkouts)
+                Haptics.warn()
+                if let cleanup, !cleanup.isComplete {
+                    let count = cleanup.failedIDs.count
+                    let noun = count == 1 ? "workout" : "workouts"
+                    finishEraseAfterAlert = true
+                    alert = AlertPayload(title: "Local data erased; Health cleanup incomplete",
+                                         message: "We could not confirm removal of \(count) \(noun) from Apple Health. Check Health access or remove them in Health.")
+                } else {
+                    hasOnboarded = false
+                    dismiss()
+                }
+            } catch {
+                alert = AlertPayload(title: "Couldn't erase", message: error.localizedDescription)
+            }
         }
     }
 }

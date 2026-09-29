@@ -11,6 +11,9 @@ struct WorkoutLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: WorkoutActivity.self) { context in
             LockScreenCard(context: context)
+                // Theme fonts follow Dynamic Type, but the card and the Island
+                // are sized to the point and clip past the default size.
+                .dynamicTypeSize(...DynamicTypeSize.large)
                 // The Lock Screen presentation needs its own link; the one on
                 // the Dynamic Island below doesn't carry over.
                 .widgetURL(WorkoutActivity.deepLink)
@@ -20,17 +23,21 @@ struct WorkoutLiveActivityWidget: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     SetBadge(context: context)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     ClockBadge(context: context)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     IslandFooter(context: context)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
                 }
             } compactLeading: {
                 CompactRing(context: context)
             } compactTrailing: {
                 CompactClock(context: context)
+                    .dynamicTypeSize(...DynamicTypeSize.large)
             } minimal: {
                 CompactRing(context: context)
             }

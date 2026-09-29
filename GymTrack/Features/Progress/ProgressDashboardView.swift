@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Charts
+import Combine
 
 struct ProgressDashboardView: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var allSessions: [WorkoutSession]
@@ -8,6 +9,14 @@ struct ProgressDashboardView: View {
     @State private var window: Window = .month
     @State private var metric: TrainingStats.Metric = .volume
     @State private var barsGrown = false
+    /// Bumped when a save changes the finished history without changing which
+    /// sessions it holds. See `ProgressHistoryCache`.
+    @State private var historyRevision = 0
+    @State private var historyCache = ProgressHistoryCache(layout: ProgressHistory.Layout(
+        windowDays: Window.allCases.map(\.days),
+        calendarDays: ProgressDashboardView.calendarWeeks * 7,
+        trendWeeks: 8
+    ))
 
     fileprivate static let calendarWeeks = 17
 
@@ -30,9 +39,10 @@ struct ProgressDashboardView: View {
     // MARK: - Body
 
     var body: some View {
-        // Worked out once, here, and handed to everything that draws it — see
-        // `ProgressFigures` for what this replaced.
-        let figures = ProgressFigures(allSessions: allSessions, window: window, metric: metric)
+        // The history is walked only when it changes; see `ProgressHistory`.
+        // What is left per pass is cheap enough to hand every card afresh.
+        let history = historyCache.history(for: allSessions, revision: historyRevision)
+        let figures = ProgressFigures(history: history, window: window, metric: metric)
         return NavigationStack {
             ScrollView {
                 if figures.sessions.isEmpty {
@@ -45,6 +55,7 @@ struct ProgressDashboardView: View {
                     }
                     .padding(.horizontal, 16)
                 } else {
+                    let lifts = liftTrends(figures)
                     VStack(spacing: 16) {
                         heroCard(figures).riseIn(0)
                         SegmentedPills(values: Window.allCases, selection: $window) { $0.rawValue }
@@ -54,14 +65,19 @@ struct ProgressDashboardView: View {
                         HeatMapCard(ratios: figures.ratios,
                                     muscleSets: figures.muscleSets,
                                     behind: figures.behind,
-                                    sessions: figures.sessions,
-                                    lastWeek: figures.lastWeek)
+                                    history: figures.history,
+                                    recentWeek: figures.recentWeek)
                             .riseIn(4)
                         balanceCard(figures).riseIn(5)
-                        ConsistencyCard(volumeByDay: figures.volumeByDay, weeks: Self.calendarWeeks)
+                        ConsistencyCard(volumeByDay: figures.volumeByDay,
+                                        trainedDays: figures.trainedDays,
+                                        weeks: Self.calendarWeeks)
                             .riseIn(6)
                         BodyWeightCard().riseIn(7)
-                        recordsCard(figures).riseIn(8)
+                        // Left out, not emptied, so a lifter with nothing to
+                        // judge yet does not get a gap where the card would be.
+                        if !lifts.isEmpty { LiftTrendsCard(lifts: lifts).riseIn(8) }
+                        recordsCard(figures).riseIn(9)
                     }
                     .padding(16)
                     .padding(.bottom, 8)
@@ -82,6 +98,14 @@ struct ProgressDashboardView: View {
         }
         .onAppear {
             withAnimation(.spring(response: 0.9, dampingFraction: 0.9).delay(0.35)) { barsGrown = true }
+        }
+        // A late set from the watch or a restore changes the finished history
+        // in place and leaves the query's sessions as they were, so the cache
+        // hears about it from the save. Not every context saves on the main
+        // thread, hence the hop.
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)
+            .receive(on: DispatchQueue.main)) { note in
+            if historyCache.isAffected(by: note) { historyRevision &+= 1 }
         }
     }
 
@@ -126,7 +150,7 @@ struct ProgressDashboardView: View {
 
     private func weekLine(_ figures: ProgressFigures) -> String {
         let count = figures.lastWeek.count
-        let volume = TrainingStats.totalVolume(figures.lastWeek).compactVolume
+        let volume = AppSettings.shared.weightUnit.fromKg(figures.lastWeekVolumeKg).compactVolume
         return "\(count) session\(count == 1 ? "" : "s") · \(volume) \(AppSettings.shared.weightUnit.short)"
     }
 
@@ -204,8 +228,21 @@ struct ProgressDashboardView: View {
     private func balanceCaption(_ regions: [(Muscle.Region, Double)]) -> String {
         let scored = regions.sorted { $0.1 < $1.1 }
         guard let weakest = scored.first, let strongest = scored.last else { return "" }
-        if weakest.1 >= 0.85 { return "Nothing is lagging — the whole body is on target this week." }
+        if weakest.1 >= 0.85 { return "Nothing is lagging — the whole body is on target over the last 7 days." }
         return "\(strongest.0.rawValue) is leading, \(weakest.0.rawValue) is the gap to close."
+    }
+
+    // MARK: - Lifts
+
+    /// Only the last few weeks are read, so the newest-first history is cut at
+    /// the window's edge before `LiftTrends` looks at any set.
+    private func liftTrends(_ figures: ProgressFigures) -> [LiftTrends.Lift] {
+        let calendar = Calendar.current
+        let now = Date.now
+        let cutoff = calendar.date(byAdding: .weekOfYear, value: -LiftTrends.windowWeeks, to: now) ?? .distantPast
+        let recent = Array(figures.sessions.prefix { $0.startedAt >= cutoff })
+        return LiftTrends.lifts(in: recent, now: now, calendar: calendar,
+                                incrementKg: { LoadScaleBook.shared.scale(for: $0).incrementKg })
     }
 
     // MARK: - Records
@@ -214,159 +251,126 @@ struct ProgressDashboardView: View {
         let records = Array(figures.records.prefix(8))
         return VStack(alignment: .leading, spacing: 10) {
             SectionHeader("Personal records")
-            ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
-                // Each record reads in whatever that exercise is loaded in.
-                let scale = LoadScaleBook.shared.scale(for: record.catalogID)
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle().fill(index < 3
-                                      ? AnyShapeStyle(LinearGradient(colors: [Theme.accent.opacity(0.26), Theme.accent.opacity(0.07)],
-                                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                                      : AnyShapeStyle(Color.white.opacity(0.05)))
-                            .overlay { Circle().strokeBorder(index < 3 ? Theme.accent.opacity(0.32) : .clear, lineWidth: 1) }
-                        if index < 3 {
-                            Image(systemName: "trophy.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.accent.wash)
-                        } else {
-                            Text("\(index + 1)")
-                                .font(Theme.number(11, weight: .bold))
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                    }
-                    .frame(width: 28, height: 28)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(record.exerciseName)
-                            .font(Theme.rounded(14, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-                        Text(record.achievedAt.formatted(date: .abbreviated, time: .omitted))
-                            .font(Theme.rounded(11, weight: .medium))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                    Spacer(minLength: 4)
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(scale.format(record.heaviestKg)) × \(record.bestReps)")
-                            .font(Theme.number(13, weight: .bold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("1RM ≈ \(scale.format(record.bestEstimatedOneRepMax))")
-                            .font(Theme.rounded(10, weight: .medium))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                }
-                .padding(.vertical, 3)
+            ForEach(records) { record in
+                recordRow(record)
             }
         }
         .gtCard()
+    }
+
+    /// The list is newest first, not ranked, so every row carries the same
+    /// trophy. Trophies on the first three and numbers on the rest read as a
+    /// podium that the ordering no longer had.
+    private func recordRow(_ record: TrainingStats.PersonalRecord) -> some View {
+        let figures = recordFigures(for: record)
+        return HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [Theme.accent.opacity(0.26), Theme.accent.opacity(0.07)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay { Circle().strokeBorder(Theme.accent.opacity(0.32), lineWidth: 1) }
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.accent.wash)
+            }
+            .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(record.exerciseName)
+                    .font(Theme.rounded(14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Text(record.achievedAt.formatted(date: .abbreviated, time: .omitted))
+                    .font(Theme.rounded(11, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(figures.headline)
+                    .font(Theme.number(13, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                if let caption = figures.caption {
+                    Text(caption)
+                        .font(Theme.rounded(10, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    /// What a record row prints. All of it belongs to the one set that holds
+    /// the record, so the load, the estimate and the date beside it agree.
+    private func recordFigures(for record: TrainingStats.PersonalRecord) -> (headline: String, caption: String?) {
+        // Each record reads in whatever that exercise is loaded in.
+        let scale = LoadScaleBook.shared.scale(for: record.catalogID)
+        switch record.measure {
+        case let .weight(kg, reps, estimatedOneRepMax):
+            return ("\(scale.format(kg)) × \(reps)",
+                    estimatedOneRepMax.map { "1RM ≈ \(scale.format($0))" })
+        case let .addedLoad(kg, reps):
+            return ("+\(scale.format(kg)) × \(reps)", "Added load")
+        case let .reps(reps):
+            return (reps == 1 ? "1 rep" : "\(reps) reps", nil)
+        case let .duration(seconds):
+            return ("\(seconds)s", nil)
+        }
     }
 }
 
 // MARK: - The figures
 
-/// Everything the Progress tab draws, worked out once per pass.
+/// What the Progress tab draws for the window and metric on screen, worked out
+/// once per pass and handed to every card.
 ///
 /// These used to be computed properties, read wherever they were drawn — and
-/// several were read from inside `filter` and `sort` closures. `behind` asked
-/// for the week's muscle ratios once per muscle and again per comparison, and
-/// every ask walked the week's sets from the top, so the tab read its history
-/// dozens of times per redraw. Tapping a muscle, flipping the figure or pinning
-/// a day on the calendar each redrew the whole screen and paid for all of it
-/// again, to move one highlight.
-///
-/// Built from the same `TrainingStats` calls as before, in the same order, so
-/// every number is the one the screen always showed.
+/// several were read from inside `filter` and `sort` closures, so the tab read
+/// its history dozens of times per redraw. Gathering them here stopped that,
+/// but every pass still walked the whole history. The walks now live in
+/// `ProgressHistory` and run once per change to it. What is left here is a
+/// lookup of the window's figures and at most ninety days of digests for the
+/// chart, cheap enough to redo on a metric tap, a window tap or the bars
+/// growing in.
 private struct ProgressFigures {
-    /// Finished sessions, newest first.
-    let sessions: [WorkoutSession]
-    let windowed: [WorkoutSession]
-    let previous: [WorkoutSession]
-    let lastWeek: [WorkoutSession]
-    let streak: TrainingStats.Streak
-    let muscleSets: [Muscle: Double]
-    let ratios: [Muscle: Double]
-    let coverage: Double
-    /// Muscles under half their weekly target, biggest target first.
-    let behind: [Muscle]
+    let history: ProgressHistory
     let points: [TrainingStats.DayPoint]
     let rolling: [TrainingStats.DayPoint]
     let rollingWindow: Int
-    let volumeByDay: [Date: Double]
-    let records: [TrainingStats.PersonalRecord]
-    let averageDuration: Double
-    let weeklySessionCounts: [Double]
-    private let totals: [TrainingStats.Metric: Double]
-    private let previousTotals: [TrainingStats.Metric: Double]
-    private let weeklyTrends: [TrainingStats.Metric: [Double]]
+    private let figures: ProgressHistory.WindowFigures
 
-    init(allSessions: [WorkoutSession], window: ProgressDashboardView.Window, metric: TrainingStats.Metric) {
-        let sessions = allSessions.filter { !$0.isActive }
-        self.sessions = sessions
-        let windowed = TrainingStats.sessions(in: sessions, days: window.days)
-        let previous = TrainingStats.previousWindow(sessions, days: window.days)
-        let lastWeek = TrainingStats.sessions(in: sessions, days: 7)
-        self.windowed = windowed
-        self.previous = previous
-        self.lastWeek = lastWeek
-        streak = TrainingStats.streak(from: sessions)
-
-        muscleSets = TrainingStats.setsPerMuscle(lastWeek)
-        let ratios = TrainingStats.muscleRatios(lastWeek)
-        self.ratios = ratios
-        coverage = TrainingStats.coverage(ratios)
-        behind = Muscle.allCases
-            .filter { (ratios[$0] ?? 0) < 0.5 }
-            .sorted { lhs, rhs in
-                lhs.weeklySetTarget == rhs.weeklySetTarget
-                    ? (ratios[lhs] ?? 0) < (ratios[rhs] ?? 0)
-                    : lhs.weeklySetTarget > rhs.weeklySetTarget
-            }
-
+    init(history: ProgressHistory, window: ProgressDashboardView.Window, metric: TrainingStats.Metric) {
+        self.history = history
+        figures = history.window(days: window.days)
         rollingWindow = window == .week ? 3 : 7
-        let points = TrainingStats.daily(metric, sessions: sessions, days: window.days)
+        let points = history.points(metric, days: window.days)
         self.points = points
         rolling = TrainingStats.rollingAverage(points, window: rollingWindow)
-
-        volumeByDay = Dictionary(uniqueKeysWithValues:
-            TrainingStats.daily(.volume, sessions: sessions, days: ProgressDashboardView.calendarWeeks * 7)
-                .map { ($0.date, $0.value) })
-        records = TrainingStats.records(in: sessions)
-        averageDuration = windowed.isEmpty ? 0 : windowed.reduce(0.0) { $0 + $1.duration } / Double(windowed.count)
-
-        let metrics = TrainingStats.Metric.allCases
-        totals = Dictionary(uniqueKeysWithValues: metrics.map { ($0, TrainingStats.total($0, windowed)) })
-        previousTotals = Dictionary(uniqueKeysWithValues: metrics.map { ($0, TrainingStats.total($0, previous)) })
-        weeklyTrends = Dictionary(uniqueKeysWithValues: metrics.map { ($0, Self.weeklyTrend($0, sessions: sessions)) })
-        weeklySessionCounts = Self.weeklySessionCounts(sessions)
     }
 
-    func total(_ metric: TrainingStats.Metric) -> Double { totals[metric] ?? 0 }
+    /// Finished sessions, newest first.
+    var sessions: [WorkoutSession] { history.sessions }
+    var windowed: [WorkoutSession] { figures.windowed }
+    var previous: [WorkoutSession] { figures.previous }
+    var lastWeek: [WorkoutSession] { history.lastWeek }
+    var recentWeek: [WorkoutSession] { history.recentWeek }
+    var lastWeekVolumeKg: Double { history.lastWeekVolumeKg }
+    var streak: TrainingStats.Streak { history.streak }
+    var muscleSets: [Muscle: Double] { history.muscleSets }
+    var ratios: [Muscle: Double] { history.ratios }
+    var coverage: Double { history.coverage }
+    /// Muscles under half their weekly target, biggest target first.
+    var behind: [Muscle] { history.behind }
+    var volumeByDay: [Date: Double] { history.volumeByDay }
+    var trainedDays: Set<Date> { history.trainedDays }
+    var records: [TrainingStats.PersonalRecord] { history.records }
+    var averageDuration: Double { figures.averageDuration }
+    var weeklySessionCounts: [Double] { history.weeklySessionCounts }
 
-    func delta(_ metric: TrainingStats.Metric) -> Double? {
-        TrainingStats.change(from: previousTotals[metric] ?? 0, to: total(metric))
-    }
+    func total(_ metric: TrainingStats.Metric) -> Double { figures.total(metric) }
 
-    func weeklyTrend(_ metric: TrainingStats.Metric) -> [Double] { weeklyTrends[metric] ?? [] }
+    func delta(_ metric: TrainingStats.Metric) -> Double? { figures.delta(metric) }
 
-    /// Weekly totals, oldest first — the shape behind each headline number.
-    private static func weeklyTrend(_ metric: TrainingStats.Metric, sessions: [WorkoutSession], weeks: Int = 8) -> [Double] {
-        let daily = TrainingStats.daily(metric, sessions: sessions, days: weeks * 7)
-        return stride(from: 0, to: daily.count, by: 7).map { start in
-            daily[start..<min(start + 7, daily.count)].reduce(0) { $0 + $1.value }
-        }
-    }
-
-    /// Sessions per week, oldest first.
-    private static func weeklySessionCounts(_ sessions: [WorkoutSession], weeks: Int = 8) -> [Double] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        return (0..<weeks).reversed().map { offset in
-            guard let end = calendar.date(byAdding: .day, value: -7 * offset, to: today),
-                  let start = calendar.date(byAdding: .day, value: -7, to: end)
-            else { return 0 }
-            return Double(sessions.filter { $0.startedAt > start && $0.startedAt <= end }.count)
-        }
-    }
+    func weeklyTrend(_ metric: TrainingStats.Metric) -> [Double] { history.weeklyTrend(metric) }
 }
 
 // MARK: - Heat map
@@ -380,8 +384,8 @@ private struct HeatMapCard: View {
     let ratios: [Muscle: Double]
     let muscleSets: [Muscle: Double]
     let behind: [Muscle]
-    let sessions: [WorkoutSession]
-    let lastWeek: [WorkoutSession]
+    let history: ProgressHistory
+    let recentWeek: [WorkoutSession]
 
     @State private var selectedMuscle: Muscle?
     @State private var bodySide: BodySide = .front
@@ -390,7 +394,7 @@ private struct HeatMapCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("MUSCLE HEAT MAP · 7 DAYS")
+                    Text("MUSCLE HEAT MAP · LAST 7 DAYS")
                         .font(Theme.eyebrow)
                         .tracking(1.4)
                         .foregroundStyle(Theme.textTertiary)
@@ -412,8 +416,8 @@ private struct HeatMapCard: View {
                 if let muscle = selectedMuscle {
                     MuscleDetailPanel(muscle: muscle,
                                       sets: muscleSets[muscle] ?? 0,
-                                      lastTrained: TrainingStats.lastTrained(muscle, in: sessions),
-                                      exercises: TrainingStats.topExercises(for: muscle, in: lastWeek))
+                                      lastTrained: history.lastTrained(muscle),
+                                      exercises: TrainingStats.topExercises(for: muscle, in: recentWeek))
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.97, anchor: .top)),
                             removal: .opacity))
@@ -465,18 +469,22 @@ private struct HeatMapCard: View {
 /// shouldn't cost the rest of the screen a recompute.
 private struct ConsistencyCard: View {
     let volumeByDay: [Date: Double]
+    let trainedDays: Set<Date>
     let weeks: Int
 
     @State private var selectedDay: Date?
 
     var body: some View {
-        let trainedDays = volumeByDay.filter { $0.value > 0 }.count
+        let trainedDayCount = volumeByDay.keys.filter { trainedDays.contains($0) }.count
 
         return VStack(alignment: .leading, spacing: 12) {
             SectionHeader("Consistency · last \(weeks) weeks")
 
             ScrollView(.horizontal, showsIndicators: false) {
-                ConsistencyGrid(volumeByDay: volumeByDay, weeks: weeks, selectedDay: $selectedDay)
+                ConsistencyGrid(volumeByDay: volumeByDay,
+                                trainedDays: trainedDays,
+                                weeks: weeks,
+                                selectedDay: $selectedDay)
                     .padding(.vertical, 2)
             }
             .scrollClipDisabled()
@@ -484,26 +492,25 @@ private struct ConsistencyCard: View {
 
             if let day = selectedDay {
                 let volume = volumeByDay[day] ?? 0
+                let wasTrained = trainedDays.contains(day)
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(volume > 0 ? Theme.accent : Theme.textTertiary)
+                        .fill(wasTrained ? Theme.accent : Theme.textTertiary)
                         .frame(width: 6, height: 6)
                     Text(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
                         .font(Theme.rounded(12, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
                     Spacer()
-                    Text(volume > 0
-                         ? "\(volume.compactVolume) \(AppSettings.shared.weightUnit.short)"
-                         : "Rest")
+                    Text(daySummary(volume: volume, wasTrained: wasTrained))
                         .font(Theme.number(12, weight: .bold))
-                        .foregroundStyle(volume > 0 ? Theme.accent : Theme.textTertiary)
+                        .foregroundStyle(wasTrained ? Theme.accent : Theme.textTertiary)
                 }
                 .transition(.opacity)
             } else {
                 HStack {
-                    Text("\(trainedDays) days trained")
+                    Text("\(trainedDayCount) days trained")
                     Spacer()
-                    Text("\(Int((Double(trainedDays) / Double(weeks * 7) * 100).rounded()))% of days")
+                    Text("\(Int((Double(trainedDayCount) / Double(weeks * 7) * 100).rounded()))% of days")
                 }
                 .font(Theme.rounded(11, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
@@ -511,6 +518,12 @@ private struct ConsistencyCard: View {
         }
         .gtCard()
         .animation(.easeInOut(duration: 0.2), value: selectedDay)
+    }
+
+    private func daySummary(volume: Double, wasTrained: Bool) -> String {
+        guard wasTrained else { return "Rest" }
+        guard volume > 0 else { return "Trained" }
+        return "\(volume.compactVolume) \(AppSettings.shared.weightUnit.short)"
     }
 }
 
@@ -823,11 +836,12 @@ struct MuscleDetailPanel: View {
     }
 
     /// Counted in calendar days, so a session logged this evening still reads
-    /// "today" rather than the relative formatter's "in 5 hours".
-    static func dayLabel(for date: Date, calendar: Calendar = .current) -> String {
-        let days = calendar.dateComponents([.day],
-                                           from: calendar.startOfDay(for: date),
-                                           to: calendar.startOfDay(for: .now)).day ?? 0
+    /// "today" rather than the relative formatter's "in 5 hours". The count is
+    /// `TrainingStats.dayCount`, not the difference of two day starts: where
+    /// the clocks spring forward at midnight, that read yesterday's session as
+    /// "today" for the whole of the next day.
+    static func dayLabel(for date: Date, calendar: Calendar = .current, now: Date = .now) -> String {
+        let days = TrainingStats.dayCount(from: date, to: now, calendar: calendar)
         switch days {
         case ..<1: return "today"
         case 1: return "yesterday"
@@ -839,7 +853,7 @@ struct MuscleDetailPanel: View {
         let remaining = Int((target - sets).rounded(.up))
         switch ratio {
         case ..<0.02:
-            return "Nothing logged this week. \(muscle.weeklySetTarget) hard sets is the target."
+            return "Nothing logged in the last 7 days. \(muscle.weeklySetTarget) hard sets is the target."
         case ..<0.85:
             return "\(remaining) more hard set\(remaining == 1 ? "" : "s") to hit the weekly target."
         case ..<1.16:

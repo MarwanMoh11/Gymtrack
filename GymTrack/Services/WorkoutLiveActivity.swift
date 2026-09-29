@@ -83,6 +83,34 @@ final class WorkoutLiveActivity {
 
     // MARK: - Content
 
+    /// The card's state for a session read straight from the store, for the
+    /// changes made with no logger on screen. With no rest dates it is the state
+    /// a headless change publishes: that side runs no rest timer, and the wrist
+    /// is counting the one that matters.
+    ///
+    /// `ActiveWorkout.activityState` builds through this, handing over its
+    /// timer's dates, so the two can't come apart.
+    static func state(for session: WorkoutSession,
+                      restEndsAt: Date? = nil, restStartedAt: Date? = nil) -> WorkoutActivity.ContentState {
+        let position = SessionPosition(session)
+        let unit = AppSettings.shared.weightUnit
+        return WorkoutActivity.ContentState(
+            startedAt: session.startedAt,
+            completedSets: position.completedCount,
+            totalSets: position.totalCount,
+            currentExercise: position.currentGroup?.name ?? "Freestyle",
+            currentSetNumber: position.nextSetNumber,
+            currentSetTotal: position.currentSetTotal,
+            currentTarget: position.nextTargetLabel,
+            upNext: position.upNextName,
+            restEndsAt: restEndsAt,
+            restStartedAt: restStartedAt,
+            volumeLabel: "\(unit.fromKg(session.totalVolumeKg).compactVolume) \(unit.short)",
+            elapsedLabel: session.duration.durationString,
+            elapsedShort: session.duration.shortDurationString
+        )
+    }
+
     /// While resting, the rest end doubles as the stale date: when it passes,
     /// the widget flips to "rest done" on its own rather than waiting for the
     /// app to be woken up to say so.

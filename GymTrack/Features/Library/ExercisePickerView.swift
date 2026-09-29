@@ -44,7 +44,7 @@ struct ExercisePickerView: View {
                     // and it drops into the workout as though it had been there
                     // all along.
                     if !trimmedQuery.isEmpty {
-                        createRow(libraryHasMatches: !results.isEmpty)
+                        createRow(libraryHasMatches: !results.isEmpty || ExerciseCatalog.shared.hasMatch(for: query))
                     }
                 }
                 .listStyle(.plain)

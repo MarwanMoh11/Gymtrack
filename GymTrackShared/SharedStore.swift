@@ -67,6 +67,19 @@ enum SharedStore {
     }
 }
 
+// MARK: - Widget kinds
+
+/// The `kind` each widget is registered under, which the app names when it asks
+/// WidgetKit to reload just that one. Kept here so the widget declaring a kind
+/// and the app reloading it can't drift apart into a reload that silently
+/// matches nothing.
+enum GymTrackWidgetKind {
+    static let today = "GymTrackToday"
+    static let streak = "GymTrackStreak"
+
+    static let all: Set<String> = [today, streak]
+}
+
 // MARK: - What a widget draws
 
 /// Everything the widgets know. Flat and small on purpose — it is rewritten on
@@ -97,6 +110,31 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
         var progress: Double {
             totalSets > 0 ? min(1, Double(completedSets) / Double(totalSets)) : 0
         }
+
+        /// How long a session can stay open before the app treats it as
+        /// abandoned and closes it: `WorkoutSession.staleAfter`, which the
+        /// widgets can't see. The two must stay equal (the widget tests pin it),
+        /// and `WorkoutSession.staleAfter` should read this so there is one
+        /// definition.
+        static let staleAfter: TimeInterval = 12 * 3600
+
+        /// Whether the app would close this session by `moment`. Nothing wakes
+        /// the app to say so when the lifter simply walked out of the gym, so
+        /// a widget has to reach the same verdict from the clock, or it shows a
+        /// workout running until somebody next opens the app.
+        func isStale(at moment: Date) -> Bool {
+            moment.timeIntervalSince(startedAt) > Self.staleAfter
+        }
+
+        /// A moment `isStale` is true at, the first whole second after it turns,
+        /// which is what the timeline needs an entry for. `isStale` is strict,
+        /// so the turn itself would still read as running.
+        var staleAt: Date { startedAt.addingTimeInterval(Self.staleAfter + 1) }
+
+        /// A stand-in carrying nothing but "a session is running", for
+        /// comparing what a widget that draws no session detail can see.
+        fileprivate static let presence = Running(title: "", startedAt: .distantPast, completedSets: 0,
+                                                  totalSets: 0, exercise: "", target: "", restEndsAt: nil)
     }
 
     /// One weekday of the routine, as much of it as a widget draws.
@@ -107,6 +145,10 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
         var exerciseCount: Int
         var setCount: Int
         var muscles: [String]
+        /// Whether this weekday carries the rotation's next day rather than a
+        /// day pinned to it — see `GymTrackSnapshot.todayIsRotation`. Optional
+        /// so a snapshot from an older build still decodes, as "Today".
+        var isRotation: Bool? = nil
     }
 
     /// The workout already finished today, if there was one with anything in
@@ -147,6 +189,13 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
     var hasPlan: Bool
     /// Today's scheduled session. `nil` on a rest day, and with no plan.
     var todayTitle: String?
+    /// Whether today's session is the plan's next in turn rather than the one
+    /// pinned to this weekday, which the widgets then call "Next up".
+    ///
+    /// "Today" on a rotation day states a schedule the plan never set, and the
+    /// phone's Today card already stopped saying it. Optional so a snapshot
+    /// written by an older build still decodes, and reads as "Today" as before.
+    var todayIsRotation: Bool?
     var todayExerciseCount: Int
     var todaySetCount: Int
     var todayMuscles: [String]
@@ -171,7 +220,8 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
                 sessionsThisWeek: Int = 0,
                 weekVolumeKg: Double = 0,
                 unit: WeightUnit = .kg,
-                session: Running? = nil) {
+                session: Running? = nil,
+                todayIsRotation: Bool? = nil) {
         self.updatedAt = updatedAt
         self.day = day
         self.schedule = schedule
@@ -180,6 +230,7 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
         self.finishedToday = finishedToday
         self.hasPlan = hasPlan
         self.todayTitle = todayTitle
+        self.todayIsRotation = todayIsRotation
         self.todayExerciseCount = todayExerciseCount
         self.todaySetCount = todaySetCount
         self.todayMuscles = todayMuscles
@@ -201,11 +252,15 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
     /// or yesterday — which is exactly when `TrainingStats.streak` keeps one —
     /// and the week's count and volume zeroed once a new week has begun.
     /// Anything that isn't about the day is left exactly as the app wrote it,
-    /// including a session still running past midnight.
+    /// including a session still running past midnight — but only until the
+    /// app itself would have closed it as abandoned; see `Running.isStale`.
+    /// That is asked before the day is, because a session left open goes stale
+    /// at any hour of the day it started on as well as the next.
     func asOf(_ date: Date, calendar: Calendar = .current) -> GymTrackSnapshot {
-        guard let day, date > day, !calendar.isDate(day, inSameDayAs: date) else { return self }
-        let midnight = calendar.startOfDay(for: date)
         var next = self
+        if let session, session.isStale(at: date) { next.session = nil }
+        guard let day, date > day, !calendar.isDate(day, inSameDayAs: date) else { return next }
+        let midnight = calendar.startOfDay(for: date)
         next.day = midnight
         next.finishedToday = nil
 
@@ -213,13 +268,13 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
             let weekday = calendar.component(.weekday, from: date)
             let today = schedule.first { $0.weekday == weekday }
             next.todayTitle = today?.title
+            next.todayIsRotation = today?.isRotation
             next.todayExerciseCount = today?.exerciseCount ?? 0
             next.todaySetCount = today?.setCount ?? 0
             next.todayMuscles = today?.muscles ?? []
         }
 
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: midnight),
-           (lastTrainedDay ?? .distantPast) < yesterday {
+        if (lastTrainedDay ?? .distantPast) < Self.startOfDay(before: date, calendar: calendar) {
             next.streak = 0
         }
 
@@ -230,6 +285,63 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
             next.weekStart = thisWeek
         }
         return next
+    }
+
+    /// The start of the day before the one holding `date`, as the phone keys
+    /// `lastTrainedDay`.
+    ///
+    /// A day doesn't always start at midnight: where the clocks spring forward
+    /// at 00:00, as Cairo's do in late April, that day starts at 01:00. A plain
+    /// day subtracted from 01:00 lands on 01:00 the day before, an hour after
+    /// the phone's key for it, and a streak trained yesterday read as lapsed
+    /// all through the day the clocks changed. Stepped from midday, which is
+    /// inside the day however long it is, exactly as
+    /// `TrainingStats.startOfDay(_:from:calendar:)` does; that one isn't
+    /// compiled into the widgets, so the rule is repeated here.
+    private static func startOfDay(before date: Date, calendar: Calendar) -> Date {
+        let midday = calendar.startOfDay(for: date).addingTimeInterval(12 * 60 * 60)
+        let stepped = calendar.date(byAdding: .day, value: -1, to: midday) ?? midday
+        return calendar.startOfDay(for: stepped)
+    }
+
+    /// Which widget kinds have something new to draw once this snapshot
+    /// replaces `old`; empty when nothing a widget draws has moved.
+    ///
+    /// WidgetKit gives an app a small daily budget of reloads, and a session
+    /// logged from the wrist with the phone locked spends it a set at a time.
+    /// Most of those changes are about the running session, which only the
+    /// Today widget draws in any detail: the Streak widget says "Session
+    /// running" and nothing finer. So a change confined to the session's
+    /// numbers reloads Today alone, and one that changes nothing reloads
+    /// nothing.
+    ///
+    /// Compared as encoded, to the millisecond, not as values: a snapshot read
+    /// back from the store has been through the wire format and can differ from
+    /// the one it was written from by less than a widget could draw. Comparing
+    /// values made a process with no memory of what it last wrote — every
+    /// background wake — reload for nothing. `updatedAt` is held level: it
+    /// moves on every write by definition.
+    func widgetKindsToReload(replacing old: GymTrackSnapshot?) -> Set<String> {
+        guard let old,
+              let before = old.comparableForm(sessionDetail: true),
+              let after = comparableForm(sessionDetail: true)
+        else { return GymTrackWidgetKind.all }
+        if before == after { return [] }
+
+        var kinds: Set<String> = [GymTrackWidgetKind.today]
+        if old.comparableForm(sessionDetail: false) != comparableForm(sessionDetail: false) {
+            kinds.insert(GymTrackWidgetKind.streak)
+        }
+        return kinds
+    }
+
+    /// The wire form with `updatedAt` fixed, and with the running session
+    /// reduced to whether there is one when the caller only needs that.
+    private func comparableForm(sessionDetail: Bool) -> Data? {
+        var copy = self
+        copy.updatedAt = Date(timeIntervalSince1970: 0)
+        if !sessionDetail { copy.session = copy.session.map { _ in Running.presence } }
+        return try? JSONEncoder.comparing.encode(copy)
     }
 
     /// What the widget gallery shows, and what a widget falls back to before
@@ -252,6 +364,23 @@ private extension JSONEncoder {
     static let shared: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .millisecondsSince1970
+        return encoder
+    }()
+}
+
+private extension JSONEncoder {
+    /// For comparing two snapshots rather than storing one: keys in a fixed
+    /// order, which `shared` leaves to chance, and dates rounded to the whole
+    /// millisecond. The wire format keeps the fraction of a millisecond, and a
+    /// date that has been through it and back can come out a hair off, so
+    /// either would read as a change no widget could draw.
+    static let comparing: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode((date.timeIntervalSince1970 * 1000).rounded())
+        }
+        encoder.outputFormatting = .sortedKeys
         return encoder
     }()
 }

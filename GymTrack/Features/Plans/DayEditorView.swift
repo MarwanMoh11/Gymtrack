@@ -158,11 +158,12 @@ struct DayEditorView: View {
         let item = PlanItem(
             catalogID: exercise.id,
             name: exercise.name,
-            order: day.items.count,
+            order: day.nextItemOrder,
             targetSets: 3,
             targetRepsLow: exercise.tracking == .duration ? 0 : 8,
             targetRepsHigh: exercise.tracking == .duration ? 0 : 12
         )
+        item.trackingRaw = exercise.slotTrackingSnapshot
         item.day = day
         context.insert(item)
         try? context.save()
@@ -170,19 +171,14 @@ struct DayEditorView: View {
 
     private func delete(at offsets: IndexSet) {
         let ordered = day.orderedItems
-        for index in offsets { context.delete(ordered[index]) }
-        reindex()
+        day.removeItems(offsets.map { ordered[$0] }, in: context)
+        try? context.save()
     }
 
     private func move(from source: IndexSet, to destination: Int) {
         var ordered = day.orderedItems
         ordered.move(fromOffsets: source, toOffset: destination)
         for (index, item) in ordered.enumerated() { item.order = index }
-        try? context.save()
-    }
-
-    private func reindex() {
-        for (index, item) in day.orderedItems.enumerated() { item.order = index }
         try? context.save()
     }
 }
@@ -238,7 +234,12 @@ struct PlanItemEditor: View {
                 } else {
                     Section("Rep range") {
                         Stepper("Low: \(item.targetRepsLow)", value: lowRepsBinding, in: 1...50)
-                        Stepper("High: \(item.targetRepsHigh)", value: $item.targetRepsHigh, in: item.targetRepsLow...60)
+                        // Floored at 60 as well: a low end above it, which only a
+                        // backup restored before restore checked for one can
+                        // hold, made this range run backwards and trapped the
+                        // moment the editor opened.
+                        Stepper("High: \(item.targetRepsHigh)", value: $item.targetRepsHigh,
+                                in: min(item.targetRepsLow, 60)...60)
                     }
                     .listRowBackground(Theme.surface)
 
@@ -265,9 +266,18 @@ struct PlanItemEditor: View {
                                 .font(Theme.rounded(14, weight: .medium))
                                 .foregroundStyle(Theme.textSecondary)
                             Spacer()
-                            LoadScaleChip(scale: scale,
-                                          isCustom: LoadScaleBook.shared.isCustomised(item.catalogID)) {
-                                showingScale = true
+                            // A custom exercise deleted since it was added has no
+                            // catalog entry, so the sheet would open blank. Show
+                            // the marking as text and leave out the button.
+                            if item.catalog != nil {
+                                LoadScaleChip(scale: scale,
+                                              isCustom: LoadScaleBook.shared.isCustomised(item.catalogID)) {
+                                    showingScale = true
+                                }
+                            } else {
+                                Text(scale.shortLabel)
+                                    .font(Theme.rounded(10, weight: .semibold))
+                                    .foregroundStyle(Theme.textTertiary)
                             }
                         }
                     } header: {

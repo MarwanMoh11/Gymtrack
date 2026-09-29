@@ -230,3 +230,71 @@ struct PlanTemplate: Identifiable {
         ]
     )
 }
+
+// MARK: - Editing routines
+
+extension Plan {
+    /// A routine with no days in it: the way to start when you already have a
+    /// program of your own and a template would only be something to delete.
+    @discardableResult
+    static func blank(in context: ModelContext, makeActive: Bool) -> Plan {
+        let plan = Plan(name: "My Routine", summary: "", isActive: makeActive)
+        context.insert(plan)
+        return plan
+    }
+
+    /// Whether a session that is still open was started from one of this
+    /// routine's days. Deleting the routine under it would leave the logger
+    /// running a workout whose day no longer exists.
+    func isInUse(by openSessions: [WorkoutSession]) -> Bool {
+        let dayIDs = Set(days.map(\.id))
+        return openSessions.contains { $0.planDayID.map(dayIDs.contains) ?? false }
+    }
+
+    /// Deletes a routine, and reports whether it did. Refused while a session
+    /// from it is open.
+    ///
+    /// History is untouched by construction: `WorkoutSession` holds
+    /// `planDayID` as a bare UUID and `planName` as text, with no relationship
+    /// to `PlanDay`, so the cascade that takes the days and items never
+    /// reaches a session or its sets. What a session keeps is its own title,
+    /// `planName`, and a `planDayID` that no longer resolves.
+    ///
+    /// If the deleted routine was the active one, the earliest remaining
+    /// routine takes over, so there is never a routine list with none marked
+    /// active. With nothing left the app simply has no plan, which Today
+    /// already treats as "start a freestyle session".
+    @discardableResult
+    static func remove(_ plan: Plan, among plans: [Plan], openSessions: [WorkoutSession],
+                       in context: ModelContext) -> Bool {
+        guard !plan.isInUse(by: openSessions) else { return false }
+        let wasActive = plan.isActive
+        let successors = plans
+            .filter { $0.id != plan.id }
+            .sorted { $0.createdAt < $1.createdAt }
+        context.delete(plan)
+        if wasActive, !successors.contains(where: \.isActive), let next = successors.first {
+            next.isActive = true
+        }
+        return true
+    }
+}
+
+extension PlanDay {
+    /// The order for an item added to this day: one past the largest in use.
+    /// `items.count` collided with a survivor whenever an earlier item had been
+    /// deleted, because the count shrinks and the orders don't.
+    var nextItemOrder: Int {
+        (items.map(\.order).max() ?? -1) + 1
+    }
+
+    /// Deletes items and renumbers the survivors 0, 1, 2. The deleted rows
+    /// stay in `items` until the next save, so they are left out by identity
+    /// rather than relied on to be gone.
+    func removeItems(_ doomed: [PlanItem], in context: ModelContext) {
+        let doomedIDs = Set(doomed.map(\.id))
+        let survivors = orderedItems.filter { !doomedIDs.contains($0.id) }
+        for item in doomed { context.delete(item) }
+        for (index, item) in survivors.enumerated() { item.order = index }
+    }
+}

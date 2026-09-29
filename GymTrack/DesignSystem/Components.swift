@@ -191,6 +191,7 @@ struct DisclosureChevron: View {
         Image(systemName: "chevron.right")
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(Theme.textTertiary)
+            .accessibilityHidden(true)
     }
 }
 
@@ -214,17 +215,24 @@ struct StepperField: View {
     var unitIsCustom = false
     /// The ladder behind a weight field, drawn in the caption.
     private var scale: LoadScale?
+    /// The most the field will take, typed or stepped to. A number past it is
+    /// refused rather than pulled down onto it: the ceiling is a guess about
+    /// what nobody lifts, and storing it in place of a typo would be a load
+    /// nobody lifted either. See `StepperEntry` for how each field's is picked.
+    let maximum: Double
 
     /// Fixed steps: reps, seconds, anything that isn't loaded on a machine.
     init(title: String,
          value: Binding<Double>,
          step: Double,
          format: @escaping (Double) -> String,
-         unit: String) {
+         unit: String,
+         maximum: Double = StepperEntry.defaultMaximum) {
         self.title = title
         self._value = value
         self.format = format
         self.unit = unit
+        self.maximum = maximum
         self.advance = { current, direction in
             max(0, current + Double(direction) * step)
         }
@@ -245,6 +253,9 @@ struct StepperField: View {
         self.unitAction = unitAction
         self.unitIsCustom = unitIsCustom
         self.scale = scale
+        // The same ceiling the Digital Crown stops at, so the phone can't
+        // store a load the wrist would refuse to dial.
+        self.maximum = scale.displayCeiling
     }
 
     @State private var isEditing = false
@@ -258,7 +269,7 @@ struct StepperField: View {
                 .foregroundStyle(Theme.textTertiary)
 
             HStack(spacing: 4) {
-                stepButton(icon: "minus", enabled: value > 0) {
+                stepButton(icon: "minus", label: "Decrease \(title)", enabled: value > 0) {
                     value = max(0, advance(value, -1))
                     Haptics.tick()
                 }
@@ -287,7 +298,11 @@ struct StepperField: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                stepButton(icon: "plus", enabled: true) {
+                stepButton(icon: "plus", label: "Increase \(title)", enabled: canStepUp) {
+                    // Checked again here as well as in the key's state: a held
+                    // key repeats, and a repeat can land before the redraw that
+                    // disables it.
+                    guard canStepUp else { return }
                     value = advance(value, 1)
                     Haptics.tick()
                 }
@@ -298,8 +313,8 @@ struct StepperField: View {
             TextField(unitName, text: $draft)
                 .keyboardType(.decimalPad)
             Button("Set") {
-                if let entered = Double(draft.replacingOccurrences(of: ",", with: ".")) {
-                    value = max(0, entered)
+                if let entered = StepperEntry.parse(draft, maximum: maximum) {
+                    value = entered
                     Haptics.tick()
                 }
             }
@@ -320,6 +335,8 @@ struct StepperField: View {
         }
     }
 
+    private var canStepUp: Bool { advance(value, 1) <= maximum }
+
     /// Just the unit, for the keypad's placeholder — "kg · 2.5" reads as a
     /// value to type rather than a hint.
     private var unitName: String {
@@ -335,7 +352,7 @@ struct StepperField: View {
             : String(format: "%.2f", number).replacingOccurrences(of: "0$", with: "", options: .regularExpression)
     }
 
-    private func stepButton(icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func stepButton(icon: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         return Button(action: action) {
             Image(systemName: icon)
@@ -357,6 +374,103 @@ struct StepperField: View {
         // still exactly one step, so nobody who never holds it can tell.
         .buttonRepeatBehavior(.enabled)
         .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+}
+
+/// What a number typed into a stepper, or stepped to, is allowed to become.
+///
+/// Kept apart from the view, and on Foundation alone, so the test harness can
+/// compile it without SwiftUI: every rule here exists because of a crash or a
+/// stored value nobody lifted.
+///
+/// - A long run of digits parses to a `Double` far past `Int.max`, and
+///   `Int(_:)` on that traps: the app dies mid-workout.
+/// - `1e999`, pasted or typed on a hardware keyboard, parses to infinity. A
+///   weight of infinity makes the backup encoder throw and the watch mirror
+///   encode to nothing, so the export fails and the wrist goes quiet.
+/// - 1000 typed for 100 is stored as a measured set, becomes a record, and
+///   feeds the next suggestion.
+///
+/// Out-of-range input is refused, leaving the field as it was, rather than
+/// clamped: a ceiling stored in place of a typo is as false as the typo.
+enum StepperEntry {
+    /// Reps in one set. A hundred sits well past any range a plan prescribes
+    /// and past the longest bodyweight sets a gym session holds; the numbers
+    /// above it that turn up are an extra digit on 10 or 12.
+    static let maximumReps = 100
+
+    /// Seconds in one timed set. An hour is past any hold or carry, and the
+    /// timed sets this logs are measured in tens of seconds, so a longer one is
+    /// a typo rather than an effort.
+    static let maximumSeconds = 3_600
+
+    /// For a fixed-step field that names no ceiling of its own. The largest of
+    /// the counts above, so no field that relies on it refuses a real number,
+    /// while still keeping infinity and overflow out.
+    static let defaultMaximum = Double(maximumSeconds)
+
+    /// The typed text as a number in `0...maximum`, or nil to leave the field
+    /// alone. Reads the decimal comma, the Arabic-Indic and extended
+    /// Arabic-Indic digits and the Arabic decimal separator, since the keypad
+    /// types whatever the phone's region uses.
+    ///
+    /// Only those are read. A broader "any Unicode digit" rule also took
+    /// fullwidth and other scripts' digits nobody's keypad offers, and
+    /// `Double(_:)` on its own accepts hex and exponent forms, so the text is
+    /// reduced to ASCII digits and one point before it is parsed.
+    static func parse(_ text: String, maximum: Double) -> Double? {
+        guard let ascii = asciiNumber(text), let number = Double(ascii) else { return nil }
+        return bounded(number, maximum: maximum)
+    }
+
+    /// The typed text rewritten with ASCII digits and a "." separator, or nil
+    /// if it holds anything else. Surrounding spaces are trimmed, but one
+    /// inside the number is a refusal: "6 0" read as 60 would be a guess.
+    static func asciiNumber(_ text: String) -> String? {
+        var ascii = ""
+        var points = 0
+        for (index, scalar) in text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.enumerated() {
+            switch scalar.value {
+            case 0x2D where index == 0:
+                // Kept so "-0" still reads as zero; `bounded` refuses the rest.
+                ascii.append("-")
+            case 0x30...0x39:
+                ascii.unicodeScalars.append(scalar)
+            case 0x0660...0x0669:
+                ascii.unicodeScalars.append(Unicode.Scalar(0x30 + (scalar.value - 0x0660))!)
+            case 0x06F0...0x06F9:
+                ascii.unicodeScalars.append(Unicode.Scalar(0x30 + (scalar.value - 0x06F0))!)
+            case 0x2E, 0x2C, 0x066B:
+                points += 1
+                ascii.append(".")
+            default:
+                return nil
+            }
+        }
+        return points <= 1 && ascii.contains(where: \.isNumber) ? ascii : nil
+    }
+
+    /// A number in `0...maximum`, or nil. Negative zero comes back as zero so a
+    /// field never shows "-0".
+    static func bounded(_ value: Double, maximum: Double) -> Double? {
+        guard value.isFinite, value >= 0, value <= maximum else { return nil }
+        return value == 0 ? 0 : value
+    }
+
+    /// Whether a stepper may store `value` over `current`. Inside the range, or
+    /// on the way down from a number stored before there was a ceiling: a field
+    /// that refused every step down from 1000 kg would be stuck there.
+    static func accepts(_ value: Double, maximum: Double, current: Double) -> Bool {
+        value.isFinite && value >= 0 && (value <= maximum || value < current)
+    }
+
+    /// A stepper's value as a whole count, or nil to leave the count alone. The
+    /// conversion is checked, never `Int(_:)` on a `Double` that could be
+    /// anything.
+    static func count(_ value: Double, maximum: Int, current: Int) -> Int? {
+        guard accepts(value, maximum: Double(maximum), current: Double(current)) else { return nil }
+        return Int(exactly: value.rounded(.down))
     }
 }
 

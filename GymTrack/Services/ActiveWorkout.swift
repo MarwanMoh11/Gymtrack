@@ -15,8 +15,10 @@ enum SessionFactory {
         let session = WorkoutSession(title: day.name, planDayID: day.id, planName: plan?.name ?? "")
         context.insert(session)
 
-        for (exerciseIndex, item) in day.orderedItems.enumerated() {
-            let last = TrainingStats.lastPerformance(of: item.catalogID, in: history)
+        let items = day.orderedItems
+        let lastTimes = lastPerformances(of: Set(items.map(\.catalogID)), in: history)
+        for (exerciseIndex, item) in items.enumerated() {
+            let last = lastPerformance(of: item, among: items, merged: lastTimes[item.catalogID] ?? [])
             let suggestion = TrainingStats.suggestion(for: item, lastSets: last)
             // Onto the machine's ladder: a target typed while the app was in
             // kilograms shouldn't open as 61.2 lb on a stack marked in fives.
@@ -26,14 +28,20 @@ enum SessionFactory {
 
             for setIndex in 0..<max(1, item.targetSets) {
                 let previous = setIndex < last.count ? last[setIndex] : last.last
+                let startingReps = openingReps(for: suggestion, previous: previous, item: item)
+                // Each row carries only the measure it is logged in. Every plan
+                // slot holds a hold target, 45 s unless someone changed it, and
+                // copied onto a squat it would be exported as a set that lasted
+                // 45 seconds — a length nobody timed, read as measured.
+                let isTimed = item.tracking == .duration
                 let set = SetLog(
                     catalogID: item.catalogID,
                     exerciseName: item.name,
                     exerciseOrder: exerciseIndex,
                     setIndex: setIndex,
                     weightKg: startingWeight,
-                    reps: previous?.reps ?? item.targetRepsLow,
-                    seconds: item.targetSeconds,
+                    reps: isTimed ? 0 : startingReps,
+                    seconds: isTimed ? item.targetSeconds : 0,
                     targetRepsLow: item.targetRepsLow,
                     targetRepsHigh: item.targetRepsHigh,
                     tracking: item.tracking
@@ -42,7 +50,149 @@ enum SessionFactory {
                 context.insert(set)
             }
         }
+        // A plan may prescribe the same catalog exercise in several slots.
+        // The logger and watch treat it as one exercise, so those rows must
+        // follow one another with unique indices before either screen sees it.
+        session.normalizeExerciseSlots()
         return session
+    }
+
+    /// Last time's high-end reps belong to last time's load. Whenever the
+    /// suggestion moves the load, or holds it because last time didn't earn a
+    /// move, every set starts at the count the suggestion names. Reusing last
+    /// time's short count would open a rebuild at the reps it is meant to fix.
+    private static func openingReps(for suggestion: TrainingStats.OverloadSuggestion,
+                                    previous: SetLog?, item: PlanItem) -> Int {
+        switch suggestion.action {
+        case .increaseWeight, .deload, .repeatLoad:
+            return suggestion.reps
+        case .addReps, .firstTime:
+            return previous?.reps ?? item.targetRepsLow
+        }
+    }
+
+    /// What this slot of the day did last time.
+    ///
+    /// A day can prescribe one movement twice, a heavy top set and a lighter
+    /// back-off say. Reading the exercise's whole last performance for both
+    /// would give them one suggestion and one load, and the back-off would
+    /// open at the top set's weight. So a repeated slot reads only its own
+    /// share of last time's sets, and progresses from its own numbers.
+    private static func lastPerformance(of item: PlanItem, among items: [PlanItem],
+                                        merged last: [SetLog]) -> [SetLog] {
+        let layout = items.filter { $0.catalogID == item.catalogID }
+        guard layout.count > 1, let position = layout.firstIndex(where: { $0.id == item.id })
+        else { return last }
+        return slotShare(of: last, position: position, layout: layout)
+    }
+
+    /// One slot's share of an exercise's merged last performance.
+    static func slotShare(of last: [SetLog], position: Int, layout: [PlanItem]) -> [SetLog] {
+        zip(last, slotPositions(of: last, layout: layout))
+            .filter { $0.1 == position }
+            .map(\.0)
+    }
+
+    /// `TrainingStats.lastPerformance` for several exercises off one walk of
+    /// the history. Asking it once per exercise sorted every finished session
+    /// again for each one, so opening a session with ten exercises paid for ten
+    /// sorts of a history that only grows. This sorts once, reads newest first,
+    /// and stops as soon as every exercise asked about has been found; what it
+    /// answers for each is what the one-at-a-time call answers.
+    static func lastPerformances(of catalogIDs: Set<String>, in history: [WorkoutSession],
+                                 excluding sessionID: UUID? = nil) -> [String: [SetLog]] {
+        var wanted: [String: [String]] = [:]
+        for id in catalogIDs { wanted[ExerciseCatalog.canonicalID(for: id), default: []].append(id) }
+        var found: [String: [SetLog]] = [:]
+        let candidates = history
+            .filter { $0.id != sessionID && !$0.isActive }
+            .sorted { $0.startedAt > $1.startedAt }
+        for session in candidates where found.count < wanted.count {
+            let efforts = session.effortSets
+            for canonical in wanted.keys where found[canonical] == nil {
+                let sets = efforts
+                    .filter { ExerciseCatalog.canonicalID(for: $0.catalogID) == canonical }
+                    .sorted(by: SetLog.precedesInSession)
+                if !sets.isEmpty { found[canonical] = sets }
+            }
+        }
+        var result: [String: [SetLog]] = [:]
+        for (canonical, ids) in wanted {
+            for id in ids { result[id] = found[canonical] ?? [] }
+        }
+        return result
+    }
+
+    /// Which of the day's slots each of one exercise's effort rows came from,
+    /// given in session order.
+    ///
+    /// `normalizeExerciseSlots` folds repeated slots into one run so the
+    /// logger and the wrist see a single exercise, and no row names its slot
+    /// after that. Two things survive: the rep range each row was built with,
+    /// and the day's own layout of how many sets each slot holds. A change of
+    /// range starts the next slot, so a set skipped in the first slot can't
+    /// pull the second slot's work into it. Where neighbouring slots share a
+    /// range, the count decides. A row that fits no slot, added on the day or
+    /// logged before ranges were kept, stays with the slot it follows.
+    static func slotPositions(of rows: [SetLog], layout: [PlanItem]) -> [Int] {
+        var slot = 0
+        var used = 0
+        return rows.map { row in
+            while slot + 1 < layout.count {
+                let fitsThis = hasRange(of: layout[slot], row)
+                let fitsNext = hasRange(of: layout[slot + 1], row)
+                let isFull = used >= max(1, layout[slot].targetSets)
+                guard fitsNext && (!fitsThis || isFull) else { break }
+                slot += 1
+                used = 0
+            }
+            used += 1
+            return slot
+        }
+    }
+
+    private static func hasRange(of item: PlanItem, _ row: SetLog) -> Bool {
+        row.targetRepsLow == item.targetRepsLow && row.targetRepsHigh == item.targetRepsHigh
+    }
+
+    /// The rows after `set` that belong to the same plan slot, in order.
+    ///
+    /// A session with no plan behind it, or whose day no longer exists, has
+    /// one slot per exercise, which is what logging has always assumed.
+    static func laterRowsInSlot(of set: SetLog, in session: WorkoutSession,
+                                context: ModelContext) -> [SetLog] {
+        laterRowsInSlot(of: set, in: session,
+                        layout: slotLayout(of: set.catalogID, in: session, context: context))
+    }
+
+    /// The same, for a caller that already holds the day's slots.
+    static func laterRowsInSlot(of set: SetLog, in session: WorkoutSession,
+                                layout: [PlanItem]) -> [SetLog] {
+        guard let place = slotPlace(of: set, in: session, layout: layout) else { return [] }
+        return place.rows.indices
+            .filter { $0 > place.index && place.slots[$0] == place.slots[place.index] }
+            .map { place.rows[$0] }
+    }
+
+    /// Where a row sits among its exercise's working rows and their slots.
+    /// Nil for a row that isn't one of them, such as a drop underneath.
+    static func slotPlace(of set: SetLog, in session: WorkoutSession, layout: [PlanItem])
+        -> (rows: [SetLog], slots: [Int], index: Int)? {
+        let rows = session.sets
+            .filter { $0.catalogID == set.catalogID && !$0.isContinuation }
+            .sorted(by: SetLog.precedesInSession)
+        guard let index = rows.firstIndex(where: { $0.id == set.id }) else { return nil }
+        return (rows, slotPositions(of: rows, layout: layout), index)
+    }
+
+    /// The day's slots for one exercise, in the order the session was built.
+    private static func slotLayout(of catalogID: String, in session: WorkoutSession,
+                                   context: ModelContext) -> [PlanItem] {
+        guard let dayID = session.planDayID,
+              let day = try? context.fetch(FetchDescriptor<PlanDay>(
+                predicate: #Predicate { $0.id == dayID })).first
+        else { return [] }
+        return day.orderedItems.filter { $0.catalogID == catalogID }
     }
 }
 
@@ -74,29 +224,46 @@ final class ActiveWorkout {
     }
 
     private let context: ModelContext
-    private var history: [WorkoutSession]
+
+    /// The finished sessions this one is read against, as they were when it
+    /// began. A session deleted since stays in the array as a model with no
+    /// context, so nothing reads it directly: `pruneDeletedHistory` runs first.
+    @ObservationIgnored private var history: [WorkoutSession]
 
     /// The plan prescriptions behind this session, keyed by exercise. Resolved
     /// once — the logging view asks for these on every card render.
     private var prescriptions: [String: PlanItem] = [:]
 
-    /// Last session's sets per exercise, likewise resolved once.
-    private var lastPerformances: [String: [SetLog]] = [:]
+    /// Every slot the day gives each exercise, in day order. `prescriptions`
+    /// keeps only the first of them, which is all a card needs for an exercise
+    /// that appears once; a movement repeated for a top set and a back-off has
+    /// a prescription, a history and an offer per slot.
+    private var slotLayouts: [String: [PlanItem]] = [:]
+
+    /// Last session's sets per exercise, likewise resolved once. Filled on
+    /// first ask rather than observed: `lastPerformance(for:)` refills it from
+    /// inside a view body when a session has been deleted, and a write to
+    /// something the body is watching from there is the loop SwiftUI warns of.
+    @ObservationIgnored private var lastPerformances: [String: [SetLog]] = [:]
 
     init(session: WorkoutSession, context: ModelContext, history: [WorkoutSession]) {
         self.session = session
         self.context = context
         self.history = history.filter { $0.id != session.id }
 
+        if session.isActive && session.normalizeExerciseSlots() {
+            try? context.save()
+        }
+
         if let dayID = session.planDayID,
-           let day = (try? context.fetch(FetchDescriptor<PlanDay>()))?.first(where: { $0.id == dayID }) {
-            prescriptions = Dictionary(day.items.map { ($0.catalogID, $0) }, uniquingKeysWith: { first, _ in first })
+           let day = (try? context.fetch(FetchDescriptor<PlanDay>(
+               predicate: #Predicate { $0.id == dayID })))?.first {
+            prescriptions = Dictionary(day.orderedItems.map { ($0.catalogID, $0) }, uniquingKeysWith: { first, _ in first })
+            slotLayouts = Dictionary(grouping: day.orderedItems, by: \.catalogID)
         }
-        for catalogID in Set(session.sets.map(\.catalogID)) {
-            lastPerformances[catalogID] = TrainingStats.lastPerformance(
-                of: catalogID, in: self.history, excluding: session.id
-            )
-        }
+        lastPerformances = SessionFactory.lastPerformances(
+            of: Set(session.sets.map(\.catalogID)), in: self.history, excluding: session.id
+        )
 
         // A rest starting, being extended or running out changes what the Lock
         // Screen should say, and none of those go through `save()`.
@@ -140,8 +307,10 @@ final class ActiveWorkout {
 
     var groups: [SessionExerciseGroup] { session.exerciseGroups }
 
-    var completedCount: Int { session.sets.filter(\.isCompleted).count }
-    var totalCount: Int { session.sets.count }
+    /// Sets done and sets planned, counted as efforts; see
+    /// `WorkoutSession.effortCount`.
+    var completedCount: Int { session.effortSets.count }
+    var totalCount: Int { session.effortCount }
 
     var progress: Double {
         totalCount == 0 ? 0 : Double(completedCount) / Double(totalCount)
@@ -152,59 +321,110 @@ final class ActiveWorkout {
     /// The exercise holding the next unlogged set — what the session is "on".
     /// Normally the first one that isn't finished, unless the lifter has picked
     /// a different one to work on.
-    var currentGroup: SessionExerciseGroup? {
-        if let preferred = session.preferredExerciseID,
-           let group = groups.first(where: { $0.catalogID == preferred && !$0.isComplete }) {
-            return group
-        }
-        return groups.first { !$0.isComplete } ?? groups.last
+    var currentGroup: SessionExerciseGroup? { currentGroup(in: groups) }
+
+    /// `currentGroup` over groups the caller already has.
+    ///
+    /// `groups` is worked out from the session's sets on every read (group by
+    /// exercise, sort each, sort the lot), and the logger asks "which exercise
+    /// is current?" once per queue row as well as for the card and the scroll.
+    /// A view takes `groups` once per pass and asks here, so a stepper step or
+    /// a heart-rate merge costs one build rather than two dozen. Nothing is
+    /// cached between passes, so no write path has to remember to invalidate
+    /// anything and a log, undo, add, remove or reorder can never be answered
+    /// from the sets as they were.
+    func currentGroup(in groups: [SessionExerciseGroup]) -> SessionExerciseGroup? {
+        SessionPosition(session, groups: groups).currentGroup
     }
 
     /// Moves the session onto a different exercise — a superset, or a machine
-    /// that was taken when its turn came round.
+    /// that was taken when its turn came round. This is "I am lifting this
+    /// now": the wrist, the Lock Screen and the dock all follow it.
     func focus(on catalogID: String) {
-        session.preferredExerciseID = groups.contains { $0.catalogID == catalogID } ? catalogID : nil
+        let known = groups.contains { $0.catalogID == catalogID }
+        session.preferredExerciseID = known ? catalogID : nil
+        // Somebody who says they are lifting this is no longer about to lift
+        // the set they announced on another exercise, whether the machine was
+        // taken or they simply changed their mind. Left standing, that start
+        // paired with whatever log finally closed the set, minutes later, and
+        // the record said the set took as long as the detour.
+        if known { forget(startsOf: session.dropStarts(awayFrom: catalogID)) }
         save()
     }
 
-    /// The set the logger has expanded, i.e. the one about to be performed.
-    var nextSet: SetLog? {
-        currentGroup?.sets.first { !$0.isCompleted }
+    /// A tap on an exercise in the phone's queue, which means one of two
+    /// different things. An unfinished exercise is the lifter choosing what to
+    /// lift next, so the session moves onto it. A finished one is only being
+    /// looked at — to rate a set, change a note, fix a number — and moves
+    /// nothing.
+    ///
+    /// Both used to go through `focus`. `currentGroup` passes over a finished
+    /// pick, so looking back at the first exercise threw away the one picked
+    /// out of order and fell back to plan order: the wrist, the Lock Screen and
+    /// the dock jumped to an exercise nobody was doing, and a set logged from
+    /// the wrist without looking went onto it.
+    ///
+    /// Returns true when the tap is a review, which the logger shows beside the
+    /// working position rather than in place of it.
+    @discardableResult
+    func openFromQueue(_ catalogID: String) -> Bool {
+        guard let group = groups.first(where: { $0.catalogID == catalogID }) else { return false }
+        if group.isComplete { return true }
+        focus(on: catalogID)
+        return false
     }
+
+    /// The set the logger has expanded, i.e. the one about to be performed.
+    var nextSet: SetLog? { SessionPosition(session, groups: groups).nextSet }
 
     /// What `nextSet` is called on its card — efforts, not rows; see
     /// `SessionExerciseGroup.number(of:)`.
-    var nextSetNumber: Int {
-        guard let group = currentGroup else { return 0 }
-        guard let next = nextSet else { return group.effortCount }
+    var nextSetNumber: Int { SessionPosition(session, groups: groups).nextSetNumber }
+
+    /// `nextSetNumber` for the group the caller already holds, so a caller
+    /// that needs the group as well does not build the groups a second time.
+    func nextSetNumber(in group: SessionExerciseGroup) -> Int {
+        guard let next = group.sets.first(where: { !$0.isCompleted }) else { return group.effortCount }
         return group.number(of: next)
     }
 
     /// How many sets the exercise that's up holds, counted the same way.
-    var currentSetTotal: Int { currentGroup?.effortCount ?? 0 }
+    var currentSetTotal: Int { SessionPosition(session, groups: groups).currentSetTotal }
 
     /// "60 kg × 8–12" — the prescription for the set that's up.
-    var nextTargetLabel: String {
-        guard let set = nextSet else { return "" }
-        if set.tracking == .duration { return "\(set.seconds)s" }
-        let reps = set.targetRepsHigh > 0
-            ? (set.targetRepsLow == set.targetRepsHigh
-               ? "\(set.targetRepsLow)"
-               : "\(set.targetRepsLow)–\(set.targetRepsHigh)")
-            : "\(set.reps)"
-        if set.weightKg == 0 { return "\(reps) reps" }
-        return "\(set.weightLabel) × \(reps)"
-    }
+    var nextTargetLabel: String { SessionPosition(session, groups: groups).nextTargetLabel }
 
     /// The exercise queued behind the current one.
-    var upNextName: String {
-        guard let current = currentGroup else { return "" }
-        return groups.first { $0.order > current.order && !$0.isComplete }?.name ?? ""
-    }
+    var upNextName: String { SessionPosition(session, groups: groups).upNextName }
 
     /// What the same exercise looked like last time, for the "last: …" hints.
+    ///
+    /// The sets are read from a session that can be deleted while this one runs,
+    /// from the history screen behind a minimised logger. A hint naming a lift
+    /// that no longer exists is worse than no hint, so a remembered answer whose
+    /// sets have gone is worked out again from what is left.
     func lastPerformance(for catalogID: String) -> [SetLog] {
-        lastPerformances[catalogID] ?? []
+        if let cached = lastPerformances[catalogID], !cached.contains(where: \.isGoneFromStore) {
+            return cached
+        }
+        pruneDeletedHistory()
+        let found = TrainingStats.lastPerformance(of: catalogID, in: history, excluding: session.id)
+        lastPerformances[catalogID] = found
+        return found
+    }
+
+    /// Lets go of every past session that has been deleted since this one began.
+    ///
+    /// The array holds the models the store handed over, and a delete leaves
+    /// them behind still answering with their old values, so a mistyped 500 kg
+    /// bench survived its own deletion as a "last time" hint and as the record
+    /// the next bench had to beat. What was worked out from them goes too:
+    /// the record baseline, and the remembered hints, which are asked for again.
+    private func pruneDeletedHistory() {
+        guard history.contains(where: \.isGoneFromStore) else { return }
+        history.removeAll { $0.isGoneFromStore }
+        recordBaseline = nil
+        lastPerformances = [:]
     }
 
     /// The prescription behind an exercise, while the plan still has it.
@@ -216,6 +436,63 @@ final class ActiveWorkout {
     func planItem(for catalogID: String) -> PlanItem? {
         guard let item = prescriptions[catalogID], !item.isDeleted, item.modelContext != nil else { return nil }
         return item
+    }
+
+    // MARK: - Slots
+
+    /// The plan slots behind an exercise, or none once any of them has left the
+    /// plan. A layout with a hole in it would put every later row in the wrong
+    /// slot, so the session treats the exercise as a single slot, the way it
+    /// treats one added on the day.
+    private func slotLayout(of catalogID: String) -> [PlanItem] {
+        guard let layout = slotLayouts[catalogID],
+              layout.allSatisfy({ !$0.isDeleted && $0.modelContext != nil }) else { return [] }
+        return layout
+    }
+
+    /// Which slot of its exercise a working row belongs to. A row that isn't
+    /// one, a drop underneath, answers with the slot of the set it continues.
+    private func slot(of set: SetLog) -> Int {
+        let layout = slotLayout(of: set.catalogID)
+        var anchor = set
+        if set.isContinuation,
+           let parent = session.sets
+               .filter({ $0.catalogID == set.catalogID && !$0.isContinuation && SetLog.precedesInSession($0, set) })
+               .max(by: SetLog.precedesInSession) {
+            anchor = parent
+        }
+        guard let place = SessionFactory.slotPlace(of: anchor, in: session, layout: layout) else { return 0 }
+        return place.slots[place.index]
+    }
+
+    /// The prescription behind this set's own slot. `planItem(for:)` by
+    /// exercise gives the first slot's, which for the back-off of a repeated
+    /// movement is the top set's rest and the top set's rep range.
+    func planItem(for set: SetLog) -> PlanItem? {
+        let layout = slotLayout(of: set.catalogID)
+        guard layout.count > 1 else { return planItem(for: set.catalogID) }
+        let position = slot(of: set)
+        return layout.indices.contains(position) ? layout[position] : nil
+    }
+
+    /// What this set's slot did last time, so a back-off is read against last
+    /// time's back-off rather than against the exercise's sets pooled.
+    func lastPerformance(for set: SetLog) -> [SetLog] {
+        let merged = lastPerformance(for: set.catalogID)
+        let layout = slotLayout(of: set.catalogID)
+        guard layout.count > 1 else { return merged }
+        return SessionFactory.slotShare(of: merged, position: slot(of: set), layout: layout)
+    }
+
+    /// Last time's set opposite this one, paired by position within its slot,
+    /// and nothing for a row that continued another.
+    func previousSet(for set: SetLog) -> SetLog? {
+        guard !set.isContinuation,
+              let place = SessionFactory.slotPlace(of: set, in: session, layout: slotLayout(of: set.catalogID))
+        else { return nil }
+        let position = place.rows[..<place.index].indices.filter { place.slots[$0] == place.slots[place.index] }.count
+        let last = lastPerformance(for: set)
+        return position < last.count ? last[position] : nil
     }
 
     // MARK: - Logging
@@ -230,21 +507,26 @@ final class ActiveWorkout {
     func complete(_ set: SetLog, restSeconds: Int?, at moment: Date = .now) {
         set.isCompleted = true
         set.completedAt = moment
-        lastLoggedSetID = set.id
-        // Whatever the last answer offered belonged to the set before this one.
-        // Logging another set is an answer of its own — you took the weight you
-        // took — so the offer, and the chance to undo having taken it, both go
-        // rather than hanging over the new row.
+        // Logged inside the count-in, so the start it was counting towards
+        // never came — whatever happened under the bar, it didn't begin at the
+        // moment on the set. Kept, it would be a set that began after it ended:
+        // a moment nobody lived, and a negative length for anything reading
+        // the pair. The rest that tap stopped isn't put back either. It was the
+        // rest before this set, and this set is now logged; whatever follows
+        // is the next rest, which is why `restCancelledByStart` goes below.
         //
-        // And that answer is the one that goes on the record: lifting the next
-        // set at the old weight is a decline whether or not anybody tapped the
-        // cross, and the two are indistinguishable from here.
-        if let standing = pendingNudge { subject(of: standing)?.recordLoadNudge(.declined, toKg: standing.toKg) }
-        pendingNudge = nil
-        takenNudge = nil
+        // And a start that has waited too long for its log, or that another
+        // set's log has overtaken, is not this set's start any more: see
+        // `SetLog.startStillDescribes` and `WorkoutSession.dropOvertakenStarts`.
+        session.settleStarts(afterLogging: set, at: moment)
+        lastLoggedSetID = set.id
+        settleOffer(answeredBy: set)
         // The rest this set's announcement cut short can no longer be put
         // back: the set it would have been counting down to has been done.
+        // The same for the rest a continuation cut short, which was the rest
+        // before a set that has since been logged over it.
         restCancelledByStart = nil
+        restCancelledByContinuation = nil
         carryLoadForward(from: set)
         save()
 
@@ -270,6 +552,102 @@ final class ActiveWorkout {
         }
     }
 
+    /// Logging the next working set of the exercise an offer was made on is an
+    /// answer to it whether or not anybody touched the offer: you took the
+    /// weight you took. Lifted at the offered rung it was taken, by hand rather
+    /// than by the button; at any other weight it was not.
+    ///
+    /// Nothing else answers it. A superset partner's set, or a drop row of the
+    /// exercise itself, says nothing about what its next working set should
+    /// weigh, and filing a decline for one would put a refusal on the record
+    /// before a single set the offer was about had been lifted. The offer keeps
+    /// standing over its own card until one of those sets is logged.
+    ///
+    /// What the answer replaced is kept, so that undoing the set puts the offer
+    /// and the record back exactly as they were — see `takeBackAnswer`.
+    private func settleOffer(answeredBy set: SetLog) {
+        let standing = pendingNudge(for: set.catalogID).flatMap { offer($0, covers: set) ? $0 : nil }
+        let taken = takenNudge(for: set.catalogID).flatMap { offer($0.nudge, covers: set) ? $0 : nil }
+        guard standing != nil || taken != nil else { return }
+
+        var answer = SettledOffer(loggedSetID: set.id, standing: standing, taken: taken)
+        if let standing, let subject = subject(of: standing) {
+            answer.priorOutcome = subject.loadNudgeOutcome
+            answer.priorToKg = subject.loadNudgeToKg
+            let outcome: LoadNudgeOutcome = isOfferedRung(set.weightKg, of: standing, on: set)
+                ? .taken : .declined
+            subject.recordLoadNudge(outcome, toKg: standing.toKg)
+            answer.recorded = outcome
+            standingOffers.removeAll { $0.setID == standing.setID }
+        }
+        // The chance to undo a take ends where the sets it moved start being
+        // lifted: undoing it after that would move a weight off a finished set.
+        if let taken { openTakes.removeAll { $0.nudge.setID == taken.nudge.setID } }
+
+        let subjectID = (standing ?? taken?.nudge)?.setID
+        settledOffers.removeAll { ($0.standing ?? $0.taken?.nudge)?.setID == subjectID }
+        settledOffers.append(answer)
+    }
+
+    /// Whether a logged weight is the rung an offer named. Compared on the
+    /// equipment's own scale, so a load typed in pounds and one stepped to by
+    /// the offer are the same rung even where the kilogram conversions differ
+    /// in the last bit.
+    private func isOfferedRung(_ kg: Double, of nudge: LoadNudge, on set: SetLog) -> Bool {
+        let scale = set.loadScale
+        return abs(scale.display(kg) - scale.display(nudge.toKg)) < 0.001
+    }
+
+    /// The other half of `settleOffer`: the set that answered an offer is being
+    /// taken back, so the answer goes with it. The record returns to what it
+    /// said before, and the offer — or the undo of having taken it — stands
+    /// again, recomputed so it counts the sets actually left.
+    ///
+    /// Only where nothing newer has spoken since. A subject re-rated in the
+    /// meantime has a newer offer or none, and restoring the old one would
+    /// overwrite a decision the lifter made after this one.
+    private func takeBackAnswer(of set: SetLog) {
+        guard let index = settledOffers.firstIndex(where: { $0.loggedSetID == set.id }) else { return }
+        let answer = settledOffers.remove(at: index)
+
+        if let standing = answer.standing, let recorded = answer.recorded,
+           let subject = subject(of: standing), subject.isCompleted,
+           subject.loadNudgeOutcome == recorded, subject.loadNudgeToKg == standing.toKg {
+            if let prior = answer.priorOutcome, let priorToKg = answer.priorToKg {
+                subject.recordLoadNudge(prior, toKg: priorToKg)
+            } else {
+                subject.clearLoadNudge()
+            }
+            if pendingNudge(for: standing.catalogID) == nil, let again = nudge(after: subject),
+               again.feel == standing.feel, again.toKg == standing.toKg {
+                standingOffers.append(again)
+            }
+        }
+        if let taken = answer.taken, takenNudge(for: taken.nudge.catalogID) == nil,
+           let subject = subject(of: taken.nudge), subject.isCompleted {
+            openTakes.append(taken)
+        }
+    }
+
+    /// An offer the logger settled without a tap, and what it overwrote.
+    private struct SettledOffer {
+        /// The set whose logging answered it.
+        let loggedSetID: UUID
+        /// The offer that was standing, if one was.
+        let standing: LoadNudge?
+        /// The undo of a take that was still open, if one was.
+        let taken: TakenNudge?
+        /// What the log filed on the subject, so a later decision is told apart.
+        var recorded: LoadNudgeOutcome?
+        /// The subject's record before the log, put back verbatim on undo.
+        var priorOutcome: LoadNudgeOutcome?
+        var priorToKg: Double?
+    }
+
+    /// One per subject at most: a newer answer about the same set supersedes
+    /// the older one, which has nothing left on the record to take back.
+    @ObservationIgnored private var settledOffers: [SettledOffer] = []
+
     /// Mirrors the load just used onto the remaining sets of the same exercise.
     /// Without this you re-dial the weight for every set of every exercise.
     ///
@@ -278,33 +656,122 @@ final class ActiveWorkout {
     /// card would leave the working sets still to come sitting at the drop
     /// weight — the lifter would take one drop and find the rest of the
     /// exercise quietly deloaded.
+    ///
+    /// The load stops at the end of the set's plan slot. A day that repeats a
+    /// movement prescribes each slot its own load, and the first set of a top
+    /// set carried onto the back-off would erase what the plan asked for.
+    ///
+    /// What each row held before is kept, so that taking the set back can put
+    /// it there again — see `restorePrefill`.
     private func carryLoadForward(from set: SetLog) {
         guard !set.isContinuation else { return }
-        for other in session.sets
-        where other.catalogID == set.catalogID
-            && !other.isCompleted
-            && !other.isContinuation
-            && other.setIndex > set.setIndex {
-            other.weightKg = set.weightKg
-            if other.tracking == .duration { other.seconds = set.seconds }
+        let overwritten = Prefill.carry(from: set,
+                                        onto: SessionFactory.laterRowsInSlot(of: set, in: session,
+                                                                             layout: slotLayout(of: set.catalogID)))
+        carriedPrefills[set.id] = overwritten.isEmpty ? nil : overwritten
+    }
+
+    /// A row's numbers before a logged set carried its own onto it, and what
+    /// it carried. Shared with the wrist's headless path, which carries and
+    /// takes back a load on its own without a logger: two copies of the rule
+    /// would let the phone and the watch disagree about the same undo.
+    struct Prefill {
+        let kg: Double
+        let seconds: Int
+        let carriedKg: Double
+        let carriedSeconds: Int
+
+        /// Copies the set's load onto each unlogged row and returns what those
+        /// rows held, for the rows it actually changed.
+        static func carry(from set: SetLog, onto rows: [SetLog]) -> [UUID: Prefill] {
+            var overwritten: [UUID: Prefill] = [:]
+            for other in rows where !other.isCompleted {
+                let before = Prefill(kg: other.weightKg, seconds: other.seconds,
+                                     carriedKg: set.weightKg, carriedSeconds: set.seconds)
+                other.weightKg = set.weightKg
+                if other.tracking == .duration { other.seconds = set.seconds }
+                if before.kg != other.weightKg || (other.tracking == .duration && before.seconds != other.seconds) {
+                    overwritten[other.id] = before
+                }
+            }
+            return overwritten
+        }
+
+        /// Puts the rows a carry changed back to what they held. A row whose
+        /// numbers have been touched since is the lifter's own now and stays as
+        /// typed, so only a row still holding exactly what was carried moves.
+        static func restore(_ memory: [UUID: Prefill], onto rows: [SetLog]) {
+            for row in rows where !row.isCompleted {
+                guard let before = memory[row.id], row.weightKg == before.carriedKg else { continue }
+                row.weightKg = before.kg
+                if row.tracking == .duration, row.seconds == before.carriedSeconds { row.seconds = before.seconds }
+            }
         }
     }
 
+    /// What each logged set's carry overwrote, by the set that carried.
+    /// In memory only: a row that outlives a relaunch keeps the load that was
+    /// carried, which is what it has always done. Nothing here is exported,
+    /// since unlogged rows are dropped when the session closes.
+    @ObservationIgnored private var carriedPrefills: [UUID: [UUID: Prefill]] = [:]
+
+    /// The other half of `carryLoadForward`: the set is being taken back, so
+    /// the rows it prefilled go back to what they held. Otherwise the next row
+    /// of a set that never happened opens at its weight, as though it had been
+    /// lifted. A row whose numbers have been touched since is the lifter's own
+    /// now and stays as typed.
+    private func restorePrefill(carriedBy set: SetLog) {
+        guard let memory = carriedPrefills.removeValue(forKey: set.id) else { return }
+        Prefill.restore(memory, onto: Array(session.sets))
+    }
+
     func uncomplete(_ set: SetLog) {
+        // A logged drop or cluster underneath goes too, last one first. Left
+        // logged, it went into the record as a lift taken without rest off a set
+        // that was never done, and a re-log of the set above stamped the parent
+        // after the row claiming to continue it. Blocking the undo instead would
+        // leave a button that does nothing mid-set. The rows keep their numbers,
+        // so logging both again is two taps. Only while this set is logged: a
+        // repeated undo must not take back a lift logged since.
+        let carried = set.isCompleted ? session.loggedContinuations(below: set) : []
+        // Read before `takeBack` clears it. The rest is the last logged set's,
+        // and only a rest that belonged to one of the sets going is taken away
+        // with them. Undoing an old set through the review path while another
+        // exercise's countdown ran used to stop that one too, on the phone, on
+        // the Lock Screen and on the wrist, and cancel its "Rest over".
+        let goingSetIDs = ([set] + carried).map(\.id)
+        let restBelongedToUndone = lastLoggedSetID.map { goingSetIDs.contains($0) } ?? false
+        for row in carried.reversed() { takeBack(row) }
+        takeBack(set)
+        // `complete` is what started that rest; this is the other half of it.
+        if restBelongedToUndone { restTimer.stop() }
+        // A rest a continuation cut short belonged to the set it was
+        // continuing; with that set taken back it isn't worth putting back.
+        if let cut = restCancelledByContinuation, let owner = cut.ownerID, goingSetIDs.contains(owner) {
+            restCancelledByContinuation = nil
+        }
+        save()
+        Haptics.tick()
+    }
+
+    /// Everything one set gained by being logged, for `uncomplete`, which runs
+    /// it on the set and on every logged row carrying on from it.
+    private func takeBack(_ set: SetLog) {
         // Everything the set itself gained by being logged — see `SetLog.unlog`,
         // which is also what the wrist's own undo runs so the two can't drift.
         set.unlog()
         recentPRs.remove(set.id)
         if lastLoggedSetID == set.id { lastLoggedSetID = nil }
-        if pendingNudge?.setID == set.id { pendingNudge = nil }
+        standingOffers.removeAll { $0.setID == set.id }
         // Taking the set back takes back everything answering for it did,
         // including a weight change its answer put on the sets underneath.
-        if takenNudge?.nudge.setID == set.id { restoreWeights() }
-        // The rest belonged to the set being taken back, so it goes with it.
-        // `complete` is what started it; this is the other half of that.
-        restTimer.stop()
-        save()
-        Haptics.tick()
+        if let taken = openTakes.first(where: { $0.nudge.setID == set.id }) { restoreWeights(of: taken) }
+        // An offer this set answered by being logged is unanswered again. And
+        // an answer about this set's own offer has nothing left to restore:
+        // `unlog` has just cleared the record it was kept to put back.
+        takeBackAnswer(of: set)
+        settledOffers.removeAll { ($0.standing ?? $0.taken?.nudge)?.setID == set.id }
+        restorePrefill(carriedBy: set)
     }
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
@@ -316,10 +783,15 @@ final class ActiveWorkout {
     @ObservationIgnored private var recordBaseline: [String: [SetLog]]?
 
     private func isPersonalRecord(_ set: SetLog) -> Bool {
+        // The baseline is the past as it was when it was built. A session
+        // deleted since, a mistyped 500 kg bench, would otherwise still be the
+        // record no lift today could beat.
+        pruneDeletedHistory()
         let baseline = recordBaseline ?? TrainingStats.recordCandidates(in: history)
         recordBaseline = baseline
-        let today = session.sets.filter { $0.catalogID == set.catalogID }
-        return TrainingStats.isPersonalRecord(set, among: (baseline[set.catalogID] ?? []) + today)
+        let catalogID = ExerciseCatalog.canonicalID(for: set.catalogID)
+        let today = session.sets.filter { ExerciseCatalog.canonicalID(for: $0.catalogID) == catalogID }
+        return TrainingStats.isPersonalRecord(set, among: (baseline[catalogID] ?? []) + today)
     }
 
     /// A weight or a rep count changed by hand on a set that hasn't been logged
@@ -341,13 +813,57 @@ final class ActiveWorkout {
     /// beat after the thumb stops. Any other save lands first and takes this
     /// one with it, so a set logged mid-run still goes out with its numbers.
     /// The most a force-quit inside that beat can cost is the last step dialled
-    /// onto a set nobody has logged yet.
+    /// onto a set nobody has logged yet — or, for a logged set being corrected
+    /// through `correct`, the run of steps since the thumb last rested, which
+    /// leaves that set holding the number it held before them.
     func numbersChanged() {
         pendingEdit?.cancel()
         pendingEdit = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             self?.save()
+        }
+    }
+
+    /// Fixes the numbers on a set already logged: the 80 typed for the 100
+    /// that was lifted, the 8 for the 10.
+    ///
+    /// Only the numbers move. When the set was logged, when it began, how it
+    /// felt and the heart rate read through it are facts about the moment, and
+    /// a typo is a fact about the numbers. Undo then Log used to be the only
+    /// way to fix one, and it rewrote all of them: the lift stamped at the
+    /// moment of the correction and sorted after whatever had been logged
+    /// since, so the rests either side of it described gaps nobody took; its
+    /// start, rating and heart rate gone; and a rest counting down that nobody
+    /// was taking.
+    ///
+    /// Seconds are written only for a timed set, as logging does. The record
+    /// question is asked again of the whole exercise, because a corrected
+    /// number can make or unmake a record on this set and moves the bar every
+    /// set logged after it had to clear. An offer still standing on this set is
+    /// withdrawn without being recorded: it was read off numbers that weren't
+    /// the lift, so nobody turned down anything real.
+    func correct(_ set: SetLog, weightKg: Double, reps: Int, seconds: Int) {
+        guard set.isCompleted, weightKg.isFinite else { return }
+        set.weightKg = max(0, weightKg)
+        set.reps = max(0, reps)
+        if set.tracking == .duration { set.seconds = max(0, seconds) }
+        reassessRecords(for: set.catalogID)
+        standingOffers.removeAll { $0.setID == set.id }
+        numbersChanged()
+    }
+
+    /// Asks the record question again of every set of one exercise logged
+    /// today, after one of them changed underneath the answers already given.
+    private func reassessRecords(for catalogID: String) {
+        let exercise = ExerciseCatalog.canonicalID(for: catalogID)
+        for logged in session.sets
+        where logged.isCompleted && ExerciseCatalog.canonicalID(for: logged.catalogID) == exercise {
+            if isPersonalRecord(logged) {
+                recentPRs.insert(logged.id)
+            } else {
+                recentPRs.remove(logged.id)
+            }
         }
     }
 
@@ -382,14 +898,18 @@ final class ActiveWorkout {
             other.setIndex += 1
         }
 
+        // Only the measure this exercise is logged in: a row taken on from a
+        // set made before sessions stopped seeding a hold time onto every row
+        // would otherwise copy that unmeasured 45 s forward.
+        let isTimed = set.tracking == .duration
         let next = SetLog(
             catalogID: set.catalogID,
             exerciseName: set.exerciseName,
             exerciseOrder: set.exerciseOrder,
             setIndex: set.setIndex + 1,
             weightKg: set.weightKg,
-            reps: set.reps,
-            seconds: set.seconds,
+            reps: isTimed ? 0 : set.reps,
+            seconds: isTimed ? set.seconds : 0,
             // No rep range, because nobody prescribed one. The plan asks for
             // three sets of 6–10; it has nothing to say about what a lifter
             // does after the third one on the way back down, and a range copied
@@ -403,10 +923,22 @@ final class ActiveWorkout {
         next.session = session
         context.insert(next)
 
+        // Kept for `removeContinuation`, on the same principle as
+        // `restCancelledByStart`: a mis-tap costs nothing, including the
+        // countdown that was on screen.
+        if restTimer.isRunning, let endsAt = restTimer.endsAt {
+            restCancelledByContinuation = (next.id, lastLoggedSetID, endsAt, restTimer.totalSeconds)
+        }
         restTimer.stop()
         save()
         Haptics.log()
     }
+
+    /// The rest that `continueSet` stopped, kept only long enough for the row to
+    /// be taken back off. `rowID` is the continuation it belongs to and
+    /// `ownerID` the set whose log started the rest. Not persisted, for the
+    /// reason `restCancelledByStart` isn't.
+    private var restCancelledByContinuation: (rowID: UUID, ownerID: UUID?, endsAt: Date, totalSeconds: Int)?
 
     /// Takes the row back off, the exact pair of `continueSet` — for a mis-tap,
     /// or an effort the lifter decided not to take further after all. Only
@@ -414,6 +946,16 @@ final class ActiveWorkout {
     /// delete a lift, and `separate` is the way out of that instead.
     func removeContinuation(_ set: SetLog) {
         guard set.isContinuation, !set.isCompleted else { return }
+        // The countdown comes back where it was, as after `cancelStart`. Not
+        // over a rest that is running now: something has started a newer one
+        // since, and the old end would replace it. A rest that has run out in
+        // the meantime is simply over, and `restore` puts nothing back for it.
+        if let cut = restCancelledByContinuation, cut.rowID == set.id {
+            restCancelledByContinuation = nil
+            if !restTimer.isRunning {
+                restTimer.restore(endingAt: cut.endsAt, totalSeconds: cut.totalSeconds)
+            }
+        }
         context.delete(set)
         resequence(set.catalogID)
         save()
@@ -441,29 +983,39 @@ final class ActiveWorkout {
     /// on screen, and a countdown doesn't survive the session either.
     private var restCancelledByStart: (setID: UUID, endsAt: Date, totalSeconds: Int)?
 
-    /// Marks the moment the lifter says they're going. Everything the record
-    /// gains comes from this one stamp: the rest before it stops being a guess
-    /// with a set hidden inside it, and the set itself gets a length.
+    /// A tap on this phone's *Start set*. The set begins when the count-in
+    /// runs out rather than under the thumb — see `SetLeadIn`.
+    func announceStart(_ set: SetLog) {
+        announceStart(set, at: SetLeadIn.start(forTapAt: .now))
+    }
+
+    /// Marks the moment the set begins. Everything the record gains comes from
+    /// this one stamp: the rest before it stops being a guess with a set hidden
+    /// inside it, and the set itself gets a length.
     ///
     /// Optional in the strongest sense — nothing here is required for a set to
     /// be logged, and a session where it's never touched behaves exactly as it
     /// did before this existed.
     ///
-    /// - Parameter moment: when the set began. Defaults to now, which is right
-    ///   for a tap on the phone. The wrist passes its own timestamp, because a
+    /// - Parameter moment: when the set begins, with the count-in already in
+    ///   it. Nothing here adds one: the phone's own tap goes through the
+    ///   overload above, and the wrist passes the moment it stamped, because a
     ///   command sent out of range waits in a queue until the phone is nearby
     ///   again and stamping it on arrival would report a set that started in
     ///   the locker room.
-    func announceStart(_ set: SetLog, at moment: Date = .now) {
+    func announceStart(_ set: SetLog, at moment: Date) {
         guard !set.isCompleted, set.startedAt == nil else { return }
         // A start that has been sitting in the watch's delivery queue is kept:
         // the log that closes the set carries the wrist's clock too, so the
         // pair is true however long the two of them waited together. Only a
-        // start from ahead of this clock is refused, and that one is the two
-        // devices disagreeing about the time rather than a moment — see
-        // `WatchCommand.clockSkewTolerance`.
-        guard moment.timeIntervalSinceNow <= WatchCommand.clockSkewTolerance else { return }
+        // start from further ahead of this clock than the count-in explains is
+        // refused, and that one is the two devices disagreeing about the time
+        // rather than a moment — see `WatchCommand.isBelievableStart`.
+        guard WatchCommand.isBelievableStart(moment) else { return }
         set.startedAt = moment
+        // One set is under way at a time. A start announced on another set that
+        // this one comes after was abandoned; see `dropOvertakenStarts`.
+        forget(startsOf: session.dropOvertakenStarts(besides: set, at: moment))
 
         // The rest is over the moment you say you're starting — that is the
         // thing the countdown was counting down to. Left running it would tick
@@ -485,10 +1037,11 @@ final class ActiveWorkout {
         Haptics.start()
     }
 
-    /// Un-says it, all the way back to never having tapped. The stamp goes, and
-    /// the rest the tap cut short comes back exactly where it was — a mis-tap
-    /// on a small control mid-workout has to cost nothing at all, including the
-    /// countdown you were watching.
+    /// Un-says it, all the way back to never having tapped — during the
+    /// count-in exactly as after it. The stamp goes, and the rest the tap cut
+    /// short comes back exactly where it was — a mis-tap on a small control
+    /// mid-workout has to cost nothing at all, including the countdown you were
+    /// watching.
     func cancelStart(_ set: SetLog) {
         set.startedAt = nil
         if let cancelled = restCancelledByStart, cancelled.setID == set.id {
@@ -497,6 +1050,16 @@ final class ActiveWorkout {
         }
         save()
         Haptics.tick()
+    }
+
+    /// Lets go of the rest a dropped start had cut short. The set it would have
+    /// counted down to is no longer being started, and a late cancel from the
+    /// wrist would otherwise put that old countdown back over whatever the
+    /// lifter is doing now.
+    private func forget(startsOf setIDs: [UUID]) {
+        if let cancelled = restCancelledByStart, setIDs.contains(cancelled.setID) {
+            restCancelledByStart = nil
+        }
     }
 
     /// How the set felt. The answer is acted on immediately rather than filed
@@ -508,7 +1071,11 @@ final class ActiveWorkout {
         guard set.rpe != feel.rawValue else { return clearRating(set) }
         set.rpe = feel.rawValue
         forgetUntakenNudge(on: set)
-        pendingNudge = nudge(after: set)
+        // Replaces only this exercise's own offer. In a superset the partner's
+        // rating used to overwrite whatever was standing, and the offer on
+        // the other card vanished without its answer ever being asked for.
+        standingOffers.removeAll { $0.catalogID == set.catalogID }
+        if let offered = nudge(after: set) { standingOffers.append(offered) }
         save()
         Haptics.tick()
     }
@@ -518,7 +1085,7 @@ final class ActiveWorkout {
     /// its own undo, because that one moved real numbers.
     func clearRating(_ set: SetLog) {
         set.rpe = nil
-        if pendingNudge?.setID == set.id { pendingNudge = nil }
+        standingOffers.removeAll { $0.setID == set.id }
         forgetUntakenNudge(on: set)
         save()
         Haptics.tick()
@@ -539,6 +1106,25 @@ final class ActiveWorkout {
     /// The set whose answer produced an offer — where the outcome is filed.
     private func subject(of nudge: LoadNudge) -> SetLog? {
         session.sets.first { $0.id == nudge.setID }
+    }
+
+    /// The rows an offer is about: the working sets of its exercise after the
+    /// one that was rated. The same rows are the ones taking it moves and the
+    /// only ones whose logging answers it, so the two can't disagree about
+    /// which sets the offer was for.
+    ///
+    /// A pending drop row is at the weight the lifter dialled it to, and says
+    /// nothing about the working sets, so it is neither moved nor an answer.
+    ///
+    /// Only within the slot it was made in. A day that repeats a movement gives
+    /// each slot its own load, and an offer read off the top set's answer must
+    /// not move the back-off's sets, nor be answered by lifting one.
+    private func offer(_ nudge: LoadNudge, covers row: SetLog) -> Bool {
+        guard row.catalogID == nudge.catalogID, !row.isContinuation, row.setIndex > nudge.fromIndex,
+              let subject = subject(of: nudge) else { return false }
+        return SessionFactory.laterRowsInSlot(of: subject, in: session,
+                                              layout: slotLayout(of: nudge.catalogID))
+            .contains { $0.id == row.id }
     }
 
     // MARK: - Acting on the answer
@@ -564,7 +1150,22 @@ final class ActiveWorkout {
         var isBackOff: Bool { toKg < fromKg }
     }
 
-    private(set) var pendingNudge: LoadNudge?
+    /// Every offer standing, at most one per exercise, oldest first. Kept per
+    /// exercise so that rating one half of a superset leaves the other half's
+    /// offer where it was.
+    private var standingOffers: [LoadNudge] = []
+
+    /// The offer standing on an exercise's card.
+    func pendingNudge(for catalogID: String) -> LoadNudge? {
+        standingOffers.first { $0.catalogID == catalogID }
+    }
+
+    /// The offer the logger is showing: the exercise the session is on, else the
+    /// newest. Callers that draw one card ask `pendingNudge(for:)` instead.
+    var pendingNudge: LoadNudge? {
+        if let preferred = session.preferredExerciseID, let offer = pendingNudge(for: preferred) { return offer }
+        return standingOffers.last
+    }
 
     /// Reads the set just rated the way the progression would read it next
     /// week, and applies that reading to the sets still in front of you.
@@ -583,10 +1184,10 @@ final class ActiveWorkout {
         guard !set.isContinuation else { return nil }
         guard let feel = set.feel, set.tracking != .duration, set.weightKg > 0 else { return nil }
 
-        let remaining = session.sets.filter {
-            $0.catalogID == set.catalogID && !$0.isCompleted
-                && !$0.isContinuation && $0.setIndex > set.setIndex
-        }
+        // The slot's own sets: what the offer would move is what it counts.
+        let remaining = SessionFactory.laterRowsInSlot(of: set, in: session,
+                                                       layout: slotLayout(of: set.catalogID))
+            .filter { !$0.isCompleted }
         guard !remaining.isEmpty else { return nil }
 
         let scale = set.loadScale
@@ -620,28 +1221,42 @@ final class ActiveWorkout {
         var id: UUID { nudge.setID }
     }
 
-    private(set) var takenNudge: TakenNudge?
+    /// Every take still open to undo, at most one per exercise. As with the
+    /// standing offers, one exercise's take must not cost another its undo.
+    private var openTakes: [TakenNudge] = []
+
+    func takenNudge(for catalogID: String) -> TakenNudge? {
+        openTakes.first { $0.nudge.catalogID == catalogID }
+    }
+
+    /// The take the logger is showing, chosen as `pendingNudge` is.
+    var takenNudge: TakenNudge? {
+        if let preferred = session.preferredExerciseID, let taken = takenNudge(for: preferred) { return taken }
+        return openTakes.last
+    }
 
     /// Takes the offer: every set of that exercise still to come moves onto the
     /// new rung.
     func apply(_ nudge: LoadNudge) {
+        // A changed answer can offer another rung before the first take is
+        // settled. Both taps are one undoable choice: keep the weight each row
+        // had before either tap, or Undo would stop at the intermediate rung.
         var previous: [UUID: Double] = [:]
-        for set in session.sets
-        where set.catalogID == nudge.catalogID
-            && !set.isCompleted
-            // A pending drop row is at the weight the lifter dialled it to. The
-            // offer is about the working sets, and it counted only those.
-            && !set.isContinuation
-            && set.setIndex > nudge.fromIndex {
-            previous[set.id] = set.weightKg
+        if let taken = openTakes.first(where: { $0.nudge.setID == nudge.setID }) {
+            previous = taken.previousKg
+        }
+        for set in session.sets where !set.isCompleted && offer(nudge, covers: set) {
+            if previous[set.id] == nil { previous[set.id] = set.weightKg }
             set.weightKg = nudge.toKg
         }
-        pendingNudge = nil
-        takenNudge = previous.isEmpty ? nil : TakenNudge(nudge: nudge, previousKg: previous)
+        standingOffers.removeAll { $0.setID == nudge.setID }
+        openTakes.removeAll { $0.nudge.catalogID == nudge.catalogID }
+        let taken = previous.isEmpty ? nil : TakenNudge(nudge: nudge, previousKg: previous)
+        if let taken { openTakes.append(taken) }
         // Only where something actually moved. An offer that found no sets left
         // to change was not taken — nothing happened — and saying it was would
         // put a rung on the record that nobody ever lifted.
-        if takenNudge != nil { subject(of: nudge)?.recordLoadNudge(.taken, toKg: nudge.toKg) }
+        if taken != nil { subject(of: nudge)?.recordLoadNudge(.taken, toKg: nudge.toKg) }
         save()
         Haptics.log()
     }
@@ -650,8 +1265,15 @@ final class ActiveWorkout {
     /// screen reads exactly as it did before the button was pressed.
     func undoTakenNudge() {
         guard let taken = takenNudge else { return }
-        restoreWeights()
-        pendingNudge = taken.nudge
+        undoTakenNudge(taken)
+    }
+
+    /// Undoes one exercise's take, whichever card it is drawn on.
+    func undoTakenNudge(_ taken: TakenNudge) {
+        guard openTakes.contains(where: { $0.nudge.setID == taken.nudge.setID }) else { return }
+        restoreWeights(of: taken)
+        standingOffers.removeAll { $0.catalogID == taken.nudge.catalogID }
+        standingOffers.append(taken.nudge)
         // Off the record entirely, not filed as a decline. The weights are back
         // where they were and the offer is standing again, so the screen reads
         // as though the button was never pressed, and the record has to say the
@@ -663,19 +1285,24 @@ final class ActiveWorkout {
 
     /// The weights half of that, without restoring the offer — for when the set
     /// that produced it is being un-logged and the offer is going too.
-    private func restoreWeights() {
-        guard let taken = takenNudge else { return }
+    private func restoreWeights(of taken: TakenNudge) {
         for set in session.sets {
             guard let weight = taken.previousKg[set.id], !set.isCompleted else { continue }
             set.weightKg = weight
         }
-        takenNudge = nil
+        openTakes.removeAll { $0.nudge.setID == taken.nudge.setID }
     }
 
     func dismissNudge() {
         guard let nudge = pendingNudge else { return }
+        dismissNudge(nudge)
+    }
+
+    /// Turns down one exercise's offer, whichever card it is drawn on.
+    func dismissNudge(_ nudge: LoadNudge) {
+        guard standingOffers.contains(where: { $0.setID == nudge.setID }) else { return }
         subject(of: nudge)?.recordLoadNudge(.declined, toKg: nudge.toKg)
-        pendingNudge = nil
+        standingOffers.removeAll { $0.setID == nudge.setID }
         // This used to change nothing on disk, so there was nothing to write.
         // Now the cross puts something in the record, and the record has to
         // survive the phone dying mid-session like everything else here.
@@ -710,15 +1337,41 @@ final class ActiveWorkout {
         Haptics.tick()
     }
 
-    /// Takes a set off the end — the pair of `addSet`, undoing exactly what
-    /// that did. The last set of an exercise stays: removing it would leave a
-    /// card with nothing on it.
+    /// Takes a set nobody has lifted off the card — the pair of `addSet`,
+    /// undoing exactly what that did. See `removableSet(in:)` for which one.
     func removeLastSet(from group: SessionExerciseGroup) {
-        guard group.sets.count > 1, let last = group.sets.last else { return }
-        context.delete(last)
+        guard let row = removableSet(in: group) else { return }
+        context.delete(row)
         resequence(group.catalogID)
         save()
         Haptics.tick()
+    }
+
+    /// The row *Remove* would take, or nothing when there isn't one — which is
+    /// also when the logger hides the button.
+    ///
+    /// Only a row nobody logged. This used to be whatever row was last, logged
+    /// or not, so a slip reaching for *Add set* on a finished exercise opened
+    /// for review erased the last set with its reps, rating, start and heart
+    /// rate, one tap, no way back; and with set 2 taken back to fix it, Remove
+    /// deleted the logged set 3 and left the empty set 2 in place. Erasing a
+    /// lift goes through its undo first, where it is one deliberate step.
+    ///
+    /// A working set is preferred over a continuation row: *Add set* only ever
+    /// adds working sets. A row with a continuation directly beneath it is
+    /// passed over, because the continuation would then claim to carry on from
+    /// whatever row was above the one removed — a drop off a set it was never
+    /// taken from. The last row of an exercise stays, or the card would be left
+    /// with nothing on it.
+    func removableSet(in group: SessionExerciseGroup) -> SetLog? {
+        let rows = group.sets
+        guard rows.count > 1 else { return nil }
+        let candidates = rows.indices.filter { index in
+            let holdsUpContinuation = index + 1 < rows.count && rows[index + 1].isContinuation
+            return !rows[index].isCompleted && !holdsUpContinuation
+        }
+        let pick = candidates.last { !rows[$0].isContinuation } ?? candidates.last
+        return pick.map { rows[$0] }
     }
 
     /// Renumbers one exercise so its sets run 0, 1, 2 with no gaps. `setIndex`
@@ -726,32 +1379,49 @@ final class ActiveWorkout {
     /// last session, so a deletion in the middle can't be left as a hole.
     private func resequence(_ catalogID: String) {
         let sets = session.sets
-            .filter { $0.catalogID == catalogID }
+            .filter { $0.catalogID == catalogID && !$0.isDeleted }
             .sorted { $0.setIndex < $1.setIndex }
         for (index, set) in sets.enumerated() { set.setIndex = index }
     }
 
     func addExercise(_ exercise: CatalogExercise, sets: Int = 3) {
-        let order = (session.sets.map(\.exerciseOrder).max() ?? -1) + 1
-        if lastPerformances[exercise.id] == nil {
-            lastPerformances[exercise.id] = TrainingStats.lastPerformance(
-                of: exercise.id, in: history, excluding: session.id
-            )
-        }
-        let last = lastPerformance(for: exercise.id)
+        // Matched by movement, not spelling: a session started from a plan
+        // slot made before a merge holds the losing ID, while the picker only
+        // offers the survivor. Compared raw, adding the survivor opened a
+        // second card for the same lift. The new rows take the card's own ID,
+        // because the session groups its rows by the ID they carry.
+        let canonical = ExerciseCatalog.canonicalID(for: exercise.id)
+        let existing = groups.first { ExerciseCatalog.canonicalID(for: $0.catalogID) == canonical }
+        let catalogID = existing?.catalogID ?? exercise.id
+        let order = existing?.order ?? (session.sets.map(\.exerciseOrder).max() ?? -1) + 1
+        let firstIndex = (existing?.sets.map(\.setIndex).max() ?? -1) + 1
+        let template = existing?.sets.last(where: { !$0.isContinuation })
+        let last = lastPerformance(for: catalogID)
+        let tracking = template?.tracking ?? exercise.tracking
+        let isTimed = tracking == .duration
         for index in 0..<sets {
-            let previous = index < last.count ? last[index] : last.last
+            let previous = template ?? (index < last.count ? last[index] : last.last)
+            // The 10 reps and 45 s are where the stepper opens, not a claim about
+            // the set; each row carries only the one its exercise is logged in,
+            // or a squat would export a hold time nobody took.
+            //
+            // And no rep range, unless the plan already set one for this
+            // exercise. Nobody prescribed anything for a movement added on the
+            // floor, and an 8–12 filled in here would be exported as a target
+            // and read back as a heavy triple that "fell short" of it. With no
+            // range the card reads the reps being dialled, as a drop row does,
+            // and an Easy answer can still offer the next rung.
             let set = SetLog(
-                catalogID: exercise.id,
-                exerciseName: exercise.name,
+                catalogID: catalogID,
+                exerciseName: existing?.name ?? exercise.name,
                 exerciseOrder: order,
-                setIndex: index,
+                setIndex: firstIndex + index,
                 weightKg: previous?.weightKg ?? 0,
-                reps: previous?.reps ?? 10,
-                seconds: previous?.seconds ?? 45,
-                targetRepsLow: 8,
-                targetRepsHigh: 12,
-                tracking: exercise.tracking
+                reps: isTimed ? 0 : previous?.reps ?? 10,
+                seconds: isTimed ? previous?.seconds ?? 45 : 0,
+                targetRepsLow: template?.targetRepsLow ?? 0,
+                targetRepsHigh: template?.targetRepsHigh ?? 0,
+                tracking: tracking
             )
             set.session = session
             context.insert(set)
@@ -760,12 +1430,62 @@ final class ActiveWorkout {
         Haptics.log()
     }
 
+    /// Whether an exercise can be taken back out of the session, which is the
+    /// only time the logger offers it.
+    ///
+    /// Only an exercise added on the day, and only while nothing on it is
+    /// logged. A logged set is data, and undoing it first is what says the
+    /// lifter means it. A planned exercise is not offered either: leaving it
+    /// unlogged already says it was skipped, and removing it would erase that
+    /// the plan asked for it. Freestyle sessions have no plan, so everything in
+    /// them counts as added on the day.
+    ///
+    /// Read from the session's rows rather than from `group`, which is a copy
+    /// taken when the card was drawn; a set logged from the wrist since then
+    /// must still stop the removal.
+    func canRemove(_ group: SessionExerciseGroup) -> Bool {
+        let held = rows(of: group)
+        return planItem(for: group.catalogID) == nil
+            && !held.isEmpty
+            && !held.contains(where: \.isCompleted)
+    }
+
+    /// Takes an exercise added by mistake out of the session, leaving no trace
+    /// of it: its unlogged rows, its note and any claim it had on the working
+    /// position go, and nothing else is touched.
     func removeExercise(_ group: SessionExerciseGroup) {
-        for set in group.sets { context.delete(set) }
+        guard canRemove(group) else { return }
+        for set in rows(of: group) {
+            // A start announced on a row that is going was a mis-tap on the
+            // wrong exercise, and it may have cut a rest short. Same as
+            // `cancelStart`: the countdown comes back with the row's stamp
+            // gone, rather than staying stopped for a set that no longer exists.
+            if let cancelled = restCancelledByStart, cancelled.setID == set.id {
+                restTimer.restore(endingAt: cancelled.endsAt, totalSeconds: cancelled.totalSeconds)
+                restCancelledByStart = nil
+            }
+            context.delete(set)
+        }
+        // A pick that names an exercise which is gone would come back to life
+        // the moment the same lift was added again, and the session would open
+        // on it as if it had been chosen twice.
+        if session.preferredExerciseID == group.catalogID { session.preferredExerciseID = nil }
         // The note was about an exercise that is no longer in this session.
         // Left behind it would describe work the record says never happened.
         session.dropNote(about: group.catalogID, in: context)
+        // `save` is what moves the wrist, the Lock Screen and the widgets off the
+        // exercise, the same door `addExercise` goes through to put it there.
         save()
+    }
+
+    private func rows(of group: SessionExerciseGroup) -> [SetLog] {
+        session.sets.filter { $0.catalogID == group.catalogID && !$0.isDeleted }
+    }
+
+    /// How many of one exercise's efforts are logged, against
+    /// `SessionExerciseGroup.effortCount` for the total.
+    func loggedEffortCount(in group: SessionExerciseGroup) -> Int {
+        group.sets.filter { $0.isCompleted && !$0.isContinuation }.count
     }
 
     // MARK: - Notes
@@ -802,32 +1522,54 @@ final class ActiveWorkout {
 
     /// Drops any sets left unlogged and stamps the session finished — see
     /// `WorkoutSession.close`, which the wrist's headless finish runs too.
-    func finish() {
+    ///
+    /// With nothing logged there is nothing to keep, and the session is
+    /// discarded instead. Closed, it was a finished workout with no sets: the
+    /// streak, the week strip and "This week" counted a mis-tap as a day
+    /// trained, while the calendar and Today called it rest. Going through
+    /// `discard` means the Lock Screen, the wrist and Health hear exactly what
+    /// a Discard tells them.
+    ///
+    /// - Parameter moment: when the session ended. Now, for the phone's own
+    ///   Finish; the wrist's tap, for one that waited in the queue while the
+    ///   lifter walked back — see `WorkoutSession.wristFinishMoment`.
+    /// - Returns: false when the session was discarded for being empty, so
+    ///   there is no summary to show.
+    @discardableResult
+    func finish(at moment: Date = .now) -> Bool {
+        guard !session.completedSets.isEmpty else {
+            discard()
+            return false
+        }
         // A settle still waiting would otherwise go out after the end, about a
         // session that has already been closed — or, after `discard`, one that
         // no longer exists.
         pendingEdit?.cancel()
-        session.close(in: context)
+        session.close(at: moment, in: context)
         adoptWatchMetrics()
         restTimer.onChange = nil
         restTimer.stop()
         writeThrough()
         WorkoutLiveActivity.shared.end(with: activityState)
-        WatchBridge.shared.update(session: nil)
+        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: session.id, reason: .finished))
         WatchBridge.shared.clearMetrics()
         WidgetPublisher.updateSession(nil)
         recordToHealth()
         Haptics.success()
+        return true
     }
 
     func discard() {
         pendingEdit?.cancel()
         restTimer.onChange = nil
         restTimer.stop()
+        // Read before the delete. A deleted model can trap when read, and an
+        // empty Finish now comes through here as well as Discard.
+        let sessionID = session.id
         context.delete(session)
         writeThrough()
         WorkoutLiveActivity.shared.end(with: nil)
-        WatchBridge.shared.update(session: nil)
+        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: sessionID, reason: .discarded))
         WatchBridge.shared.clearMetrics()
         WidgetPublisher.updateSession(nil)
     }
@@ -837,14 +1579,28 @@ final class ActiveWorkout {
     /// Takes whatever the watch measured while the session ran. The watch is
     /// the only thing here that can read a heart rate, so its numbers win.
     private func adoptWatchMetrics() {
-        guard let metrics = WatchBridge.shared.liveMetrics else { return }
-        session.wasWatchDriven = true
-        if let average = metrics.averageHeartRate { session.averageHeartRate = average }
-        if let max = metrics.maxHeartRate { session.maxHeartRate = max }
-        if let energy = metrics.activeEnergyKcal, energy > 0 { session.activeEnergyKcal = energy }
+        guard let metrics = WatchBridge.shared.liveMetrics, metrics.sessionID == session.id else { return }
+        // Each field is written only when it differs. A model property that is
+        // set to the value it already holds still tells every observer it
+        // changed, and anything on screen that reads it draws again for nothing.
+        if !session.wasWatchDriven { session.wasWatchDriven = true }
+        // A zero is a watch that had nothing to report yet, not a heart that
+        // never beat. Filed, it would read as a measurement, and it would stop
+        // the Health backfill filling the real number in later.
+        if let average = metrics.averageHeartRate, average > 0, session.averageHeartRate != average {
+            session.averageHeartRate = average
+        }
+        if let max = metrics.maxHeartRate, max > 0, session.maxHeartRate != max { session.maxHeartRate = max }
+        if let energy = metrics.activeEnergyKcal, energy > 0, session.activeEnergyKcal != energy {
+            session.activeEnergyKcal = energy
+        }
+        session.stampWatchVitals(average: metrics.averageHeartRate, max: metrics.maxHeartRate,
+                                 energy: metrics.activeEnergyKcal)
         // The watch saves its own workout — with the full beat-by-beat record —
         // so the phone must not write a second copy of the same session.
-        if let workoutID = metrics.healthWorkoutID { session.healthWorkoutID = workoutID }
+        if let workoutID = metrics.healthWorkoutID, session.healthWorkoutID != workoutID {
+            session.healthWorkoutID = workoutID
+        }
     }
 
     /// Writes the session to Health and picks up the heart rate and energy an
@@ -853,20 +1609,36 @@ final class ActiveWorkout {
     /// the summary screen.
     private func recordToHealth() {
         let session = session
+        let sessionID = session.id
         let context = context
         let watchIsRecording = session.wasWatchDriven || WatchBridge.shared.liveMetrics != nil
+        // The task holds the session across up to twelve seconds of waiting
+        // and then Health's own calls, and it can be deleted, erased or
+        // restored over in that time. So every read after an await checks it
+        // is still there first: a deleted model can trap when read, and
+        // anything written for it is an orphan no later erase can find.
         Task { @MainActor in
             // When the watch drove the session it saves the workout itself —
             // with the beat-by-beat heart rate the phone can't reproduce — and
             // tells us the ID a moment later. Give it that moment rather than
             // racing it to a duplicate workout in Health.
             if watchIsRecording {
-                for _ in 0..<12 where session.healthWorkoutID == nil {
+                for _ in 0..<12 {
+                    guard !session.isGoneFromStore else { return }
+                    if session.healthWorkoutID != nil { break }
                     try? await Task.sleep(for: .seconds(1))
                 }
             }
-            await HealthKitService.shared.saveWorkout(for: session)
+            guard !session.isGoneFromStore else { return }
+            let phoneWorkoutID = await HealthKitService.shared.saveWorkout(for: session)
+            // A workout written for a session that went meanwhile has already
+            // been queued for removal by `saveWorkout`.
+            guard !session.isGoneFromStore else { return }
+            if let phoneWorkoutID {
+                WatchBridge.shared.notePhoneHealthWorkout(phoneWorkoutID, for: sessionID)
+            }
             await HealthKitService.shared.backfillVitals(for: session)
+            guard !session.isGoneFromStore else { return }
             try? context.save()
         }
     }
@@ -896,14 +1668,24 @@ final class ActiveWorkout {
             currentSetID: nextSet?.id,
             rest: (restTimer.endsAt, restTimer.startedAt, restTimer.totalSeconds),
             restSeconds: { [self] catalogID in
-                planItem(for: catalogID)?.resolvedRestSeconds ?? AppSettings.shared.defaultRestSeconds
+                (nextRow(of: catalogID).flatMap(planItem(for:)) ?? planItem(for: catalogID))?
+                    .resolvedRestSeconds ?? AppSettings.shared.defaultRestSeconds
             },
             lastTimeLabel: { [self] catalogID in lastTimeLabel(for: catalogID) }
         )
     }
 
     private func lastTimeLabel(for catalogID: String) -> String? {
-        WatchSnapshotFactory.label(for: lastPerformance(for: catalogID))
+        WatchSnapshotFactory.label(for: nextRow(of: catalogID).map(lastPerformance(for:))
+                                        ?? lastPerformance(for: catalogID))
+    }
+
+    /// The working row an exercise is up to, so the wrist reads the rest and
+    /// the "last time" of the slot that row is in rather than of the first.
+    private func nextRow(of catalogID: String) -> SetLog? {
+        session.sets
+            .filter { $0.catalogID == catalogID && !$0.isCompleted && !$0.isContinuation }
+            .min(by: SetLog.precedesInSession)
     }
 
     func pushToWatch() {
@@ -929,17 +1711,41 @@ final class ActiveWorkout {
     ///
     /// Returns false for the commands that belong to whoever owns session
     /// lifecycle — starting, finishing and discarding — so `RootView` can take
-    /// them without this object having to know about navigation.
+    /// them without this object having to know about navigation. Also for a
+    /// set this session has no row for, which is not this object's to drop.
     @discardableResult
     func apply(_ command: WatchCommand) -> Bool {
         switch command {
         case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
-            guard let set = session.sets.first(where: { $0.id == id }) else { return true }
+            // Not a row of this session, so possibly one the last Finish
+            // deleted before the wrist's log of it could arrive. Swallowed
+            // here, that lift was lost from the record; `RootView` passes it
+            // on to the one path allowed to put it back.
+            // A log the wrist already took back, whose undo got here first.
+            // Nobody is owed it, here or in a finished session.
+            guard !DroppedSetMemory.shared.wasTakenBack(id, loggedAt: loggedAt) else { return true }
+            // A log this logger already applied and the phone has since undone:
+            // the wrist re-sent it because it never heard the answer. The set
+            // no longer holds it, so `holdsWristLog` below cannot tell, and
+            // applying it again re-completed a lift the lifter had taken back.
+            // The wrist is told where things stand instead.
+            guard !DroppedSetMemory.shared.wasHeardLog(id, loggedAt: loggedAt) else {
+                pushToWatch()
+                return true
+            }
+            guard let set = session.sets.first(where: { $0.id == id }) else { return false }
+            // The same log again. See `SetLog.holdsWristLog`: run twice,
+            // `complete` files a decline nobody made and re-dials rows the
+            // lifter has moved on from.
+            guard !set.holdsWristLog(at: loggedAt) else {
+                pushToWatch()
+                return true
+            }
             set.weightKg = weightKg
             set.reps = reps
             if set.tracking == .duration { set.seconds = seconds }
             complete(set,
-                     restSeconds: planItem(for: set.catalogID)?.resolvedRestSeconds,
+                     restSeconds: planItem(for: set)?.resolvedRestSeconds,
                      at: WatchCommand.loggedMoment(loggedAt))
             return true
 
@@ -961,13 +1767,24 @@ final class ActiveWorkout {
             }
             return true
 
-        case .undoSet(let id):
-            guard let set = session.sets.first(where: { $0.id == id }) else { return true }
+        case .undoSet(let id, let completion):
+            // The same, for taking back a set that was put back that way.
+            DroppedSetMemory.shared.rememberTakenBack(id, completedAt: completion)
+            guard let set = session.sets.first(where: { $0.id == id }) else { return false }
+            // An undo of a log this row no longer holds; see
+            // `SetLog.admitsWristUndo`. The wrist is shown the set as kept.
+            guard set.admitsWristUndo(of: completion) else {
+                pushToWatch()
+                return true
+            }
             uncomplete(set)
             return true
 
         case .announceStart(let id, let moment):
             guard let set = session.sets.first(where: { $0.id == id }) else { return true }
+            // The wrist's moment as it came, count-in included. Through the
+            // phone's own tap it would be restamped as its arrival plus a
+            // second count-in — late twice over, and later still out of range.
             announceStart(set, at: moment)
             return true
 
@@ -998,16 +1815,19 @@ final class ActiveWorkout {
             restTimer.add(seconds: seconds)
             return true
 
-        case .metrics:
+        case .metrics(let metrics):
+            // A late update for the previous session belongs to RootView's
+            // finished-session path, even while a new logger is open.
+            guard metrics.sessionID == session.id else { return false }
             // Already folded into `WatchBridge.liveMetrics`; the logger reads it
-            // from there. Nothing to write until the session ends.
+            // from there. Nothing to write until this session ends.
             return true
 
         case .requestMirror:
             WatchBridge.shared.resend()
             return true
 
-        case .startToday, .startFreestyle, .finish, .discard:
+        case .startToday, .startFreestyle, .finish, .finishSession, .discard, .discardSession:
             return false
         }
     }
@@ -1018,22 +1838,8 @@ final class ActiveWorkout {
     /// values are formatted here because the widget can't read the user's
     /// kg/lb preference.
     var activityState: WorkoutActivity.ContentState {
-        let unit = AppSettings.shared.weightUnit
-        return WorkoutActivity.ContentState(
-            startedAt: session.startedAt,
-            completedSets: completedCount,
-            totalSets: totalCount,
-            currentExercise: currentGroup?.name ?? "Freestyle",
-            currentSetNumber: nextSetNumber,
-            currentSetTotal: currentSetTotal,
-            currentTarget: nextTargetLabel,
-            upNext: upNextName,
-            restEndsAt: restTimer.endsAt,
-            restStartedAt: restTimer.startedAt,
-            volumeLabel: "\(unit.fromKg(volumeKg).compactVolume) \(unit.short)",
-            elapsedLabel: session.duration.durationString,
-            elapsedShort: session.duration.shortDurationString
-        )
+        WorkoutLiveActivity.state(for: session, restEndsAt: restTimer.endsAt,
+                                  restStartedAt: restTimer.startedAt)
     }
 
     /// Called after every change, and again whenever the app comes back to the
@@ -1082,4 +1888,95 @@ enum LoadNudgeOutcome: String, Sendable {
     case taken
     /// Not taken: the cross, or the next set logged at the weight that stood.
     case declined
+}
+
+// MARK: - Announced starts
+
+extension SetLog {
+    /// The longest an announced start can sit ahead of the log that closes the
+    /// set and still be believed as this set's start.
+    ///
+    /// A start nobody closed is not a slow set. The lifter tapped Start, found
+    /// the bench taken, lifted something else and logged this one after the
+    /// detour, and the pair then reported a time under tension of however long
+    /// the detour took, exported as something measured. So the gap has to be one
+    /// a set could fill, and the bound is set by what the set was: ten seconds a
+    /// rep, slower than any tempo anybody lifts a working set at, for a
+    /// counted set; twice the hold for a timed one; and a minute either way for
+    /// the unracking and settling the count-in doesn't cover. Never under three
+    /// minutes, because the lifter dials the numbers after the set and before
+    /// the tap on Log, and a short set is not a reason to disbelieve a slow tap.
+    ///
+    /// Over the bound the start is dropped, not shortened. A shortened one
+    /// would be a moment made up to fit, and the record would say the set
+    /// began then.
+    var longestPlausibleLength: TimeInterval {
+        let working = tracking == .duration ? TimeInterval(seconds) * 2 : TimeInterval(reps) * 10
+        return max(180, working + 60)
+    }
+
+    /// Whether the start on this set still describes it once it is logged at
+    /// `moment`: it exists, it isn't in the future of the log (logged inside
+    /// the count-in, the start it counted towards never came), and the two are
+    /// close enough for one set to have filled.
+    func startStillDescribes(loggedAt moment: Date) -> Bool {
+        guard let startedAt else { return false }
+        let length = moment.timeIntervalSince(startedAt)
+        return length >= 0 && length <= longestPlausibleLength
+    }
+}
+
+extension WorkoutSession {
+    /// The logged rows whose claim to have been taken without rest leans on
+    /// `set`: the unbroken run of logged continuations directly beneath it,
+    /// top to bottom. The run stops at the first row that is not one, because
+    /// a drop below an unlogged row was already leaning on nothing and this
+    /// undo changes nothing about it.
+    ///
+    /// Here rather than in the logger because the wrist's undo, applied with
+    /// no logger running, has to take the same rows back as the phone's.
+    func loggedContinuations(below set: SetLog) -> [SetLog] {
+        let below = sets
+            .filter { $0.catalogID == set.catalogID && !$0.isDeleted && $0.setIndex > set.setIndex }
+            .sorted { $0.setIndex < $1.setIndex }
+        return Array(below.prefix { $0.isContinuation && $0.isCompleted })
+    }
+
+    /// What logging `set` at `moment` does to the starts announced on it and on
+    /// the sets around it. Shared by the logger and by the wrist's log applied
+    /// with no logger running, so the two can't disagree about a start.
+    func settleStarts(afterLogging set: SetLog, at moment: Date) {
+        if !set.startStillDescribes(loggedAt: moment) { set.startedAt = nil }
+        dropOvertakenStarts(besides: set, at: moment)
+    }
+
+    /// Clears the announced start of every unlogged set other than `set` that
+    /// began before `moment`, and returns which sets they were.
+    ///
+    /// A start that a later log, or a later start, has overtaken cannot still
+    /// be under way: nobody lifts two sets at once. The rest gap and the heart
+    /// rate window already refuse a start that another set's log has passed;
+    /// the set's own length and the exported stamp did not, and an abandoned
+    /// start paired with a log twenty minutes on.
+    @discardableResult
+    func dropOvertakenStarts(besides set: SetLog, at moment: Date) -> [UUID] {
+        dropStarts { $0.id != set.id && ($0.startedAt ?? .distantFuture) < moment }
+    }
+
+    /// Clears the announced start of every unlogged set of another exercise
+    /// than `catalogID`, for a lifter who has moved onto it.
+    @discardableResult
+    func dropStarts(awayFrom catalogID: String) -> [UUID] {
+        dropStarts { $0.catalogID != catalogID }
+    }
+
+    private func dropStarts(where abandoned: (SetLog) -> Bool) -> [UUID] {
+        var dropped: [UUID] = []
+        for other in sets where !other.isCompleted && other.startedAt != nil
+            && !other.isGoneFromStore && abandoned(other) {
+            other.startedAt = nil
+            dropped.append(other.id)
+        }
+        return dropped
+    }
 }

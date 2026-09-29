@@ -35,6 +35,9 @@ struct WatchLoggerView: View {
     /// Held independently of the next set, which advances as soon as logging succeeds.
     @State private var effortSetID: UUID?
     @State private var effortCompletedAt: Date?
+    /// When the last set was logged from this screen, for `WatchLoggerRules`'
+    /// double-tap window.
+    @State private var lastLoggedAt: Date?
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @State private var showingExercises = false
     @FocusState private var isCrownFocused: Bool
@@ -57,46 +60,30 @@ struct WatchLoggerView: View {
     private var phase: SessionPhase { session.phase(resting: rest.isRunning) }
 
     var body: some View {
-        Group {
-            if let subject = effortSet, let owner = effortExercise {
-                ScrollView {
-                    WatchSetFeelView(
-                        exerciseName: owner.name, setNumber: owner.number(of: subject),
-                        current: subject.rpe.map(SetFeel.nearest(to:)),
-                        onPick: { feel in
-                            connector.rateSet(subject, rpe: subject.rpe == feel.rawValue ? nil : feel.rawValue)
-                            WatchHaptics.tick()
-                            dismissEffort()
-                        },
-                        onSkip: { dismissEffort() },
-                        onUndo: { undo(subject) }
-                    )
-                    .padding(.horizontal, 2)
-                }
-            } else {
-                logger
+        logger
+            .navigationTitle(session.title)
+            .watchScreenTint(phase)
+            .sheet(isPresented: $showingExercises) {
+                WatchExerciseListView(session: session, connector: connector)
             }
-        }
-        .navigationTitle(effortSet == nil ? session.title : "Set logged")
-        .watchScreenTint(effortSet == nil ? phase : .working)
-        .sheet(isPresented: $showingExercises) {
-            WatchExerciseListView(session: session, connector: connector)
-        }
-        .onAppear { load(set) }
-        .onChange(of: set) { was, now in
-            if was?.id == now?.id { adopt(now) } else { load(now) }
-        }
-        .onChange(of: session.sessionID) { _, _ in dismissEffort() }
-        .onChange(of: session.effortEnabled) { _, enabled in
-            if enabled != true { dismissEffort() }
-        }
-        .task(id: effortSetID) {
-            guard effortSetID != nil, !voiceOverEnabled else { return }
-            // Ignoring the question never requires a dismissal. VoiceOver
-            // readers keep control of the pace instead of racing a timeout.
-            do { try await Task.sleep(for: .seconds(10)) } catch { return }
-            dismissEffort()
-        }
+            .onAppear { load(set) }
+            .onChange(of: set) { was, now in
+                if was?.id == now?.id { adopt(now) } else { load(now) }
+            }
+            .onChange(of: session.sessionID) { _, _ in dismissEffort() }
+            .onChange(of: session.effortEnabled) { _, enabled in
+                if enabled != true { dismissEffort() }
+            }
+            .task(id: effortSetID) {
+                guard effortSetID != nil, !voiceOverEnabled else { return }
+                // Ignoring the question never requires a dismissal. It sits below
+                // Log set and takes nothing over, and it folds itself back into
+                // the quiet "Rate last set" button after a while, which moves
+                // nothing above it. VoiceOver readers keep control of the pace
+                // instead of racing a timeout.
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                dismissEffort()
+            }
     }
 
     private var logger: some View {
@@ -125,7 +112,7 @@ struct WatchLoggerView: View {
                     } else {
                         allDone
                     }
-                    effortButton
+                    effortPrompt
                     undoButton
                 }
                 .padding(.horizontal, 2)
@@ -135,9 +122,13 @@ struct WatchLoggerView: View {
             // appeared at the top is off screen, and the one screen in this app
             // designed to be read without stopping had to be scrolled to first.
             // Only on the way in: a lifter who has scrolled somewhere during a
-            // rest put themselves there.
+            // rest put themselves there. Not while the effort card is waiting
+            // for an answer either: it sits below Log set precisely so that
+            // nothing moves under the thumb, and scrolling to the countdown
+            // took the question off the screen the moment it was asked.
             .onChange(of: rest.isRunning) { _, resting in
-                guard resting else { return }
+                guard WatchLoggerRules.scrollsToTop(whenRestBecomes: resting,
+                                                    effortCardWaiting: effortSet != nil) else { return }
                 withAnimation(.easeOut(duration: 0.25)) {
                     proxy.scrollTo(Self.topID, anchor: .top)
                 }
@@ -219,15 +210,12 @@ struct WatchLoggerView: View {
     /// read it, and then look again to find the weight.
     private var restCentrepiece: some View {
         VStack(spacing: 7) {
-            Text(rest.label)
-                .font(Theme.number(46, weight: .heavy))
-                .foregroundStyle(SessionPhase.resting.gradient)
-                .shadow(color: SessionPhase.resting.glow, radius: 10)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .accessibilityLabel("\(Int(max(0, rest.remaining))) seconds of rest left")
-
-            WatchRestProgressBar(progress: rest.progress)
+            // The one part of this screen that changes every second, in a view
+            // of its own so that only it is re-evaluated. Drawn here it took
+            // the whole logger with it, four times a second, for every rest.
+            if let endsAt = rest.endsAt {
+                WatchRestCountdown(endsAt: endsAt, totalSeconds: rest.totalSeconds)
+            }
 
             HStack(spacing: 6) {
                 Text("RESTING")
@@ -314,7 +302,7 @@ struct WatchLoggerView: View {
                 tile(title: "seconds", value: "\(Int(secondsValue))", field: .seconds)
             case .weightReps, .bodyweightReps:
                 HStack(spacing: 6) {
-                    if exercise.tracking.logsWeight || set.weightKg > 0 {
+                    if exercise.tracking.logsWeight || exercise.tracking == .bodyweightReps {
                         tile(title: scale.unit.short, value: trimmed(weightDisplay), field: .weight)
                     }
                     tile(title: "reps", value: "\(Int(repsValue))", field: .reps)
@@ -521,6 +509,9 @@ struct WatchLoggerView: View {
             working(since: startedAt, set: set)
         } else {
             Button {
+                // Not a second tap of the Log set that has just gone through:
+                // the rest card slides under the thumb as it lands.
+                guard acceptsSetTap else { return }
                 WatchHaptics.start()
                 connector.announceStart(set)
                 // The rest is over the moment you say you're going — that is
@@ -535,26 +526,21 @@ struct WatchLoggerView: View {
                 Label("Start set", systemImage: "play.fill")
             }
             .buttonStyle(WatchQuietButtonStyle(tint: Theme.accent, weight: .heavy, size: 14))
-            .accessibilityHint("Optional. Records the moment this set begins")
+            .accessibilityHint("Optional. Counts you in, then records the moment this set begins")
         }
     }
 
-    /// The clock the announcement became. Off a `TimelineView` rather than a
-    /// ticker of its own — the view already knows when the set began.
+    /// The count-in the announcement starts, and the clock it becomes. Both off
+    /// one `TimelineView` rather than a ticker of their own — the view already
+    /// knows when the set begins. Zero arrives without a tap on the wrist: the
+    /// one under the thumb was the signal, and another a few seconds later
+    /// would land mid-unrack as a buzz asking to be looked at.
     private func working(since start: Date, set: WatchSetSnapshot) -> some View {
         HStack(spacing: 7) {
             WatchGlyphTile(symbol: "stopwatch.fill", tint: Theme.accent, size: 24)
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text("WORKING")
-                    .font(Theme.microCaps)
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.accent.wash)
-                TimelineView(.periodic(from: start, by: 1)) { context in
-                    Text(max(0, context.date.timeIntervalSince(start)).clockString)
-                        .font(Theme.number(17, weight: .bold))
-                        .foregroundStyle(Theme.ink)
-                }
+            TimelineView(.periodic(from: SetLeadIn.tickAnchor(for: start), by: 1)) { context in
+                readout(SetStartReading(start: start, now: context.date))
             }
 
             Spacer(minLength: 0)
@@ -573,6 +559,20 @@ struct WatchLoggerView: View {
         .watchCard(padding: 7, radius: 12, phase: .working)
     }
 
+    private func readout(_ reading: SetStartReading) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(reading.eyebrow)
+                .font(Theme.microCaps)
+                .tracking(0.8)
+                .foregroundStyle(Theme.accent.wash)
+            Text(reading.figure)
+                .font(Theme.number(17, weight: .bold))
+                .foregroundStyle(Theme.ink)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(reading.spoken)
+    }
+
     // MARK: - Logging
 
     private func logButton(set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) -> some View {
@@ -586,7 +586,18 @@ struct WatchLoggerView: View {
         .buttonStyle(WatchProminentButtonStyle(phase: .working))
     }
 
+    /// Whether a tap that changes the record is one the lifter meant, or the
+    /// second half of a double tap on Log set. See `WatchLoggerRules`.
+    private var acceptsSetTap: Bool {
+        WatchLoggerRules.acceptsSetTap(lastLoggedAt: lastLoggedAt, now: .now)
+    }
+
     private func log(set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) {
+        // The mirror is updated in this same call, so by the second tap of a
+        // double tap the button is already bound to the next set, and it would
+        // log that one with the same numbers.
+        guard acceptsSetTap else { return }
+        lastLoggedAt = .now
         WatchHaptics.log()
         let moment = connector.logSet(
             set,
@@ -627,11 +638,34 @@ struct WatchLoggerView: View {
     private var undoButton: some View {
         if let last = lastCompletedSet {
             Button {
+                guard acceptsSetTap else { return }
                 undo(last)
             } label: {
                 Label("Undo last set", systemImage: "arrow.uturn.backward")
             }
             .buttonStyle(WatchQuietButtonStyle(tint: Theme.textSecondary, weight: .semibold, size: 12))
+        }
+    }
+
+    /// The effort question, in the flow of the logger and below Log set rather
+    /// than over it. Nothing above it ever moves for it, so a thumb going for
+    /// the next set of a drop set or a superset finds Log set where it was, and
+    /// there is nothing to dismiss: it is answered, or it is left, and it
+    /// folds back into `effortButton` on its own.
+    @ViewBuilder
+    private var effortPrompt: some View {
+        if let subject = effortSet, let owner = effortExercise {
+            WatchSetFeelView(
+                exerciseName: owner.name, setNumber: owner.number(of: subject),
+                current: subject.rpe.map(SetFeel.nearest(to:)),
+                onPick: { feel in
+                    connector.rateSet(subject, rpe: subject.rpe == feel.rawValue ? nil : feel.rawValue)
+                    WatchHaptics.tick()
+                    dismissEffort()
+                }
+            )
+        } else {
+            effortButton
         }
     }
 
@@ -712,6 +746,41 @@ struct WatchLoggerView: View {
     private func trimmed(_ value: Double) -> String { scale.text(value) }
 }
 
+// MARK: - The countdown
+
+/// The rest's clock and its bar, drawn from the end date alone.
+///
+/// Takes values rather than the timer, so nothing about it changes between
+/// ticks except the time. The `TimelineView` re-evaluates this small view
+/// once a second and leaves the logger that holds it alone.
+struct WatchRestCountdown: View {
+    let endsAt: Date
+    let totalSeconds: Int
+
+    var body: some View {
+        TimelineView(.periodic(from: WatchRestRules.tickAnchor(endsAt: endsAt, totalSeconds: totalSeconds,
+                                                              now: .now), by: 1)) { context in
+            let remaining = max(0, endsAt.timeIntervalSince(context.date))
+            VStack(spacing: 7) {
+                Text(remaining.clockString)
+                    .font(Theme.number(46, weight: .heavy))
+                    .foregroundStyle(SessionPhase.resting.gradient)
+                    .shadow(color: SessionPhase.resting.glow, radius: 10)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .accessibilityLabel("\(Int(remaining.rounded())) seconds of rest left")
+
+                WatchRestProgressBar(progress: progress(remaining: remaining))
+            }
+        }
+    }
+
+    private func progress(remaining: TimeInterval) -> Double {
+        guard totalSeconds > 0 else { return 0 }
+        return min(1, max(0, 1 - remaining / Double(totalSeconds)))
+    }
+}
+
 // MARK: - Jumping between exercises
 
 /// The session's exercises, so the lifter can work out of order — supersets,
@@ -730,43 +799,103 @@ struct WatchExerciseListView: View {
     private var list: some View {
         List {
             ForEach(session.exercises) { exercise in
-                Button {
-                    WatchHaptics.tick()
-                    connector.focus(on: exercise.id)
-                    dismiss()
-                } label: {
-                    HStack(spacing: 9) {
-                        // The ring carries the count, so a glance down the list
-                        // says how far into each exercise you are without
-                        // reading a single fraction.
-                        WatchRestRing(progress: exercise.progress,
-                                      phase: exercise.isComplete ? .done : .working,
-                                      size: 22, lineWidth: 3)
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(exercise.name)
-                                .font(Theme.rounded(13, weight: .bold))
-                                .foregroundStyle(Theme.ink)
-                                .lineLimit(2)
-                            Text("\(exercise.completedCount)/\(exercise.sets.count) sets")
-                                .font(Theme.number(11, weight: .semibold))
-                                .foregroundStyle(exercise.isComplete
-                                                 ? AnyShapeStyle(SessionPhase.done.gradient)
-                                                 : AnyShapeStyle(Theme.textSecondary))
-                        }
+                switch WatchLoggerRules.tap(on: exercise) {
+                case .focus:
+                    Button {
+                        WatchHaptics.tick()
+                        connector.focus(on: exercise.id)
+                        dismiss()
+                    } label: {
+                        row(for: exercise)
                     }
+                    .listRowBackground(rowBackground)
+                case .review:
+                    // Looking at what was logged, and nothing more. Focusing a
+                    // finished exercise moved the phone, the Lock Screen and
+                    // the dock off the one being lifted, so this sends nothing.
+                    NavigationLink {
+                        WatchExerciseReviewView(exercise: exercise, unit: session.unit)
+                    } label: {
+                        row(for: exercise)
+                    }
+                    .listRowBackground(rowBackground)
                 }
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(LinearGradient(colors: [Theme.surfaceRaised, Theme.surface],
-                                             startPoint: .top, endPoint: .bottom))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(Theme.hairline, lineWidth: 1)
-                        )
-                )
             }
         }
         .navigationTitle("Exercises")
+    }
+
+    private func row(for exercise: WatchExerciseSnapshot) -> some View {
+        HStack(spacing: 9) {
+            // The ring carries the count, so a glance down the list
+            // says how far into each exercise you are without
+            // reading a single fraction.
+            WatchRestRing(progress: exercise.progress,
+                          phase: exercise.isComplete ? .done : .working,
+                          size: 22, lineWidth: 3)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(exercise.name)
+                    .font(Theme.rounded(13, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(2)
+                Text("\(exercise.completedCount)/\(exercise.sets.count) sets")
+                    .font(Theme.number(11, weight: .semibold))
+                    .foregroundStyle(exercise.isComplete
+                                     ? AnyShapeStyle(SessionPhase.done.gradient)
+                                     : AnyShapeStyle(Theme.textSecondary))
+            }
+        }
+    }
+
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(LinearGradient(colors: [Theme.surfaceRaised, Theme.surface],
+                                 startPoint: .top, endPoint: .bottom))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1)
+            )
+    }
+}
+
+/// A finished exercise, read-only: what was logged on each set. Reached from
+/// the exercise list without moving the session onto it.
+struct WatchExerciseReviewView: View {
+    let exercise: WatchExerciseSnapshot
+    let unit: WeightUnit
+
+    private var scale: LoadScale { exercise.resolvedScale(sessionUnit: unit) }
+
+    var body: some View {
+        List {
+            ForEach(exercise.sets.filter(\.isCompleted)) { set in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Set \(exercise.number(of: set))")
+                        .font(Theme.rounded(11, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text(summary(of: set))
+                        .font(Theme.number(15, weight: .heavy))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if let rpe = set.rpe {
+                        Text(SetFeel.nearest(to: rpe).label)
+                            .font(Theme.rounded(11, weight: .semibold))
+                            .foregroundStyle(SetFeel.nearest(to: rpe).tint)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .navigationTitle(exercise.name)
+    }
+
+    /// The numbers the exercise is tracked in, and only those: a set of
+    /// bodyweight reps says reps, not "0 kg".
+    private func summary(of set: WatchSetSnapshot) -> String {
+        if exercise.tracking == .duration { return "\(set.seconds)s" }
+        guard exercise.tracking.logsWeight || set.weightKg > 0 else { return "\(set.reps) reps" }
+        return "\(scale.text(scale.display(set.weightKg))) \(scale.unit.short) × \(set.reps)"
     }
 }

@@ -21,9 +21,22 @@ struct RootView: View {
     @State private var selectedTab: AppTab = .today
     @State private var activeWorkout: ActiveWorkout?
     @State private var isSessionExpanded = false
+    /// Bumped by `WatchIdleSync` each time the idle snapshot it watches
+    /// changes, so the widgets follow it from here, where the running
+    /// workout is known.
+    @State private var watchIdleRevision = 0
     @State private var showingSummary: WorkoutSession?
     @State private var confirmingDockFinish = false
     @State private var confirmingDockDiscard = false
+    /// True while a heart-rate backfill over recent sessions is running. See
+    /// `backfillRecentHeartRate`.
+    @State private var isBackfillingRecentSessions = false
+    /// Where a Siri, Shortcut or Action Button start is read. Closed until the
+    /// first `.task` has adopted whatever session was left open: a start read
+    /// before then finds no `activeWorkout` and begins a second session beside
+    /// the unfinished one. A class, so opening it is visible to every closure
+    /// at once instead of to the next copy of the view.
+    @State private var pendingInbox = PendingActionHandoff.Inbox()
 
     var body: some View {
         Group {
@@ -42,7 +55,9 @@ struct RootView: View {
             connectWatch()
             syncBodyWeightFromHealth()
             publishWidgets()
+            pendingInbox.open()
             runPendingAction()
+            backfillRecentHeartRate()
         }
         .onChange(of: hasOnboarded) { _, done in
             if done { seedSampleDataIfRequested() }
@@ -63,10 +78,13 @@ struct RootView: View {
         // Comparing what is about to be sent is also the only version of this
         // that stays correct when a field is added to the snapshot, rather than
         // needing a new trigger alongside it.
-        .onChange(of: watchIdle) { _, snapshot in
-            WatchBridge.shared.update(idle: snapshot)
-            publishWidgets()
-        }
+        //
+        // The comparison lives in `WatchIdleSync`, a view of its own. Made
+        // here, it was rebuilt — the streak and the rotation over every
+        // finished session — on every pass of this body, and this body runs
+        // for a tab switch or a sheet as much as for a change to the data.
+        .background { WatchIdleSync(revision: $watchIdleRevision).equatable() }
+        .onChange(of: watchIdleRevision) { _, _ in publishWidgets() }
         // Derived rather than set at each call site — the session can be put
         // away or brought back from the logger, the dock, the Today card and a
         // Live Activity tap, and every one of them has to agree.
@@ -82,20 +100,58 @@ struct RootView: View {
         .onChange(of: AppSettings.shared.trackRPE) { _, _ in
             activeWorkout?.pushToWatch()
         }
+        // The wrist reads its unit and whether to start a rest from the
+        // session mirror, and Settings stays reachable mid-workout. Without a
+        // push the phone showed 225 lb while the wrist turned kg, and a rest
+        // switched off here still started after the next wrist log.
+        .onChange(of: AppSettings.shared.weightUnit) { _, _ in
+            activeWorkout?.pushToWatch()
+        }
+        .onChange(of: AppSettings.shared.restTimerAutoStart) { _, _ in
+            activeWorkout?.pushToWatch()
+        }
         // Restamp the card on the way out — that's the moment it becomes the
         // thing the user is looking at — and on the way back in, since the rest
         // timer can't tick while the app is suspended.
         .onChange(of: scenePhase) { _, phase in
-            activeWorkout?.pushLiveActivity()
+            // A warm resume never runs `.task`, so a session left open
+            // overnight is retired here too — before anything restamps the
+            // Lock Screen or the wrist with it.
+            let retired = phase == .active && retireStaleSession()
+            if !retired { activeWorkout?.pushLiveActivity() }
             if phase == .active {
-                activeWorkout?.pushToWatch()
+                if !retired { activeWorkout?.pushToWatch() }
                 pushWatchIdle()
                 publishWidgets()
                 // Siri, a Shortcut, the Action Button or a widget button can
                 // only leave a note and bring the app forward — this is where
-                // the note gets read.
+                // the note gets read if it was already there. One written
+                // after the app came to the front is read on its announcement
+                // below.
                 runPendingAction()
+                backfillRecentHeartRate()
+                // A workout Health refused to remove, or could not look up
+                // while the phone was locked, waits on the list until
+                // something asks again. A cold launch can be days away.
+                Task { await HealthKitService.shared.retryPendingWorkoutCleanup() }
             }
+        }
+        // The intent runs in this process, and the system may bring the app to
+        // the front before or after `perform()` has left its note. Reading
+        // only on activation lost the second order: the note was written
+        // after the read, waited for the next activation, and either started a
+        // workout minutes late or aged out. The intent announces every note,
+        // so the read happens whichever came first. A note is taken once, so
+        // hearing about it twice starts nothing twice.
+        .onReceive(NotificationCenter.default.publisher(for: PendingActionHandoff.didRequest)
+            .receive(on: DispatchQueue.main)) { _ in
+            runPendingAction()
+        }
+        // One decision for every way it can change: the setting, a session
+        // starting or ending, the app leaving the screen. `initial` covers a
+        // launch straight into a resumed session.
+        .onChange(of: holdsScreenAwake, initial: true) { _, awake in
+            UIApplication.shared.isIdleTimerDisabled = awake
         }
         .onOpenURL { url in
             switch url.host {
@@ -134,7 +190,9 @@ struct RootView: View {
                     onMinimise: minimiseSession,
                     onClose: { finished in
                         closeSession()
-                        if let finished { showingSummary = finished }
+                        // A Finish with nothing logged discards the session,
+                        // and a deleted session has no summary to open.
+                        if let finished, !finished.isGoneFromStore { showingSummary = finished }
                     }
                 )
                 .transition(.move(edge: .bottom))
@@ -164,6 +222,9 @@ struct RootView: View {
 
     private var dockFinishMessage: String {
         guard let workout = activeWorkout else { return "" }
+        // `ActiveWorkout.finish` discards an empty session, and "Every set
+        // logged" was the message for a workout with no sets in it.
+        if workout.completedCount == 0 { return "Nothing was logged, so this session won't be kept." }
         let remaining = workout.totalCount - workout.completedCount
         return remaining > 0
             ? "\(remaining) set\(remaining == 1 ? "" : "s") not logged — they'll be dropped from the record."
@@ -204,12 +265,14 @@ struct RootView: View {
         sessionMinimised = false
     }
 
-    private func finishSession() {
+    /// - Parameter moment: when the session ended. Now, for the phone's own
+    ///   Finish; the wrist's tap, for one that came from the watch.
+    private func finishSession(at moment: Date = .now) {
         guard let workout = activeWorkout else { return }
         let session = workout.session
-        workout.finish()
+        let kept = workout.finish(at: moment)
         closeSession()
-        showingSummary = session
+        if kept { showingSummary = session }
         pushWatchIdle()
     }
 
@@ -219,13 +282,26 @@ struct RootView: View {
         pushWatchIdle()
     }
 
+    // MARK: - Screen
+
+    /// Held only while a workout is open and the app is on screen. The
+    /// preference alone used to keep the phone awake for as long as the app
+    /// was open.
+    private var holdsScreenAwake: Bool {
+        ScreenAwakeRules.holdsScreenAwake(
+            setting: AppSettings.shared.keepScreenAwake,
+            workoutOpen: activeWorkout != nil,
+            appIsActive: scenePhase == .active
+        )
+    }
+
     // MARK: - Starting from outside the app
 
     /// Siri, a Shortcut, the Action Button and the widgets all land here. None
     /// of them can build a session themselves — see `GymTrackIntents` — so they
     /// leave a note and bring the app forward, and this reads it.
     private func runPendingAction() {
-        switch SharedStore.takeAction() {
+        switch pendingInbox.take() {
         case .startToday: startScheduledSession()
         case .startFreestyle: startFreestyleSession()
         case .openSession: expandSession()
@@ -241,7 +317,7 @@ struct RootView: View {
         guard activeWorkout == nil else { return expandSession() }
         let plan = plans.first(where: \.isActive) ?? plans.first
         let history = sessions.filter { !$0.isActive }
-        if let day = plan?.day(for: .now) {
+        if let day = plan?.nextDay(on: .now, after: history) {
             present(ActiveWorkout.start(day: day, plan: plan, context: context, history: history))
         } else {
             present(ActiveWorkout.startFreestyle(context: context, history: history))
@@ -280,13 +356,17 @@ struct RootView: View {
         WatchCommandCenter.shared.uiHandler = { command in
             handleWatchCommand(command)
         }
-        pushWatchIdle()
+        // The session first, for the same reason `WatchCommandCenter` does
+        // it: an idle update sent ahead of it carries whatever session the
+        // bridge held before.
         activeWorkout?.pushToWatch()
+        pushWatchIdle()
     }
 
     /// What the watch's idle screen is built from — today's prescription, the
-    /// streak and the last thing trained. Computed rather than stored so the
-    /// comparison above is made against the same lines that get sent.
+    /// streak and the last thing trained. Computed rather than stored so every
+    /// send is made from the store as it is at that moment. Nothing here reads
+    /// it during a body pass; see `WatchIdleSync`.
     private var watchIdle: WatchIdleSnapshot {
         WatchMirrorBuilder.idle(plans: plans, sessions: sessions)
     }
@@ -307,7 +387,7 @@ struct RootView: View {
         switch command {
         case .startToday:
             let plan = plans.first(where: \.isActive) ?? plans.first
-            if let day = plan?.day(for: .now) {
+            if let day = plan?.nextDay(on: .now, after: sessions) {
                 startFromWatch {
                     ActiveWorkout.start(day: day, plan: plan, context: context,
                                         history: sessions.filter { !$0.isActive })
@@ -327,23 +407,55 @@ struct RootView: View {
             }
             return true
 
+        case .finishSession(let batch, _):
+            if let workout = activeWorkout, workout.session.id == batch.sessionID {
+                workout.session.applyWatchFinish(batch)
+                try? context.save()
+                finishSession(at: workout.session.wristFinishMoment(batch.endedAt))
+                return true
+            }
+            // A session this view isn't holding is one the store-side path
+            // either adopts or has already seen closed. A closed one may still
+            // be owed the logs in this batch — the phone's Finish can beat the
+            // wrist's — and those and the metrics are written in one context
+            // and one save there, rather than half of them here.
+            return false
+
+        case .logSet, .undoSet:
+            // The running logger had no row for it. With nothing running the
+            // store-side path takes it whole; with a logger on screen, it may
+            // only reach a session already finished, never the one this view
+            // is writing to.
+            guard activeWorkout != nil else { return false }
+            WatchCommandCenter.shared.applyToFinishedSession(command)
+            return true
+
         case .finish(let metrics):
-            if activeWorkout != nil {
+            // A queued command from an older watch has no independent session
+            // ID. Its metrics may identify one; without them, closing the
+            // current workout would risk ending a different session.
+            guard let metrics, let id = metrics.sessionID else { return true }
+            if activeWorkout?.session.id == id {
                 finishSession()
                 return true
             }
-            // The watch ended a session the phone had already closed out.
-            if let metrics { return applyLateMetrics(metrics) }
-            return false
+            return applyLateMetrics(metrics, final: true)
 
         case .metrics(let metrics):
-            // Only reaches here with no session running: the watch saving its
-            // workout to Health after the phone finished.
-            return applyLateMetrics(metrics)
+            // Reaches here only for a session the logger isn't running: most
+            // often the watch handing over the workout it saved to Health
+            // after the phone finished, and now and then a live reading that
+            // landed after the close, which `takeWatchMetrics` turns away.
+            return applyLateMetrics(metrics, final: false)
+
+        case .discardSession(let id):
+            guard activeWorkout?.session.id == id else { return false }
+            discardSession()
+            return true
 
         case .discard:
-            guard activeWorkout != nil else { return false }
-            discardSession()
+            // The old payload cannot identify its target. Ignore it rather
+            // than letting a delayed Discard delete the next workout.
             return true
 
         case .requestMirror:
@@ -369,10 +481,14 @@ struct RootView: View {
     /// in a bag when this happens, and springing the logger open would mean
     /// finding it in that state later.
     private func startFromWatch(_ makeWorkout: () -> ActiveWorkout) {
+        // Yesterday's session, held since the app was last on screen, would
+        // count as the one already running and be handed back to a wrist that
+        // will not draw it — every Start ended on "Starting…" and nothing more.
+        let retired = retireStaleSession()
         // A live message can also be queued after its send fails, then arrive
         // twice. Check before building: an already-built workout has inserted
         // a second active session into the store even if we decline to show it.
-        if let activeWorkout {
+        if !retired, let activeWorkout {
             activeWorkout.pushToWatch()
             WatchBridge.shared.resend()
             return
@@ -396,19 +512,49 @@ struct RootView: View {
     /// Heart rate, energy and the Health workout the watch saved can land
     /// after the phone has already filed the session — the watch takes a few
     /// seconds to close a workout out. Match them back up by session ID.
+    ///
+    /// - Parameter final: true for the metrics a Finish carried. Anything else
+    ///   reaches a closed session only as the Health hand-over.
     @discardableResult
-    private func applyLateMetrics(_ metrics: WatchWorkoutMetrics) -> Bool {
-        guard let id = metrics.sessionID,
-              let session = sessions.first(where: { $0.id == id })
-        else { return false }
-
-        session.wasWatchDriven = true
-        if let average = metrics.averageHeartRate { session.averageHeartRate = average }
-        if let max = metrics.maxHeartRate { session.maxHeartRate = max }
-        if let energy = metrics.activeEnergyKcal, energy > 0 { session.activeEnergyKcal = energy }
-        if let workoutID = metrics.healthWorkoutID { session.healthWorkoutID = workoutID }
+    private func applyLateMetrics(_ metrics: WatchWorkoutMetrics, final: Bool) -> Bool {
+        guard let id = metrics.sessionID else { return false }
+        guard let session = sessions.first(where: { $0.id == id }) else {
+            discardOrphanWorkout(of: metrics)
+            return false
+        }
+        // The query can still hand back a session an erase, a restore or the
+        // wrist deleted through another context a moment ago. Linking a watch
+        // workout to it would file the ID on a row no later erase can find.
+        // Not handled here, so the store-side path looks the ID up afresh: a
+        // restore may have put the same session back, and a session that is
+        // really gone is turned away there. The watch's workout is queued for
+        // removal from Health first, if the store confirms no session holds
+        // it; otherwise nothing would ever find it.
+        guard !session.isGone(fromStore: FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { $0.id == id })) else {
+            discardOrphanWorkout(of: metrics)
+            return false
+        }
+        // Handled either way: a reading turned away here has nowhere better
+        // to go, and the store-side path would only turn it away again.
+        guard session.takeWatchMetrics(metrics, final: final) else { return true }
+        session.stampWatchVitals(average: metrics.averageHeartRate, max: metrics.maxHeartRate, energy: metrics.activeEnergyKcal)
+        if let workoutID = metrics.healthWorkoutID {
+            HealthKitService.shared.acceptWatchWorkout(workoutID, for: session, context: context)
+        }
         try? context.save()
         return true
+    }
+
+    /// Queues the Health workout a watch report names, when no session holds
+    /// it any more. A session the user deleted while the wrist was still
+    /// saving leaves the watch's workout in Fitness with nothing in the app
+    /// pointing at it. Health does the checking, against the store rather
+    /// than this view's query, so a session that is only late to appear in
+    /// the query keeps its workout.
+    private func discardOrphanWorkout(of metrics: WatchWorkoutMetrics) {
+        guard let id = metrics.sessionID, let workoutID = metrics.healthWorkoutID else { return }
+        HealthKitService.shared.discardOrphanWorkout(workoutID, sessionID: id)
     }
 
     // MARK: - Health
@@ -418,6 +564,23 @@ struct RootView: View {
     private func syncBodyWeightFromHealth() {
         guard AppSettings.shared.healthBodyWeight else { return }
         Task { await HealthKitService.shared.importBodyMass(into: context) }
+    }
+
+    /// Gives recent sets the heart rate a headless finish couldn't read. A
+    /// workout finished on the wrist with the phone locked is filed with no
+    /// view on screen, every Health read then fails, and no summary is ever
+    /// shown to try again, so the next unlock is the first chance.
+    ///
+    /// One pass at a time. A trip to Control Center brings the scene back to
+    /// active while a slow pass is still waiting on Health, and a second pass
+    /// over the same sessions would only ask the same questions again.
+    private func backfillRecentHeartRate() {
+        guard !isBackfillingRecentSessions else { return }
+        isBackfillingRecentSessions = true
+        Task {
+            await HealthKitService.shared.backfillRecentSessions(in: context)
+            isBackfillingRecentSessions = false
+        }
     }
 
     private func seedSampleDataIfRequested() {
@@ -430,8 +593,14 @@ struct RootView: View {
 
     /// Mirrors user-created exercises into the shared catalog so the rest of the
     /// app can resolve them by ID like any bundled exercise.
+    ///
+    /// Also gives their plan slots the record of how each is measured, which
+    /// only new slots and the editor's delete used to write. A failure here
+    /// costs nothing: the next launch or the next change asks again.
     private func syncCustomExercises() {
-        ExerciseCatalog.shared.setCustom(customExercises.map(\.asCatalogExercise))
+        let custom = customExercises.map(\.asCatalogExercise)
+        ExerciseCatalog.shared.setCustom(custom)
+        _ = try? context.snapshotCustomSlotTracking(of: custom)
     }
 
     /// Applies the user's trimmed-down view of the library. Hidden exercises
@@ -453,24 +622,94 @@ struct RootView: View {
             return
         }
 
-        // Anything older than 12 hours is stale — close it out rather than
-        // dropping the user back into yesterday's workout.
-        if open.startedAt.timeIntervalSinceNow < -12 * 3600 {
-            if open.completedSets.isEmpty {
-                context.delete(open)
-            } else {
-                // Closed properly, not just stamped: the sets nobody lifted go,
-                // and so does anything written about them.
-                let lastLogged = open.completedSets.compactMap(\.completedAt).max() ?? open.startedAt
-                open.close(at: lastLogged, in: context)
-            }
-            try? context.save()
+        // Stale — close it out rather than dropping the user back into
+        // yesterday's workout.
+        if let end = WatchCommandCenter.shared.retire(open, in: context) {
             WorkoutLiveActivity.shared.endAll()
+            if openSessions.isEmpty { WatchBridge.shared.update(session: nil, ended: end) }
             sessionMinimised = false
             return
         }
 
         activeWorkout = ActiveWorkout(session: open, context: context, history: sessions)
         isSessionExpanded = !sessionMinimised
+    }
+
+    /// The twelve-hour rule — `WorkoutSession.closeIfStale` — for the paths
+    /// that never pass through `resumeUnfinishedSession`: a warm resume, and a
+    /// wrist asking for a workout while the app has been resident since
+    /// yesterday. Without it the dock went on offering a session the watch
+    /// refuses to draw, and Finish recorded the whole night.
+    ///
+    /// A session this view holds is taken down the way a finish takes it down
+    /// — rest timer, Lock Screen, the wrist, the logger, and Health for one
+    /// that kept sets; see `WatchCommandCenter.retire`. Returns true when it
+    /// was, so the caller knows not to use the workout it was holding.
+    @discardableResult
+    private func retireStaleSession() -> Bool {
+        if let workout = activeWorkout {
+            guard workout.session.isStale() else { return false }
+            workout.restTimer.onChange = nil
+            workout.restTimer.stop()
+            let end = WatchCommandCenter.shared.retire(workout.session, in: context)
+            WorkoutLiveActivity.shared.endAll()
+            WatchBridge.shared.update(session: nil, ended: end)
+            WatchBridge.shared.clearMetrics()
+            WidgetPublisher.updateSession(nil)
+            closeSession()
+            pushWatchIdle()
+            return true
+        }
+
+        // A session started in the background that this view never adopted.
+        let stale = openSessions.filter { $0.isStale() }.sorted { $0.startedAt < $1.startedAt }
+        guard !stale.isEmpty else { return false }
+        let ends = stale.compactMap { WatchCommandCenter.shared.retire($0, in: context) }
+        // A session opened since is still running, and the Lock Screen and
+        // the wrist are about that one. Otherwise the latest is the one a
+        // wrist could still be recording.
+        if openSessions.isEmpty {
+            WorkoutLiveActivity.shared.endAll()
+            WatchBridge.shared.update(session: nil, ended: ends.last)
+        }
+        pushWatchIdle()
+        return false
+    }
+
+    /// Read from the store rather than `sessions`, which a session started in
+    /// the background may not have reached yet. Only the open ones: this runs
+    /// on every return to the foreground, and the history is the whole store.
+    private var openSessions: [WorkoutSession] {
+        let open = FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.endedAt == nil })
+        return (try? context.fetch(open)) ?? sessions.filter(\.isActive)
+    }
+}
+
+/// Sends the watch's idle screen whenever what it would say changes.
+///
+/// A view of its own, with its own queries, so that the streak and the
+/// rotation are recomputed when the plans or sessions change and not on every
+/// pass of `RootView`'s body. Its `==` is always true and it is applied with
+/// `.equatable()`, so a pass of the parent that changed nothing here does not
+/// evaluate it again; a change to its queries still does, which is the only
+/// time the answer can differ.
+private struct WatchIdleSync: View, Equatable {
+    @Query private var sessions: [WorkoutSession]
+    @Query(sort: \Plan.createdAt) private var plans: [Plan]
+    @Binding var revision: Int
+
+    static func == (lhs: WatchIdleSync, rhs: WatchIdleSync) -> Bool { true }
+
+    private var idle: WatchIdleSnapshot {
+        WatchMirrorBuilder.idle(plans: plans, sessions: sessions)
+    }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: idle) { _, snapshot in
+                WatchBridge.shared.update(idle: snapshot)
+                revision &+= 1
+            }
     }
 }

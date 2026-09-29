@@ -23,28 +23,71 @@ final class WatchCommandCenter {
     /// false for anything the UI isn't holding, which falls through below.
     var uiHandler: ((WatchCommand) -> Bool)?
 
-    private var container: ModelContainer?
-    private lazy var context: ModelContext? = container.map { ModelContext($0) }
+    /// The container's main context, the one `RootView` and the logger read
+    /// and write through. It used to be a second context of its own, kept for
+    /// the life of the process, and rows saved through one were not always
+    /// visible in the other: the summary on screen could not show a late
+    /// wrist log until it was reopened. Commands are handled on the main
+    /// actor, so sharing costs nothing and there is a single set of rows.
+    private var context: ModelContext?
 
     private init() {}
 
     /// Called once at launch, before the first watch message can arrive.
     func configure(container: ModelContainer) {
-        self.container = container
+        context = container.mainContext
+        repairStoredStartsOnce(in: container.mainContext)
         WatchBridge.shared.commandHandler = { [weak self] command in
             self?.handle(command)
         }
         WatchBridge.shared.activate()
+        // The bridge sends nothing until it has been told what is running, and
+        // this is where it is told. Activation finishing is what used to send
+        // the first mirror, and in a fresh process that mirror said "no
+        // session" — a guess, not the store. A watch mid-workout took it as the
+        // end, threw away the Health recording it had kept since the first set
+        // and dropped its unconfirmed logs. A background launch has no view to
+        // correct it, and a foreground one corrected it too late, so the store
+        // is read here, before either can happen.
+        if let context { pushMirror(context: context) }
     }
 
     func handle(_ command: WatchCommand) {
-        if uiHandler?(command) == true { return }
+        if uiHandler?(command) == true {
+            rememberHeardLog(command)
+            return
+        }
         applyHeadless(command)
+    }
+
+    /// Clears the starts already stored that no set could have filled, once.
+    /// See `SetLog.dropImplausibleStoredStarts`. A flag rather than a check on
+    /// every launch: the rule now holds on every path that writes a start, so
+    /// once the old ones are gone nothing makes new ones.
+    func repairStoredStartsOnce(in context: ModelContext, defaults: UserDefaults = .standard) {
+        let key = "implausibleStartsRepaired"
+        guard !defaults.bool(forKey: key) else { return }
+        SetLog.dropImplausibleStoredStarts(in: context)
+        defaults.set(true, forKey: key)
+    }
+
+    /// A wrist log the running logger took, remembered as the headless path
+    /// remembers its own; see `DroppedSetMemory.rememberHeardLog`. The logger
+    /// reports nothing back, so the store is asked whether the row holds it.
+    private func rememberHeardLog(_ command: WatchCommand) {
+        guard case .logSet(let id, _, _, _, let loggedAt) = command, loggedAt != nil,
+              let context else { return }
+        var byID = FetchDescriptor<SetLog>(predicate: #Predicate { $0.id == id })
+        byID.fetchLimit = 1
+        guard let set = (try? context.fetch(byID))?.first, set.holdsWristLog(at: loggedAt) else { return }
+        DroppedSetMemory.shared.rememberHeardLog(id, completedAt: loggedAt)
     }
 
     // MARK: - Headless
 
-    private func applyHeadless(_ command: WatchCommand) {
+    /// Internal so a test can drive it without a view hierarchy, as a wake in
+    /// the background does. Everything else goes through `handle`.
+    func applyHeadless(_ command: WatchCommand) {
         guard let context else { return }
 
         switch command {
@@ -58,6 +101,9 @@ final class WatchCommandCenter {
             WatchBridge.shared.resend()
 
         case .startToday, .startFreestyle:
+            // Yesterday's session would otherwise count as the one already
+            // running, and be handed back to a wrist that will not draw it.
+            closeStaleSession(in: context)
             guard activeSession(in: context) == nil else {
                 // The first start may have landed while its mirror did not.
                 // A retry needs the session back, even though nothing changed.
@@ -68,7 +114,7 @@ final class WatchCommandCenter {
             let history = finishedSessions(in: context)
             if case .startToday = command,
                let plan = activePlan(in: context),
-               let day = plan.day(for: .now) {
+               let day = plan.nextDay(on: .now, after: history) {
                 let session = SessionFactory.build(day: day, plan: plan, context: context, history: history)
                 session.wasWatchDriven = true
             } else {
@@ -80,7 +126,31 @@ final class WatchCommandCenter {
             pushMirror(context: context)
 
         case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
-            guard let set = setLog(id: id, in: context) else { return }
+            // A log the wrist already took back, whose undo got here first.
+            guard !DroppedSetMemory.shared.wasTakenBack(id, loggedAt: loggedAt) else { return }
+            // A log this path already applied and the lifter has since undone,
+            // sent again because the wrist never heard the answer. The row no
+            // longer holds it, so `holdsWristLog` below cannot tell.
+            guard !DroppedSetMemory.shared.wasHeardLog(id, loggedAt: loggedAt) else {
+                pushMirror(context: context)
+                return
+            }
+            // Finish carries the wrist's final set state. A queued command
+            // delivered afterward must not rewrite that closed record — but
+            // it may still be owed a row the close deleted before this log
+            // could reach it.
+            guard let set = setLog(id: id, in: context), set.session?.isActive == true else {
+                restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
+                                  loggedAt: loggedAt, in: context)
+                return
+            }
+            // The same log again: see `SetLog.holdsWristLog`. Its load has
+            // already been carried, and carrying it a second time would undo
+            // whatever the lifter has dialled on the rows since.
+            guard !set.holdsWristLog(at: loggedAt) else {
+                pushMirror(context: context)
+                return
+            }
             set.weightKg = weightKg
             set.reps = reps
             if set.tracking == .duration { set.seconds = seconds }
@@ -92,8 +162,19 @@ final class WatchCommandCenter {
             // racked the bar. No rest is started to go with it — there is no
             // screen here to count one down on, and the wrist has been running
             // the one that matters since the set was logged.
-            set.completedAt = WatchCommand.loggedMoment(loggedAt)
-            carryLoadForward(from: set)
+            let loggedMoment = WatchCommand.loggedMoment(loggedAt)
+            set.completedAt = loggedMoment
+            DroppedSetMemory.shared.rememberHeardLog(id, completedAt: loggedAt)
+            // Logged inside the count-in: the start was a moment still to come,
+            // and it never came. The rule `ActiveWorkout.complete` applies, for
+            // the same reason — a set that began after it ended is a moment
+            // nobody lived, whichever path wrote it. The same call also drops a
+            // start too old for one set to have filled, and the starts this log
+            // has overtaken on other sets: with the phone asleep, a start
+            // abandoned for another exercise is exactly what the queue delivers
+            // minutes before the log that used to close it.
+            set.session?.settleStarts(afterLogging: set, at: loggedMoment)
+            carryLoadForward(from: set, in: context)
             save(context)
             pushMirror(context: context)
 
@@ -116,16 +197,21 @@ final class WatchCommandCenter {
             // to be the same one: this is the path that runs with the phone
             // asleep in a locker, which is exactly where a start that waited in
             // the queue comes from — and waiting is no longer a reason to
-            // refuse one. See `WatchCommand.clockSkewTolerance`.
-            guard let set = setLog(id: id, in: context), !set.isCompleted, set.startedAt == nil,
-                  moment.timeIntervalSinceNow <= WatchCommand.clockSkewTolerance
+            // refuse one. See `WatchCommand.isBelievableStart`. The moment is
+            // written as it came: the wrist added the count-in when it was
+            // tapped, and adding it again here would start the set late.
+            guard let set = setLog(id: id, in: context), set.session?.isActive == true,
+                  !set.isCompleted, set.startedAt == nil,
+                  WatchCommand.isBelievableStart(moment)
             else { return }
             set.startedAt = moment
+            // One set is under way at a time; see `ActiveWorkout.announceStart`.
+            set.session?.dropOvertakenStarts(besides: set, at: moment)
             save(context)
             pushMirror(context: context)
 
         case .cancelStart(let id):
-            guard let set = setLog(id: id, in: context) else { return }
+            guard let set = setLog(id: id, in: context), set.session?.isActive == true else { return }
             // Nothing else goes with it. The announcement is the only thing
             // this tap ever wrote, and the rest it cut short is a countdown on
             // a screen — the phone is asleep here, so there is none to restore.
@@ -133,15 +219,33 @@ final class WatchCommandCenter {
             save(context)
             pushMirror(context: context)
 
-        case .undoSet(let id):
-            guard let set = setLog(id: id, in: context) else { return }
+        case .undoSet(let id, let completion):
+            DroppedSetMemory.shared.rememberTakenBack(id, completedAt: completion)
+            guard let set = setLog(id: id, in: context), set.session?.isActive == true else {
+                withdrawDroppedSet(id, completedAt: completion, in: context)
+                return
+            }
+            // A stale undo, of a log the lifter has since replaced with
+            // another; see `SetLog.admitsWristUndo`.
+            guard set.admitsWristUndo(of: completion) else {
+                pushMirror(context: context)
+                return
+            }
             // The same erasure the phone's own undo performs, and deliberately
             // the identical call. Clearing the completion alone left the effort
             // answer, the announced start and the heart rate read through it
             // sitting on a set the lifter had taken back — so a mis-tap on the
             // wrist wrote a rating and a time under tension into the record for
             // a set that, as far as the record is concerned, never happened.
+            //
+            // The logged drops directly beneath it go too, last one first, as
+            // `ActiveWorkout.uncomplete` takes them. Left logged, they went
+            // into the record as lifts taken without rest off a set that was
+            // never done, whenever the phone was asleep for the undo.
+            let carried = set.isCompleted ? (set.session?.loggedContinuations(below: set) ?? []) : []
+            for row in carried.reversed() { row.unlog() }
             set.unlog()
+            restorePrefill(carriedBy: set)
             save(context)
             pushMirror(context: context)
 
@@ -172,41 +276,73 @@ final class WatchCommandCenter {
             save(context)
             pushMirror(context: context)
 
+        case .finishSession(let batch, let metrics):
+            guard let session = session(id: batch.sessionID, in: context) else {
+                discardOrphanWorkout(of: metrics, sessionID: batch.sessionID)
+                return
+            }
+            guard session.isActive else {
+                // Repeated delivery may carry a late Health workout, but it
+                // must never close whichever session opened after this one.
+                // The phone's Finish may have got here first, too, deleting
+                // rows this batch holds the wrist's logs for.
+                let changed = session.applyLateWatchFinish(batch, in: context)
+                apply(metrics, to: session, final: true, context: context)
+                save(context)
+                if changed { announceChange(context: context) }
+                return
+            }
+            guard activeSession(in: context)?.id == batch.sessionID else { return }
+            session.applyWatchFinish(batch)
+            finish(session, metrics: metrics, at: session.wristFinishMoment(batch.endedAt), context: context)
+
         case .finish(let metrics):
-            guard let session = activeSession(in: context) else { return }
-            // The whole close, not just the unlogged sets. This path runs with
-            // the phone asleep, and it used to stop at deleting those — so the
-            // notes and drop rows the phone's own Finish tidies away reached
-            // the record from here describing work that didn't happen.
-            session.close(in: context)
-            apply(metrics, to: session)
-            save(context)
-            WorkoutLiveActivity.shared.end(with: nil)
-            WatchBridge.shared.update(session: nil)
-            WatchBridge.shared.clearMetrics()
-            publishWidgets(context: context)
-            recordToHealth(session, context: context)
+            // Older queued commands only identify a session when the watch
+            // sent metrics. A nil-metrics Finish cannot safely choose one.
+            guard let metrics, let id = metrics.sessionID else { return }
+            guard let session = session(id: id, in: context) else {
+                discardOrphanWorkout(of: metrics, sessionID: id)
+                return
+            }
+            if session.isActive {
+                guard activeSession(in: context)?.id == id else { return }
+                finish(session, metrics: metrics, context: context)
+            } else {
+                apply(metrics, to: session, final: true, context: context)
+                save(context)
+            }
+
+        case .discardSession(let id):
+            guard let session = activeSession(in: context), session.id == id else { return }
+            discard(session, context: context)
 
         case .discard:
-            guard let session = activeSession(in: context) else { return }
-            context.delete(session)
-            save(context)
-            WorkoutLiveActivity.shared.end(with: nil)
-            WatchBridge.shared.update(session: nil)
-            WatchBridge.shared.clearMetrics()
-            publishWidgets(context: context)
+            // Legacy Discard has no session ID, so a delayed copy cannot be
+            // distinguished from a request to delete the current workout.
+            break
 
         case .metrics(let metrics):
-            // Live heart rate while the app is asleep is only worth keeping if
-            // it belongs to a session that's already closed — that's the watch
-            // handing over the workout it just saved to Health.
-            guard let id = metrics.sessionID, let session = session(id: id, in: context) else { return }
-            apply(metrics, to: session)
+            // Live heart rate while the app is asleep is written into the
+            // session still running, the only record of it if the watch's
+            // final report never comes. A closed session takes only the watch
+            // handing over the workout it just saved to Health; see
+            // `WorkoutSession.takeWatchMetrics`.
+            guard let id = metrics.sessionID else { return }
+            guard let session = session(id: id, in: context) else {
+                discardOrphanWorkout(of: metrics, sessionID: id)
+                return
+            }
+            guard apply(metrics, to: session, final: false, context: context) else { return }
             save(context)
 
         case .focusExercise(let catalogID):
             guard let session = activeSession(in: context) else { return }
-            session.preferredExerciseID = session.sets.contains { $0.catalogID == catalogID } ? catalogID : nil
+            let known = session.sets.contains { $0.catalogID == catalogID }
+            session.preferredExerciseID = known ? catalogID : nil
+            // Somebody lifting this is no longer about to lift the set they
+            // announced elsewhere; `ActiveWorkout.focus` clears it for the same
+            // reason, and this is the path that runs with no logger.
+            if known { session.dropStarts(awayFrom: catalogID) }
             save(context)
             pushMirror(context: context)
 
@@ -219,39 +355,197 @@ final class WatchCommandCenter {
 
     // MARK: - Pieces
 
-    private func apply(_ metrics: WatchWorkoutMetrics?, to session: WorkoutSession) {
-        guard let metrics else { return }
-        session.wasWatchDriven = true
-        if let average = metrics.averageHeartRate { session.averageHeartRate = average }
-        if let max = metrics.maxHeartRate { session.maxHeartRate = max }
-        if let energy = metrics.activeEnergyKcal, energy > 0 { session.activeEnergyKcal = energy }
-        if let workoutID = metrics.healthWorkoutID { session.healthWorkoutID = workoutID }
+    /// The workout the wrist saved to Health for a session that is no longer
+    /// here: deleted while the wrist was saving, or before its Finish arrived.
+    /// It is in Health with nothing to own it, so it is queued for removal;
+    /// Health checks the store again first, and keeps it if a restore has put
+    /// the session back.
+    private func discardOrphanWorkout(of metrics: WatchWorkoutMetrics?, sessionID: UUID) {
+        guard let workoutID = metrics?.healthWorkoutID else { return }
+        HealthKitService.shared.discardOrphanWorkout(workoutID, sessionID: sessionID)
+    }
+
+    /// A set command the running logger has no row for, arriving while the
+    /// app is on screen. Such a row can only be one `close` deleted from a
+    /// session already finished, so this reaches for that and nothing else:
+    /// the running session belongs to the logger, and this context writing
+    /// to it behind the logger's back is how two copies of a set disagree.
+    func applyToFinishedSession(_ command: WatchCommand) {
+        guard let context else { return }
+        switch command {
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
+            restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
+                              loggedAt: loggedAt, in: context, loggerRunning: true)
+        case .undoSet(let id, let completion):
+            DroppedSetMemory.shared.rememberTakenBack(id, completedAt: completion)
+            withdrawDroppedSet(id, completedAt: completion, in: context, loggerRunning: true)
+        default:
+            break
+        }
+    }
+
+    /// See `WorkoutSession.restoreDroppedSet` for when a row comes back.
+    private func restoreDroppedSet(_ id: UUID, weightKg: Double, reps: Int, seconds: Int,
+                                   loggedAt: Date?, in context: ModelContext,
+                                   loggerRunning: Bool = false) {
+        guard let row = DroppedSetMemory.shared.row(for: id),
+              let session = session(id: row.sessionID, in: context),
+              session.restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
+                                        loggedAt: loggedAt, in: context) != nil
+        else { return }
+        save(context)
+        announceChange(context: context, loggerRunning: loggerRunning)
+    }
+
+    private func withdrawDroppedSet(_ id: UUID, completedAt completion: Date? = nil,
+                                    in context: ModelContext, loggerRunning: Bool = false) {
+        guard let row = DroppedSetMemory.shared.row(for: id) else { return }
+        guard let session = session(id: row.sessionID, in: context) else {
+            // Discarded since: there is nothing left for a late log to join.
+            DroppedSetMemory.shared.forget(id)
+            return
+        }
+        guard session.withdrawDroppedSet(id, completedAt: completion, in: context) else { return }
+        save(context)
+        announceChange(context: context, loggerRunning: loggerRunning)
+    }
+
+    /// A finished session changed after the fact. The Home Screen and the
+    /// watch's idle screen both count what it holds — sets, volume, the last
+    /// thing trained — and would go on showing it without the set.
+    ///
+    /// The widgets only while nothing is running: this path has no logger to
+    /// describe, and publishing without one would take a workout still in
+    /// progress off the Home Screen. Its own Finish publishes this change too.
+    /// With the logger on screen, only the idle half of the mirror goes: the
+    /// session half is the logger's, and one built here has no rest timer.
+    private func announceChange(context: ModelContext, loggerRunning: Bool = false) {
+        let sessions = allSessions(in: context)
+        if !sessions.contains(where: \.isActive) {
+            publishWidgets(context: context, sessions: sessions)
+        }
+        guard loggerRunning else {
+            pushMirror(context: context)
+            return
+        }
+        let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
+        WatchBridge.shared.update(idle: WatchMirrorBuilder.idle(plans: plans, sessions: sessions))
+    }
+
+    /// - Parameter moment: when the session ended: the wrist's tap where it
+    ///   sent one, and otherwise now.
+    private func finish(_ session: WorkoutSession, metrics: WatchWorkoutMetrics?,
+                        at moment: Date = .now, context: ModelContext) {
+        // Read after the wrist's batch is applied, so its logs count. A Finish
+        // with nothing logged is a Discard, here as in `ActiveWorkout.finish`:
+        // kept, the empty session counted toward the streak and the week as a
+        // day trained. A Health workout the wrist saved for it is not linked,
+        // since there is no session left to own it.
+        guard !session.completedSets.isEmpty else {
+            discard(session, context: context)
+            return
+        }
+        // The same close as the phone UI, after the wrist's last unconfirmed
+        // actions have been applied. Only untouched rows are discarded.
+        session.close(at: moment, in: context)
+        apply(metrics, to: session, final: true, context: context)
+        save(context)
+        WorkoutLiveActivity.shared.end(with: nil)
+        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: session.id, reason: .finished))
+        WatchBridge.shared.clearMetrics()
+        publishWidgets(context: context)
+        recordToHealth(session, context: context)
+    }
+
+    /// Deletes a running session and says so everywhere a Discard is heard.
+    private func discard(_ session: WorkoutSession, context: ModelContext) {
+        // Read before the delete: a deleted model is not something to read.
+        let sessionID = session.id
+        context.delete(session)
+        save(context)
+        WorkoutLiveActivity.shared.end(with: nil)
+        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: sessionID, reason: .discarded))
+        WatchBridge.shared.clearMetrics()
+        publishWidgets(context: context)
+    }
+
+    /// - Parameter final: true for the metrics a Finish carried.
+    /// - Returns: true when the session took them.
+    @discardableResult
+    private func apply(_ metrics: WatchWorkoutMetrics?, to session: WorkoutSession,
+                       final: Bool, context: ModelContext) -> Bool {
+        guard let metrics, session.takeWatchMetrics(metrics, final: final) else { return false }
+        session.stampWatchVitals(average: metrics.averageHeartRate, max: metrics.maxHeartRate, energy: metrics.activeEnergyKcal)
+        if let workoutID = metrics.healthWorkoutID {
+            HealthKitService.shared.acceptWatchWorkout(workoutID, for: session, context: context)
+        }
+        return true
     }
 
     /// Mirrors the load just used onto the remaining sets, exactly as the
     /// logger does — the watch shouldn't behave differently because the phone
     /// happened to be asleep.
-    private func carryLoadForward(from set: SetLog) {
+    ///
+    /// Only as far as the end of the set's plan slot, as in the logger. A day
+    /// that repeats a movement prescribes each slot its own load, and a top
+    /// set logged on the wrist used to be carried onto the back-off sets too,
+    /// so the phone and the watch disagreed about the same log.
+    private func carryLoadForward(from set: SetLog, in context: ModelContext) {
         guard let session = set.session, !set.isContinuation else { return }
-        for other in session.sets
-        where other.catalogID == set.catalogID
-            && !other.isCompleted
-            && !other.isContinuation
-            && other.setIndex > set.setIndex {
-            other.weightKg = set.weightKg
-            if other.tracking == .duration { other.seconds = set.seconds }
-        }
+        let overwritten = ActiveWorkout.Prefill.carry(
+            from: set, onto: SessionFactory.laterRowsInSlot(of: set, in: session, context: context))
+        carriedPrefills[set.id] = overwritten.isEmpty ? nil : overwritten
     }
 
+    /// What each set's carry overwrote, by the set that carried, so the wrist's
+    /// undo can put the rows back as the phone's own does. In memory only, as
+    /// there: a row that outlives a relaunch keeps the load that was carried,
+    /// and a carry done by the phone's logger is that logger's to take back.
+    private var carriedPrefills: [UUID: [UUID: ActiveWorkout.Prefill]] = [:]
+
+    /// The other half of `carryLoadForward`. Without it a mis-tapped wrist log
+    /// left the rows below opening at the weight of a set never lifted, which
+    /// the phone's undo never did. A row the lifter has typed into since keeps
+    /// what they typed.
+    private func restorePrefill(carriedBy set: SetLog) {
+        guard let memory = carriedPrefills.removeValue(forKey: set.id),
+              let session = set.session else { return }
+        ActiveWorkout.Prefill.restore(memory, onto: Array(session.sets))
+    }
+
+    /// The headless twin of `ActiveWorkout.recordToHealth`.
+    ///
+    /// The task holds the session across up to twelve seconds of waiting and
+    /// then Health's own calls, and it can be deleted, erased or restored over
+    /// meanwhile. So every read after an await checks it is still there
+    /// first: a deleted model can trap when read, and anything written for it
+    /// is an orphan no later erase can find. The store is asked, not only the
+    /// instance, because this context holds the session while the screen
+    /// deletes through another, and that leaves this copy looking alive.
     private func recordToHealth(_ session: WorkoutSession, context: ModelContext) {
+        let sessionID = session.id
         Task { @MainActor in
+            func isGone() -> Bool {
+                session.isGone(fromStore: FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { $0.id == sessionID }))
+            }
             if session.healthWorkoutID == nil {
-                for _ in 0..<12 where session.healthWorkoutID == nil {
+                for _ in 0..<12 {
+                    guard !isGone() else { return }
+                    if session.healthWorkoutID != nil { break }
                     try? await Task.sleep(for: .seconds(1))
                 }
             }
-            await HealthKitService.shared.saveWorkout(for: session)
+            guard !isGone() else { return }
+            let phoneWorkoutID = await HealthKitService.shared.saveWorkout(for: session)
+            // A workout written for a session that went meanwhile has already
+            // been queued for removal by `saveWorkout`.
+            guard !isGone() else { return }
+            if let phoneWorkoutID {
+                WatchBridge.shared.notePhoneHealthWorkout(phoneWorkoutID, for: sessionID)
+            }
             await HealthKitService.shared.backfillVitals(for: session)
+            guard !isGone() else { return }
             self.save(context)
         }
     }
@@ -260,52 +554,133 @@ final class WatchCommandCenter {
     /// taken down on this path and the Home Screen has to follow it, or a
     /// workout finished on the wrist with the phone in a bag goes on showing as
     /// running there until somebody next opens the app.
-    private func publishWidgets(context: ModelContext) {
+    private func publishWidgets(context: ModelContext, sessions: [WorkoutSession]? = nil) {
         let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
-        WidgetPublisher.publish(plans: plans, sessions: allSessions(in: context), running: nil)
+        WidgetPublisher.publish(plans: plans, sessions: sessions ?? allSessions(in: context), running: nil)
     }
 
     private func pushMirror(context: ModelContext) {
+        closeStaleSession(in: context)
         let sessions = allSessions(in: context)
         let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
+        // The session before the idle screen. Each update can go out on its
+        // own, and the idle one sent first carried whatever session the bridge
+        // held before — nothing at all in a fresh process, which a watch
+        // mid-workout reads as the workout having ended.
+        WatchBridge.shared.update(session: sessionSnapshot(from: sessions, in: context))
         WatchBridge.shared.update(idle: WatchMirrorBuilder.idle(plans: plans, sessions: sessions))
+        // The Lock Screen card and the Home Screen widget are told from the
+        // same read, once per change. Every command that reaches here without
+        // a logger used to leave both on whatever the app last published, so
+        // sets logged from the wrist with the phone in a bag never moved them.
+        WidgetPublisher.publishHeadless(running: sessions.first(where: \.isActive))
+    }
 
-        guard let session = sessions.first(where: \.isActive) else {
-            WatchBridge.shared.update(session: nil)
-            return
-        }
+    private func sessionSnapshot(from sessions: [WorkoutSession],
+                                 in context: ModelContext) -> WatchSessionSnapshot? {
+        guard let session = sessions.first(where: \.isActive) else { return nil }
+        if session.normalizeExerciseSlots() { save(context) }
 
         let history = sessions.filter { !$0.isActive }
         let items = planItems(for: session, in: context)
-        WatchBridge.shared.update(session: WatchSnapshotFactory.snapshot(
+        return WatchSnapshotFactory.snapshot(
             for: session,
             rest: (nil, nil, 0),
+            // Blank because there is no timer here, not because there is no
+            // rest. See `WatchSessionSnapshot.restUnknown`.
+            restUnknown: true,
             restSeconds: { items[$0]?.resolvedRestSeconds ?? AppSettings.shared.defaultRestSeconds },
             lastTimeLabel: { catalogID in
                 WatchSnapshotFactory.label(
                     for: TrainingStats.lastPerformance(of: catalogID, in: history, excluding: session.id)
                 )
             }
-        ))
+        )
+    }
+
+    /// Retires a session left open past the twelve-hour mark — see
+    /// `WorkoutSession.closeIfStale` — on the path that runs with no view at
+    /// all: a phone woken in the background by the wrist has never been
+    /// through the cold launch that used to be the only place this was asked.
+    ///
+    /// The Live Activity goes because the session it describes has; the
+    /// widgets follow for the same reason. The watch is told how the session
+    /// ended before whichever mirror the caller sends next.
+    @discardableResult
+    private func closeStaleSession(in context: ModelContext) -> Bool {
+        // Only an open session can be stale, so the history is not fetched to
+        // answer this, and this runs on every mirror.
+        let stale = unfinishedSessions(in: context).filter { $0.isStale() }.sorted { $0.startedAt < $1.startedAt }
+        guard !stale.isEmpty else { return false }
+        let ends = stale.compactMap { retire($0, in: context) }
+        // A session opened alongside the stale one is still running, and the
+        // card, the widgets and the wrist are about that one.
+        guard unfinishedSessions(in: context).isEmpty else { return true }
+        WorkoutLiveActivity.shared.end(with: nil)
+        // The latest is the one a wrist could still be recording.
+        WatchBridge.shared.update(session: nil, ended: ends.last)
+        publishWidgets(context: context)
+        return true
+    }
+
+    /// Retires one session left open past the twelve-hour mark, and writes the
+    /// Health workout of one that kept sets, ending where the close ended it:
+    /// at the last set. Shared with `RootView`, which meets the same session on
+    /// a warm resume and a cold launch.
+    ///
+    /// The Health write is the one a Finish makes, waiting for a watch that is
+    /// still recording to hand over its own workout first. A session deleted
+    /// for being empty gets none: it is not a workout.
+    ///
+    /// - Returns: how the wrist should hear the session ended, for the
+    ///   caller's next mirror; `nil` when the session was not stale.
+    @discardableResult
+    func retire(_ session: WorkoutSession, in context: ModelContext) -> WatchSessionEnd? {
+        guard let end = session.retireIfStale(in: context) else { return nil }
+        save(context)
+        if end.reason == .finished { recordToHealth(session, context: context) }
+        return end
     }
 
     // MARK: - Fetching
 
+    /// Every session, finished or not. Only what reads the whole history asks
+    /// for this — the idle screen's streak, the widgets — and each command
+    /// asks once; the lookups below are predicated.
     private func allSessions(in context: ModelContext) -> [WorkoutSession] {
         let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
         return WatchSessionRecovery.discardUntouchedOverlaps(sessions, in: context)
     }
 
+    /// Sessions still open, which is nearly always one. A workout is looked
+    /// for here far more often than the history is wanted, and the history
+    /// grows for as long as the app is used.
+    private func unfinishedSessions(in context: ModelContext) -> [WorkoutSession] {
+        let open = FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.endedAt == nil })
+        let sessions = (try? context.fetch(open)) ?? []
+        return WatchSessionRecovery.discardUntouchedOverlaps(sessions, in: context)
+    }
+
+    /// Finished sessions need no overlap check: only a session still open can
+    /// be the duplicate that check removes.
     private func finishedSessions(in context: ModelContext) -> [WorkoutSession] {
-        allSessions(in: context).filter { !$0.isActive }
+        let finished = FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.endedAt != nil })
+        return (try? context.fetch(finished)) ?? []
     }
 
     private func activeSession(in context: ModelContext) -> WorkoutSession? {
-        allSessions(in: context).first(where: \.isActive)
+        guard let session = unfinishedSessions(in: context).first else { return nil }
+        if session.normalizeExerciseSlots() { save(context) }
+        return session
     }
 
     private func session(id: UUID, in context: ModelContext) -> WorkoutSession? {
-        allSessions(in: context).first { $0.id == id }
+        var byID = FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.id == id })
+        byID.fetchLimit = 1
+        guard let found = try? context.fetch(byID).first else { return nil }
+        // An open session that is an untouched duplicate is deleted by the
+        // check, and a lookup by its ID must not hand it back.
+        return WatchSessionRecovery.discardUntouchedOverlaps([found], in: context).first
     }
 
     private func setLog(id: UUID, in context: ModelContext) -> SetLog? {
@@ -318,10 +693,11 @@ final class WatchCommandCenter {
     }
 
     private func planItems(for session: WorkoutSession, in context: ModelContext) -> [String: PlanItem] {
-        guard let dayID = session.planDayID,
-              let day = (try? context.fetch(FetchDescriptor<PlanDay>()))?.first(where: { $0.id == dayID })
-        else { return [:] }
-        return Dictionary(day.items.map { ($0.catalogID, $0) }, uniquingKeysWith: { first, _ in first })
+        guard let dayID = session.planDayID else { return [:] }
+        var byID = FetchDescriptor<PlanDay>(predicate: #Predicate { $0.id == dayID })
+        byID.fetchLimit = 1
+        guard let day = (try? context.fetch(byID))?.first else { return [:] }
+        return Dictionary(day.orderedItems.map { ($0.catalogID, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     private func save(_ context: ModelContext) {
@@ -342,6 +718,7 @@ enum WatchSnapshotFactory {
     static func snapshot(for session: WorkoutSession,
                          currentSetID: UUID? = nil,
                          rest: (endsAt: Date?, startedAt: Date?, total: Int),
+                         restUnknown: Bool = false,
                          restSeconds: (String) -> Int,
                          lastTimeLabel: (String) -> String?) -> WatchSessionSnapshot {
         let groups = session.exerciseGroups
@@ -386,7 +763,8 @@ enum WatchSnapshotFactory {
             restAutoStart: AppSettings.shared.restTimerAutoStart,
             volumeKg: session.totalVolumeKg,
             unit: AppSettings.shared.weightUnit,
-            effortEnabled: AppSettings.shared.trackRPE
+            effortEnabled: AppSettings.shared.trackRPE,
+            restUnknown: restUnknown ? true : nil
         )
         // Asked of the snapshot rather than of the session, so this answer and
         // the watch's own — made while a log of its own is still unconfirmed —
@@ -406,5 +784,67 @@ enum WatchSnapshotFactory {
         if best.tracking == .duration { return "\(best.seconds)s" }
         if best.weightKg == 0 { return "\(best.reps) reps" }
         return "\(best.loadScale.format(best.weightKg, showUnit: false)) × \(best.reps)"
+    }
+}
+
+/// What the phone has told the watch link so far, kept apart from
+/// WatchConnectivity so the rule that matters most can be checked on its own:
+/// no mirror exists until the phone has said what is running.
+///
+/// A fresh process starts with an empty idle screen and no session, and until
+/// something has read the store that is a guess. Sent anyway — activation
+/// finishing was enough to send it — it reached a watch mid-workout stamped
+/// newer than anything it held, and the watch took "no session" to mean the
+/// workout was over: it discarded the Health recording it had kept since the
+/// first set, and the logs it had not yet heard back about.
+struct WatchMirrorState {
+    private(set) var idle: WatchIdleSnapshot = .empty
+    private(set) var session: WatchSessionSnapshot?
+    private(set) var endedSession: WatchSessionEnd?
+    /// Set by the first session update, including one saying none is running.
+    /// That answer is as much the truth as a session is; the empty value this
+    /// starts with is not.
+    private(set) var isEstablished = false
+    private var revision = 0
+
+    /// Returns true when the idle screen changed.
+    mutating func update(idle snapshot: WatchIdleSnapshot) -> Bool {
+        guard idle != snapshot else { return false }
+        idle = snapshot
+        return true
+    }
+
+    /// Returns true when there is something new to send. The first update
+    /// always is: it is the moment the watch can be told anything at all.
+    mutating func update(session snapshot: WatchSessionSnapshot?, ended end: WatchSessionEnd?) -> Bool {
+        let nextEnd = snapshot == nil ? (end ?? endedSession) : nil
+        let changed = !isEstablished || session != snapshot || endedSession != nextEnd
+        isEstablished = true
+        session = snapshot
+        endedSession = nextEnd
+        return changed
+    }
+
+    /// Returns true when the finish the watch was told about now names the
+    /// phone's Health workout.
+    mutating func notePhoneHealthWorkout(_ workoutID: UUID, for sessionID: UUID) -> Bool {
+        guard endedSession?.sessionID == sessionID,
+              endedSession?.reason == .finished else { return false }
+        endedSession?.phoneHealthWorkoutID = workoutID
+        return true
+    }
+
+    /// The next mirror to send, or nil while nothing has been established.
+    mutating func nextMirror(sentAt: Date = .now, healthEnabled: Bool) -> WatchMirror? {
+        guard isEstablished else { return nil }
+        revision += 1
+        return WatchMirror(
+            revision: revision,
+            sentAt: sentAt,
+            idle: idle,
+            session: session,
+            healthEnabled: healthEnabled,
+            endedSession: endedSession
+        )
     }
 }

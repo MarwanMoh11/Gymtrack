@@ -56,8 +56,7 @@ struct PlansView: View {
                     showingTemplates = false
                     Haptics.success()
                 } onBlank: {
-                    let plan = Plan(name: "My Routine", summary: "", isActive: plans.isEmpty)
-                    context.insert(plan)
+                    Plan.blank(in: context, makeActive: plans.isEmpty)
                     try? context.save()
                     showingTemplates = false
                 }
@@ -68,7 +67,7 @@ struct PlansView: View {
                                 titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
                     if let plan = planPendingDeletion {
-                        context.delete(plan)
+                        Plan.remove(plan, among: plans, openSessions: openSessions, in: context)
                         try? context.save()
                     }
                     planPendingDeletion = nil
@@ -132,6 +131,7 @@ struct PlansView: View {
                                 .strokeBorder(Theme.edge, lineWidth: 1)
                         }
                 }
+                .accessibilityLabel("Routine settings")
             }
             .gtCard()
 
@@ -215,6 +215,10 @@ struct PlansView: View {
                     .foregroundStyle(Theme.textTertiary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Delete routine")
+            // A workout is running from this routine's days; deleting the
+            // routine under it is refused until the workout ends.
+            .disabled(plan.isInUse(by: openSessions))
         }
         .gtCard(padding: 12)
     }
@@ -292,6 +296,17 @@ struct TemplatePickerView: View {
 struct PlanSettingsView: View {
     @Bindable var plan: Plan
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \Plan.createdAt) private var plans: [Plan]
+    @Query(filter: #Predicate<WorkoutSession> { $0.endedAt == nil }) private var openSessions: [WorkoutSession]
+
+    @State private var confirmingDelete = false
+    /// Set once the delete is confirmed. The routine is removed only after
+    /// this screen has left, because a form still bound to a deleted model
+    /// reads it mid-pop.
+    @State private var deleteOnDisappear = false
+
+    private var isInUse: Bool { plan.isInUse(by: openSessions) }
 
     var body: some View {
         Form {
@@ -312,11 +327,36 @@ struct PlanSettingsView: View {
                 LabeledContent("Weekly sets", value: "\(plan.days.reduce(0) { $0 + $1.totalSets })")
             }
             .listRowBackground(Theme.surface)
+
+            Section {
+                Button("Delete routine", role: .destructive) { confirmingDelete = true }
+                    .disabled(isInUse)
+            } footer: {
+                Text(isInUse
+                     ? "A workout from this routine is running. Finish it before deleting the routine."
+                     : "Sessions you've already logged are kept.")
+            }
+            .listRowBackground(Theme.surface)
         }
         .scrollContentBackground(.hidden)
         .gtScreenBackground()
         .navigationTitle("Routine settings")
         .navigationBarTitleDisplayMode(.inline)
-        .onDisappear { try? context.save() }
+        .confirmationDialog("Delete this routine?", isPresented: $confirmingDelete,
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                deleteOnDisappear = true
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its days and exercises go with it. Sessions you've already logged are kept.")
+        }
+        .onDisappear {
+            if deleteOnDisappear {
+                Plan.remove(plan, among: plans, openSessions: openSessions, in: context)
+            }
+            try? context.save()
+        }
     }
 }

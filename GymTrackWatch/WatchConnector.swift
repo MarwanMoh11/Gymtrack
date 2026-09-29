@@ -23,17 +23,24 @@ final class WatchConnector: NSObject {
     private(set) var mirror: WatchMirror = .placeholder
     private(set) var isReachable = false
     private(set) var hasEverReceivedMirror = false
+    /// The phone's last description of a running session, kept after the
+    /// phone ends it. A recording closed because the phone retired a session
+    /// left open reads the last set from this: by then the mirror no longer
+    /// names the session, and ending the workout on arrival instead recorded
+    /// the hours it sat forgotten.
+    private(set) var lastMirroredSession: WatchSessionSnapshot?
     /// A cached active session needs the reachable phone's current answer
     /// before the watch can treat it as a workout to record.
     private var waitingForFreshMirror = false
 
-    /// Sets logged here that the phone hasn't confirmed yet, and the numbers
-    /// each was logged with. The numbers are kept, not just the fact of the
-    /// log, because the phone mirrors the load just used onto the rest of the
-    /// exercise — a watch that predicted only the tick would draw the next set
-    /// at the weight the lifter had just moved away from.
-    private var pendingCompletions: [UUID: PendingLog] = [:]
-    private var pendingUndos: Set<UUID> = []
+    private static let pendingActionsKey = "watch.pendingActions"
+    private var pending = WatchPendingActions() {
+        didSet {
+            if let data = try? JSONEncoder().encode(pending) {
+                UserDefaults.standard.set(data, forKey: Self.pendingActionsKey)
+            }
+        }
+    }
     private static let ratingsKey = "watch.pendingSetRatings"
     private var ratings = WatchRatingOutbox() {
         didSet {
@@ -42,35 +49,25 @@ final class WatchConnector: NSObject {
             }
         }
     }
-    /// Starts announced here that the phone hasn't confirmed yet, and the
-    /// moment each was announced. The moment is kept rather than recomputed
-    /// because it is the measurement: out of range the command waits in the
-    /// queue, and the clock on the wrist has to count from when the lifter
-    /// actually went, not from when the phone finally heard about it.
-    private var pendingStarts: [UUID: Date] = [:]
-    private var pendingCancels: Set<UUID> = []
-    /// An exercise picked here that the phone hasn't confirmed yet, held for
-    /// the same reason a logged set is drawn as done straight away: the pick
-    /// has to take under the thumb that made it. Out of range the command sits
-    /// in the queue for as long as the phone stays in the locker, and until it
-    /// lands this is the only record that the lifter moved.
-    private var pendingFocus: String?
-
-    /// What a set was logged with while the phone hasn't answered yet.
-    private struct PendingLog: Hashable {
-        var weightKg: Double
-        var reps: Int
-        var seconds: Int
-        var completedAt: Date
+    /// The session Finish or Discard closed on this wrist, until the phone
+    /// agrees it is over. See `WatchSessionTombstone`.
+    private var endedLocally = WatchSessionTombstone() {
+        didSet {
+            if endedLocally != oldValue { endedLocally.save(to: .standard) }
+        }
     }
-
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack.watchkitapp", category: "Connector")
 
     private override init() {
         super.init()
+        endedLocally = WatchSessionTombstone(defaults: .standard)
         if let data = UserDefaults.standard.data(forKey: Self.ratingsKey),
            let saved = try? JSONDecoder().decode(WatchRatingOutbox.self, from: data) {
             ratings = saved
+        }
+        if let data = UserDefaults.standard.data(forKey: Self.pendingActionsKey),
+           let saved = try? JSONDecoder().decode(WatchPendingActions.self, from: data) {
+            pending = saved
         }
     }
 
@@ -87,16 +84,12 @@ final class WatchConnector: NSObject {
 
     /// The mirror's session with this watch's unconfirmed changes folded in.
     var session: WatchSessionSnapshot? {
-        guard !waitingForFreshMirror else { return nil }
-        guard var session = mirror.session else { return nil }
-        // The phone closes an unfinished session after twelve hours on its
-        // next launch. Its old application context can reach this watch first,
-        // and treating that snapshot as live would start a new Health workout
-        // for yesterday's session before the phone has a chance to correct it.
-        guard session.startedAt.timeIntervalSinceNow > -12 * 3600 else { return nil }
+        guard var session = endedLocally.liveSession(in: mirror, awaitingFreshMirror: waitingForFreshMirror)
+        else { return nil }
         // The pick goes on first: everything below asks which exercise the
         // logger is on, and while this is set the answer is this one.
-        if let pendingFocus { session.preferredExerciseID = pendingFocus }
+        if let pendingID = pending.sessionID, pendingID != session.sessionID { return session }
+        if let focus = pending.focus { session.preferredExerciseID = focus }
         guard hasPendingChanges else { return session }
 
         session.exercises = session.exercises.map(folding)
@@ -126,7 +119,7 @@ final class WatchConnector: NSObject {
         var exercise = exercise
         exercise.sets = exercise.sets.map { set in
             var set = set
-            if let pending = pendingCompletions[set.id] {
+            if let pending = pending.logs[set.id] {
                 set.isCompleted = true
                 set.weightKg = pending.weightKg
                 set.reps = pending.reps
@@ -137,19 +130,19 @@ final class WatchConnector: NSObject {
             if let entry = ratings.entries[set.id], entry.rating.matches(set.completedAt), set.isCompleted {
                 set.rpe = entry.rating.rpe
             }
-            if pendingUndos.contains(set.id) {
+            if pending.undos.contains(set.id) {
                 set.isCompleted = false
                 set.completedAt = nil
                 set.rpe = nil
             }
-            if let started = pendingStarts[set.id] { set.startedAt = started }
-            if pendingCancels.contains(set.id) { set.startedAt = nil }
+            if let started = pending.starts[set.id] { set.startedAt = started }
+            if pending.cancels.contains(set.id) { set.startedAt = nil }
             return set
         }
         // A continuation carries nothing forward: its weight was chosen to be
         // lower, for that row, and pushing it down the card would leave the
         // working sets still to come sitting at the drop weight.
-        for logged in exercise.sets where pendingCompletions[logged.id] != nil && !logged.isContinuation {
+        for logged in exercise.sets where pending.logs[logged.id] != nil && !logged.isContinuation {
             exercise.sets = exercise.sets.map { other in
                 var other = other
                 guard !other.isCompleted, !other.isContinuation, other.index > logged.index else { return other }
@@ -171,39 +164,60 @@ final class WatchConnector: NSObject {
     /// and the only way an unsent start is lost is walking away without logging
     /// the set it belongs to — which makes it a set nobody did.
     var hasUnsyncedWork: Bool {
-        !pendingCompletions.isEmpty || !pendingUndos.isEmpty || !ratings.entries.isEmpty
+        !pending.logs.isEmpty || !pending.undos.isEmpty || !ratings.entries.isEmpty
     }
 
     /// Whether anything at all here still has to be drawn over the mirror.
     private var hasPendingChanges: Bool {
-        hasUnsyncedWork || pendingFocus != nil || !pendingStarts.isEmpty || !pendingCancels.isEmpty
+        hasUnsyncedWork || pending.focus != nil || !pending.starts.isEmpty || !pending.cancels.isEmpty
     }
 
     // MARK: - Sending
 
     func send(_ command: WatchCommand) {
-        let payload = command.watchPayload(key: WatchLink.commandKey)
+        var payload = command.watchPayload(key: WatchLink.commandKey)
         guard !payload.isEmpty, WCSession.isSupported() else { return }
+        // Beside the command, not in it, so a phone that predates these keys
+        // reads the command as it always did. See `WatchCommandDelivery`.
+        payload.merge(WatchCommandDelivery.stamp(command, showing: self.session?.sessionID).payload) { $1 }
         let session = WCSession.default
 
-        if session.isReachable {
-            let replyHandler: (([String: Any]) -> Void)?
-            switch command {
-            case .startToday, .startFreestyle, .requestMirror:
-                replyHandler = { [weak self] reply in
-                    Task { @MainActor in self?.receive(reply) }
-                }
-            default:
-                replyHandler = nil
+        if case .metrics(let metrics) = command, !metrics.isHandover {
+            // Live or not at all. See `WatchWorkoutMetrics.isHandover`: queued,
+            // these drained after the Finish and wrote partway numbers over
+            // the session's totals, and woke the phone for each one to do it.
+            guard session.isReachable else { return }
+            session.sendMessage(payload, replyHandler: nil) { [weak self] error in
+                self?.log.debug("Live metrics dropped: \(error.localizedDescription, privacy: .public)")
             }
-            session.sendMessage(payload, replyHandler: replyHandler) { [weak self] error in
-                // Reachability can lapse between the check and the send, so a
-                // failed message is re-queued rather than dropped.
-                self?.log.debug("Message failed, queueing: \(error.localizedDescription, privacy: .public)")
-                WCSession.default.transferUserInfo(payload)
-            }
-        } else {
+            return
+        }
+
+        // WatchConnectivity keeps order only inside the queue. A command sent
+        // live while earlier ones still wait there reaches the phone first, so
+        // an undo landed before its own log and the log then put the set back.
+        // Behind a backlog everything queues, and the phone hears the wrist in
+        // the order the lifter tapped.
+        guard session.isReachable, session.outstandingUserInfoTransfers.isEmpty else {
             session.transferUserInfo(payload)
+            return
+        }
+        let replyHandler: (([String: Any]) -> Void)?
+        switch command {
+        case .startToday, .startFreestyle, .requestMirror:
+            replyHandler = { [weak self] reply in
+                onMain { self?.receive(reply) }
+            }
+        default:
+            replyHandler = nil
+        }
+        session.sendMessage(payload, replyHandler: replyHandler) { [weak self] error in
+            // Reachability can lapse between the check and the send, so a
+            // failed message is re-queued rather than dropped. A failure can
+            // also be reported for a message that did arrive, so the phone
+            // treats a second copy of a log as the same log.
+            self?.log.debug("Message failed, queueing: \(error.localizedDescription, privacy: .public)")
+            WCSession.default.transferUserInfo(payload)
         }
     }
 
@@ -216,10 +230,21 @@ final class WatchConnector: NSObject {
     @discardableResult
     func logSet(_ set: WatchSetSnapshot, weightKg: Double, reps: Int, seconds: Int) -> Date {
         let moment = Date()
-        pendingUndos.remove(set.id)
+        guard let session else { return moment }
+        pending.adopt(session.sessionID)
+        // Logged inside the count-in, so the start is dropped here exactly as
+        // the phone will drop it when the log lands — see
+        // `ActiveWorkout.complete`. Left in the overlay it would never be
+        // confirmed, since the phone's answer is no start at all, and the wrist
+        // would go on holding a moment that never came.
+        if let start = pending.starts[set.id] ?? set.startedAt, start > moment {
+            pending.starts.removeValue(forKey: set.id)
+            pending.cancels.insert(set.id)
+        }
+        pending.forgetUndo(of: set.id)
         ratings.remove(set.id)
-        pendingCompletions[set.id] = PendingLog(weightKg: weightKg, reps: reps, seconds: seconds,
-                                               completedAt: moment)
+        pending.logs[set.id] = WatchPendingLog(setID: set.id, weightKg: weightKg, reps: reps,
+                                               seconds: seconds, completedAt: moment)
         send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds, at: moment))
         return moment
     }
@@ -236,31 +261,43 @@ final class WatchConnector: NSObject {
     }
 
     func undoSet(_ set: WatchSetSnapshot) {
+        guard let session else { return }
+        // Read before the overlay forgets it: the log being taken back is the
+        // unconfirmed one if there is one, and otherwise the one the phone
+        // confirmed. See `WatchCommand.undoSet`.
+        let completion = pending.logs[set.id]?.completedAt ?? set.completedAt
+        pending.adopt(session.sessionID)
         ratings.remove(set.id)
-        pendingCompletions.removeValue(forKey: set.id)
-        pendingUndos.insert(set.id)
+        pending.logs.removeValue(forKey: set.id)
+        pending.recordUndo(of: set.id, completedAt: completion)
         // Whatever the phone knows about this set's start goes with it — that
         // is what `SetLog.unlog` does over there, and the wrist drawing a clock
         // still running on a set it has just taken back would be the two
         // screens disagreeing about whether the lifter is under a bar.
-        pendingStarts.removeValue(forKey: set.id)
-        pendingCancels.insert(set.id)
-        send(.undoSet(id: set.id))
+        pending.starts.removeValue(forKey: set.id)
+        pending.cancels.insert(set.id)
+        send(.undoSet(id: set.id, completedAt: completion))
     }
 
-    /// Says the set is beginning, now. Drawn here immediately and stamped here
-    /// too — see `pendingStarts`.
+    /// Says the set is about to begin. Drawn here immediately and stamped here
+    /// too, count-in included — see `pendingStarts`. This is the only place a
+    /// wrist start gets one: the phone writes the moment it is sent as it
+    /// came, so adding the count anywhere downstream would add it twice.
     func announceStart(_ set: WatchSetSnapshot) {
-        let moment = Date()
-        pendingCancels.remove(set.id)
-        pendingStarts[set.id] = moment
+        guard let session else { return }
+        pending.adopt(session.sessionID)
+        let moment = SetLeadIn.start(forTapAt: Date())
+        pending.cancels.remove(set.id)
+        pending.starts[set.id] = moment
         send(.announceStart(id: set.id, at: moment))
     }
 
     /// Un-says it. A mis-tap on a 41mm screen has to cost nothing at all.
     func cancelStart(_ set: WatchSetSnapshot) {
-        pendingStarts.removeValue(forKey: set.id)
-        pendingCancels.insert(set.id)
+        guard let session else { return }
+        pending.adopt(session.sessionID)
+        pending.starts.removeValue(forKey: set.id)
+        pending.cancels.insert(set.id)
         send(.cancelStart(id: set.id))
     }
 
@@ -268,66 +305,76 @@ final class WatchConnector: NSObject {
     /// was taken when its turn came round. Taken here immediately, confirmed by
     /// the phone.
     func focus(on catalogID: String) {
-        pendingFocus = catalogID
+        guard let session, WatchLoggerRules.allowsFocus(on: catalogID, in: session.exercises) else { return }
+        pending.adopt(session.sessionID)
+        pending.focus = catalogID
         send(.focusExercise(catalogID: catalogID))
     }
 
+    /// The latest local actions accompany Finish because queued set commands
+    /// can arrive after its live message. Built at the tap, so the moment it
+    /// carries is when the lifter stopped rather than when the recorder had
+    /// finished saving, or the phone finally heard.
+    func finishBatch(for sessionID: UUID) -> WatchFinishBatch {
+        var batch = pending.finishBatch(for: sessionID, ratings: ratings.entries.values.map(\.rating))
+        batch.endedAt = Date()
+        return batch
+    }
+
     func requestMirror() { send(.requestMirror) }
+
+    /// Called by Finish and Discard on the wrist before the recorder closes,
+    /// so no later mirror, and no relaunch, can hand the session back to it.
+    /// The unconfirmed sets are left where they are: they still belong to the
+    /// phone's copy of the session, whenever it hears them.
+    func markEndedLocally(_ sessionID: UUID) {
+        endedLocally.mark(sessionID)
+    }
+
+    /// Whether the recorder may run, or report, a Health workout for this
+    /// session.
+    func admitsRecording(of sessionID: UUID) -> Bool {
+        endedLocally.admits(sessionID)
+    }
 
     // MARK: - Receiving
 
     private func receive(_ payload: [String: Any], fromCache: Bool = false) {
         guard let incoming = WatchMirror.fromWatchPayload(payload, key: WatchLink.mirrorKey) else { return }
-        // Application context and live messages race; an older mirror arriving
-        // second would drag the screen backwards. Ordered by the phone's own
-        // timestamp rather than the revision counter, because that counter
-        // starts over every time the phone app is relaunched — and a watch app
-        // that has been running across that restart would otherwise reject
-        // everything the phone says from then on.
-        guard incoming.sentAt >= mirror.sentAt else { return }
+        // Application context and live messages race; see `accepts` for why the
+        // phone's timestamp orders them.
+        guard WatchMirrorReconciliation.accepts(incoming, over: mirror) else { return }
         mirror = incoming
+        if let session = incoming.session { lastMirroredSession = session }
+        endedLocally.settle(with: incoming, fromCache: fromCache)
         if !fromCache { waitingForFreshMirror = false }
         hasEverReceivedMirror = true
-        reconcile(with: incoming.session)
+        // A cached context may predate a queued command. It is useful for
+        // drawing offline, but cannot acknowledge or erase persisted work.
+        if WatchMirrorReconciliation.mayReconcile(fromCache: fromCache) { reconcile(with: incoming.session) }
     }
 
     /// Drops the optimistic overlay for anything the phone has now agreed with.
+    /// The rules are `WatchMirrorReconciliation`'s; this carries out its answer.
     private func reconcile(with session: WatchSessionSnapshot?) {
-        guard let session else {
-            // The session can end before its final answer is echoed. The phone
-            // accepts ratings for finished sessions too, so hand delivery to
-            // WatchConnectivity before retiring the local overlay.
-            for entry in ratings.entries.values { send(.rateSet(entry.rating)) }
-            ratings = WatchRatingOutbox()
-            pendingCompletions.removeAll()
-            pendingUndos.removeAll()
-            pendingStarts.removeAll()
-            pendingCancels.removeAll()
-            pendingFocus = nil
-            return
-        }
-        let sets = Dictionary(session.allSets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for rating in ratings.reconcile(with: session) { send(.rateSet(rating)) }
-        pendingCompletions = pendingCompletions.filter { id, pending in
-            guard let set = sets[id] else { return false }
-            guard set.isCompleted else { return true }
-            guard let moment = set.completedAt else { return false }
-            // A mirror of the completion before an undo must not acknowledge
-            // a new log of that same row and replace its fresh timestamp.
-            return abs(moment.timeIntervalSince(pending.completedAt)) >= 0.001
-        }
-        pendingUndos = pendingUndos.filter { sets[$0]?.isCompleted == true }
-        pendingStarts = pendingStarts.filter { sets[$0.key]?.startedAt == nil }
-        pendingCancels = pendingCancels.filter { sets[$0]?.startedAt != nil }
-        // The pick is the phone's own once it names the same exercise — or once
-        // that exercise is no longer in the session, which is the one way the
-        // phone turns a pick down. Without the second half the watch would go
-        // on insisting on an exercise that had been deleted underneath it.
-        if let pending = pendingFocus,
-           pending == session.preferredExerciseID || !session.exercises.contains(where: { $0.id == pending }) {
-            pendingFocus = nil
-        }
+        let outcome = WatchMirrorReconciliation.reconcile(pending: pending, ratings: ratings, with: session)
+        ratings = outcome.ratings
+        pending = outcome.pending
+        for rating in outcome.resend { send(.rateSet(rating)) }
     }
+}
+
+/// Hands a WatchConnectivity delegate callback to the main actor in the order
+/// it arrived.
+///
+/// The callbacks come in on the session's own queue, and a `Task` per callback
+/// promises no order between two of them: a live message and the queued one
+/// behind it could apply the wrong way round, so the mirror ordering guard saw
+/// the newer one first and dropped the older, or a wrist log landed after the
+/// Finish that closed its session. The main queue runs its blocks in the order
+/// they were submitted.
+private func onMain(_ body: @escaping @MainActor () -> Void) {
+    DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
 }
 
 // MARK: - WCSessionDelegate
@@ -337,7 +384,7 @@ extension WatchConnector: WCSessionDelegate {
     nonisolated func session(_ session: WCSession,
                              activationDidCompleteWith state: WCSessionActivationState,
                              error: Error?) {
-        Task { @MainActor in
+        onMain {
             self.isReachable = session.isReachable
             // Whatever arrived while the app was closed is waiting in the
             // application context. If the phone is reachable, wait for its
@@ -356,7 +403,7 @@ extension WatchConnector: WCSessionDelegate {
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
-        Task { @MainActor in
+        onMain {
             self.isReachable = session.isReachable
             if !session.isReachable { self.waitingForFreshMirror = false }
             if session.isReachable { self.requestMirror() }
@@ -364,14 +411,14 @@ extension WatchConnector: WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
-        Task { @MainActor in self.receive(context) }
+        onMain { self.receive(context) }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        Task { @MainActor in self.receive(message) }
+        onMain { self.receive(message) }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
-        Task { @MainActor in self.receive(userInfo) }
+        onMain { self.receive(userInfo) }
     }
 }

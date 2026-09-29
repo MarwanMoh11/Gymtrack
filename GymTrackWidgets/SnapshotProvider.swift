@@ -29,8 +29,8 @@ struct SnapshotProvider: TimelineProvider {
                                      ?? (context.isPreview ? .placeholder : nil)))
     }
 
-    /// Now, and the two moments the card has to change with nobody in the app
-    /// to say so: the rest running out, and midnight.
+    /// Now, and the moments the card has to change with nobody in the app to
+    /// say so: the rest running out, a session going stale, and midnight.
     ///
     /// Each entry carries the snapshot as it reads at that moment — see
     /// `GymTrackSnapshot.asOf`. Reloading at midnight used to hand back the
@@ -38,6 +38,12 @@ struct SnapshotProvider: TimelineProvider {
     /// retire yesterday's session went on showing it. And a rest ending is the
     /// Live Activity's stale date, but nothing at all for a widget: the card
     /// sat on a finished countdown in amber until the app next wrote.
+    ///
+    /// A session nobody finished has the same problem with no end in sight: the
+    /// app closes it once it has been open twelve hours, but a phone left in a
+    /// locker never runs to do it, so the card would keep timing a workout that
+    /// ended the night before. `asOf` retires it at that moment, and the entry
+    /// here is what makes the widget look.
     func getTimeline(in context: Context, completion: @escaping (Timeline<GymTrackEntry>) -> Void) {
         let now = Date.now
         let midnight = nextRefresh()
@@ -47,7 +53,11 @@ struct SnapshotProvider: TimelineProvider {
         if let restEndsAt = snapshot?.session?.restEndsAt, restEndsAt > now, restEndsAt < midnight {
             moments.append(restEndsAt)
         }
+        if let staleAt = snapshot?.session?.staleAt, staleAt > now, staleAt < midnight {
+            moments.append(staleAt)
+        }
         moments.append(midnight)
+        moments.sort()
 
         let entries = moments.map { GymTrackEntry(date: $0, snapshot: snapshot?.asOf($0)) }
         completion(Timeline(entries: entries, policy: .after(midnight)))

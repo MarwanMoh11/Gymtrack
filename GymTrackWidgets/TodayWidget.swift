@@ -10,7 +10,7 @@ import WidgetKit
 /// keeps the App Group to the one job only it can do: the numbers above.
 struct TodayWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "GymTrackToday", provider: SnapshotProvider()) { entry in
+        StaticConfiguration(kind: GymTrackWidgetKind.today, provider: SnapshotProvider()) { entry in
             Group {
                 if let snapshot = entry.snapshot {
                     TodayWidgetView(snapshot: snapshot, date: entry.date)
@@ -18,6 +18,9 @@ struct TodayWidget: Widget {
                     WidgetUnavailableView()
                 }
             }
+            // Theme fonts follow Dynamic Type, but these are laid out to the point and
+            // clip past the default size, so they stay where they were.
+            .dynamicTypeSize(...DynamicTypeSize.large)
             .containerBackground(for: .widget) {
                 WidgetBackground(phase: entry.snapshot?.widgetPhase(at: entry.date) ?? .working)
             }
@@ -109,10 +112,17 @@ private struct TodayWidgetView: View {
 
     // MARK: Nothing running, something scheduled
 
+    /// "Next up" for a day the plan's rotation chose, because "Today" would
+    /// state a schedule the plan never set. The app's Today card says the
+    /// same; a snapshot from an older build carries no flag and reads "Today".
+    private var scheduledEyebrow: String {
+        snapshot.todayIsRotation == true ? "NEXT UP" : "TODAY"
+    }
+
     private var scheduled: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 6) {
-                Eyebrow(text: "TODAY", tint: Theme.accent)
+                Eyebrow(text: scheduledEyebrow, tint: Theme.accent)
                 Spacer(minLength: 2)
                 if snapshot.streak > 0 { StreakPill(days: snapshot.streak) }
             }

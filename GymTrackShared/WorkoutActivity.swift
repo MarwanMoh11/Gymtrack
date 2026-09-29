@@ -63,9 +63,7 @@ struct WorkoutActivity: ActivityAttributes {
         /// How far through the current rest we are, 0 → 1.
         var restProgress: Double {
             guard let restEndsAt, let restStartedAt else { return 0 }
-            let total = restEndsAt.timeIntervalSince(restStartedAt)
-            guard total > 0 else { return 1 }
-            return min(1, max(0, -restEndsAt.timeIntervalSinceNow / total))
+            return RestProgress.fraction(startedAt: restStartedAt, endsAt: restEndsAt)
         }
 
         /// One line describing where the lifter is, used wherever there's room

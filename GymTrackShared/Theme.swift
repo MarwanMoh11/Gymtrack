@@ -19,7 +19,13 @@ enum Theme {
 
     static let textPrimary = Color.white
     static let textSecondary = Color.white.opacity(0.62)
-    static let textTertiary = Color.white.opacity(0.38)
+    /// Held at 0.50 because it carries 8-11 pt captions, and the lightest
+    /// thing it sits on is the top of a selected card (`panelSelected`, 8%
+    /// white over `surfaceRaised`). 0.38 measured 3.6:1 on plain cards and 0.46
+    /// still left the selected card at 4.2:1; 0.50 clears 4.5:1 on both (4.7:1
+    /// on the selected card). The app is dark-only, so there is no light-mode
+    /// value to keep in step.
+    static let textTertiary = Color.white.opacity(0.50)
 
     static let positive = Color(red: 0.24, green: 0.85, blue: 0.55)
     static let warning = Color(red: 1.0, green: 0.72, blue: 0.22)
@@ -33,19 +39,47 @@ enum Theme {
 
     // MARK: - Type
 
+    /// The text style whose default size is exactly `size`, so that size keeps
+    /// its look at the default setting and grows with Dynamic Type otherwise.
+    /// Sizes with no matching style, and every hero numeral from 23 pt up, stay
+    /// fixed: a scaled 44 pt timer would push the logger off the screen. The
+    /// watch is left fixed too, because its text styles are sized differently
+    /// and a wrist has no room to grow into.
+    private static func textStyle(for size: CGFloat) -> Font.TextStyle? {
+        #if os(watchOS)
+        return nil
+        #else
+        switch size {
+        case 11: return .caption2
+        case 12: return .caption
+        case 13: return .footnote
+        case 15: return .subheadline
+        case 16: return .callout
+        case 17: return .body
+        case 20: return .title3
+        case 22: return .title2
+        default: return nil
+        }
+        #endif
+    }
+
     /// Numerals that don't jitter while a timer counts or a weight steps.
     static func number(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .rounded).monospacedDigit()
+        rounded(size, weight: weight).monospacedDigit()
     }
 
     static func rounded(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+        if let style = textStyle(for: size) {
+            return .system(style, design: .rounded, weight: weight)
+        }
+        return .system(size: size, weight: weight, design: .rounded)
     }
 
     /// Small all-caps label used for section eyebrows.
-    static let eyebrow = Font.system(size: 11, weight: .bold, design: .rounded)
+    static let eyebrow = rounded(11, weight: .bold)
 
     /// The eyebrow shrunk for the Dynamic Island, where a caption has to sit
-    /// under a number without widening the region it lives in.
+    /// under a number without widening the region it lives in. Fixed, because
+    /// that region can't grow.
     static let microCaps = Font.system(size: 8, weight: .bold, design: .rounded)
 }

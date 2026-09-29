@@ -14,8 +14,6 @@ struct ActiveWorkoutView: View {
     let onClose: (WorkoutSession?) -> Void
 
     @Environment(\.modelContext) private var context
-    /// The watch's live numbers, when one is recording alongside the phone.
-    @State private var watch = WatchBridge.shared
     @State private var showingAddExercise = false
     @State private var showingFinishConfirm = false
     @State private var showingDiscardConfirm = false
@@ -52,6 +50,10 @@ struct ActiveWorkoutView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        // Capped because the set rows, steppers and Log button are laid out to
+        // sit on one screen with a bar in your hands; past this the keys push
+        // Log below the fold. Everything outside the logger scales freely.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .gtSessionTint(workout.phase)
         .background(
@@ -114,7 +116,7 @@ struct ActiveWorkoutView: View {
                     HStack(spacing: 6) {
                         SessionClock(startedAt: workout.session.startedAt, phase: workout.phase)
 
-                        Text("\(workout.completedCount)/\(workout.totalCount) sets")
+                        Text(effortsLoggedLabel)
                             .font(Theme.rounded(11, weight: .semibold))
                             .foregroundStyle(Theme.textTertiary)
 
@@ -125,9 +127,7 @@ struct ActiveWorkoutView: View {
                                 .accessibilityLabel("\(AppSettings.shared.weight(workout.volumeKg)) moved")
                         }
 
-                        if let heartRate = watch.liveMetrics?.currentHeartRate {
-                            LiveHeartRatePill(bpm: heartRate)
-                        }
+                        HeaderHeartRate()
                     }
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -164,9 +164,16 @@ struct ActiveWorkoutView: View {
             .padding(.vertical, 4)
     }
 
-    /// One tick per set, the same bar the Lock Screen card draws — so the thing
-    /// you glance at on your phone and the thing you glance at on your wrist
-    /// are measuring in the same units.
+    /// "5/12 sets", counted in efforts like the row badges, the dock and the
+    /// summary. Counting rows made a drop read as a set of its own here while
+    /// the card underneath called it part of the one above, so a session the
+    /// summary reports as 12 sets was 13 on the way through.
+    private var effortsLoggedLabel: String {
+        "\(workout.completedCount)/\(workout.totalCount) sets"
+    }
+
+    /// One tick per set, counted the way the header beside it counts, so the
+    /// bar and the "x/y sets" under the title never disagree about a drop.
     private var headerProgressLine: some View {
         PhaseProgressBar(completed: workout.completedCount,
                          total: workout.totalCount,
@@ -217,16 +224,23 @@ struct ActiveWorkoutView: View {
     // MARK: - Body
 
     private var content: some View {
-        ScrollViewReader { scroll in
+        // Built once for the pass and handed down. The queue asks "which is
+        // current?" for every row, and each ask used to sort the whole
+        // session again. Held only for this pass, so nothing can be stale
+        // after a log, an undo or an edit: the next pass starts from the sets.
+        let groups = workout.groups
+        let current = workout.currentGroup(in: groups)
+        let displayed = displayedGroup(in: groups, current: current)
+        return ScrollViewReader { scroll in
             ScrollView {
                 LazyVStack(spacing: 12) {
                     Color.clear
                         .frame(height: 0)
                         .id("logger-top")
 
-                    if let group = displayedGroup {
+                    if let group = displayed {
                         if reviewedGroupID != nil,
-                           let current = workout.currentGroup,
+                           let current,
                            current.catalogID != group.catalogID {
                             reviewBanner(current: current, scroll: scroll)
                         }
@@ -244,7 +258,7 @@ struct ActiveWorkoutView: View {
                         .gtCard(padding: 0)
                     }
 
-                    exerciseQueue(scroll: scroll)
+                    exerciseQueue(groups: groups, displayed: displayed, scroll: scroll)
 
                     discardFooter
                 }
@@ -262,7 +276,7 @@ struct ActiveWorkoutView: View {
             // goes looking for the next exercise, rather than by finding a
             // button.
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: workout.currentGroup?.catalogID) { _, currentID in
+            .onChange(of: current?.catalogID) { _, currentID in
                 if reviewedGroupID == currentID { reviewedGroupID = nil }
                 guard reviewedGroupID == nil else { return }
                 scrollToLogger(scroll)
@@ -270,19 +284,22 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private var displayedGroup: SessionExerciseGroup? {
+    private func displayedGroup(in groups: [SessionExerciseGroup],
+                                current: SessionExerciseGroup?) -> SessionExerciseGroup? {
         if let reviewedGroupID,
-           let reviewed = workout.groups.first(where: { $0.catalogID == reviewedGroupID }) {
+           let reviewed = groups.first(where: { $0.catalogID == reviewedGroupID }) {
             return reviewed
         }
-        return workout.currentGroup
+        return current
     }
 
     /// The route through the workout stays visible without making every
     /// exercise carry a live editor. One tap changes the exercise at the top;
     /// completed exercises open for review without changing what the watch
     /// calls "next".
-    private func exerciseQueue(scroll: ScrollViewProxy) -> some View {
+    private func exerciseQueue(groups: [SessionExerciseGroup],
+                               displayed: SessionExerciseGroup?,
+                               scroll: ScrollViewProxy) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text("WORKOUT")
@@ -290,21 +307,21 @@ struct ActiveWorkoutView: View {
                     .tracking(1.4)
                     .foregroundStyle(Theme.textTertiary)
                 Spacer()
-                Text("\(workout.groups.filter(\.isComplete).count)/\(workout.groups.count) exercises")
+                Text("\(groups.filter(\.isComplete).count)/\(groups.count) exercises")
                     .font(Theme.rounded(11, weight: .semibold))
                     .foregroundStyle(Theme.textTertiary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
 
-            ForEach(workout.groups) { group in
+            ForEach(groups) { group in
                 Divider()
                     .overlay(Theme.edge)
                     .padding(.leading, 58)
 
                 Button {
-                    workout.focus(on: group.catalogID)
-                    reviewedGroupID = group.isComplete ? group.catalogID : nil
+                    let isReview = workout.openFromQueue(group.catalogID)
+                    reviewedGroupID = isReview ? group.catalogID : nil
                     scrollToLogger(scroll)
                 } label: {
                     HStack(spacing: 10) {
@@ -317,31 +334,28 @@ struct ActiveWorkoutView: View {
                                 .font(Theme.rounded(14, weight: .bold))
                                 .foregroundStyle(Theme.ink)
                                 .lineLimit(1)
-                            Text(queueDetail(group))
-                                .font(Theme.rounded(11, weight: .medium))
-                                .foregroundStyle(Theme.textTertiary)
-                                .lineLimit(1)
+                            QueueRowDetail(workout: workout, group: group)
                         }
 
                         Spacer(minLength: 4)
 
-                        if displayedGroup?.catalogID == group.catalogID {
+                        if displayed?.catalogID == group.catalogID {
                             Text(group.isComplete ? "REVIEWING" : "CURRENT")
                                 .font(Theme.microCaps)
                                 .tracking(0.8)
                                 .foregroundStyle(group.isComplete ? Theme.positive : Theme.accent)
-                        } else if workout.pendingNudge?.catalogID == group.catalogID {
+                        } else if workout.pendingNudge(for: group.catalogID) != nil {
                             Text("ADJUST")
                                 .font(Theme.microCaps)
                                 .tracking(0.8)
                                 .foregroundStyle(Theme.warning)
-                        } else if workout.takenNudge?.nudge.catalogID == group.catalogID {
+                        } else if workout.takenNudge(for: group.catalogID) != nil {
                             Text("CHANGED")
                                 .font(Theme.microCaps)
                                 .tracking(0.8)
                                 .foregroundStyle(Theme.positive)
                         } else {
-                            Text("\(group.completedCount)/\(group.sets.count)")
+                            Text("\(workout.loggedEffortCount(in: group))/\(group.effortCount)")
                                 .font(Theme.number(12, weight: .semibold))
                                 .foregroundStyle(Theme.textTertiary)
                             DisclosureChevron()
@@ -352,8 +366,13 @@ struct ActiveWorkoutView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(group.order + 1), \(group.name), \(group.completedCount) of \(group.sets.count) sets")
+                .accessibilityLabel("\(group.order + 1), \(group.name), \(workout.loggedEffortCount(in: group)) of \(group.effortCount) sets")
                 .accessibilityHint(group.isComplete ? "Review this exercise" : "Make this the current exercise")
+                // Long press, and nothing on screen, like the row menu on a
+                // set: a lifter who never picks the wrong exercise never sees
+                // that this exists.
+                .contextMenu { exerciseMenu(for: group) }
+                .accessibilityActions { exerciseMenu(for: group) }
             }
 
             Divider().overlay(Theme.edge)
@@ -376,6 +395,7 @@ struct ActiveWorkoutView: View {
         HStack(spacing: 9) {
             Image(systemName: "clock.arrow.circlepath")
                 .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
             Text("Reviewing a finished exercise")
                 .font(Theme.rounded(12, weight: .semibold))
                 .foregroundStyle(Theme.textSecondary)
@@ -393,27 +413,17 @@ struct ActiveWorkoutView: View {
         .background(Theme.well, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private func queueDetail(_ group: SessionExerciseGroup) -> String {
-        if group.isComplete { return "Complete · \(group.effortCount) set\(group.effortCount == 1 ? "" : "s")" }
-        if workout.pendingNudge?.catalogID == group.catalogID {
-            return "Load change waiting · tap to review"
+    /// Taking back an exercise picked by mistake. Offered only where
+    /// `ActiveWorkout.canRemove` says so: one added on the day with nothing
+    /// logged on it. For anything else the menu is empty, and an empty menu
+    /// does not open.
+    @ViewBuilder
+    private func exerciseMenu(for group: SessionExerciseGroup) -> some View {
+        if workout.canRemove(group) {
+            Button(role: .destructive) { workout.removeExercise(group) } label: {
+                Label("Remove from workout", systemImage: "trash")
+            }
         }
-        if workout.takenNudge?.nudge.catalogID == group.catalogID {
-            return "Load changed · tap to review or undo"
-        }
-        guard let next = group.sets.first(where: { !$0.isCompleted }) else { return "Ready" }
-        return "Set \(group.label(for: next)) · \(targetLabel(next))"
-    }
-
-    private func targetLabel(_ set: SetLog) -> String {
-        if set.tracking == .duration { return "\(set.seconds)s" }
-        let reps = set.targetRepsHigh > 0
-            ? (set.targetRepsLow == set.targetRepsHigh
-               ? "\(set.targetRepsLow)"
-               : "\(set.targetRepsLow)–\(set.targetRepsHigh)")
-            : "\(set.reps)"
-        if set.weightKg == 0 { return "\(reps) reps" }
-        return "\(set.loadScale.format(set.weightKg)) × \(reps)"
     }
 
     private func scrollToLogger(_ scroll: ScrollViewProxy) {
@@ -450,6 +460,50 @@ struct ActiveWorkoutView: View {
         let session = workout.session
         workout.finish()
         onClose(session)
+    }
+}
+
+// MARK: - Queue row detail
+
+/// The line under an exercise's name in the queue: what set is up on it and
+/// what it prescribes.
+///
+/// A view of its own so that the prescribed weight is read here and not in
+/// the logger's body. It is the one place the queue looks at a pending set's
+/// weight, and while it was read there, every step on the stepper drew the
+/// whole logger again, card, queue and all, to redraw one line of this.
+private struct QueueRowDetail: View {
+    let workout: ActiveWorkout
+    let group: SessionExerciseGroup
+
+    var body: some View {
+        Text(detail)
+            .font(Theme.rounded(11, weight: .medium))
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(1)
+    }
+
+    private var detail: String {
+        if group.isComplete { return "Complete · \(group.effortCount) set\(group.effortCount == 1 ? "" : "s")" }
+        if workout.pendingNudge(for: group.catalogID) != nil {
+            return "Load change waiting · tap to review"
+        }
+        if workout.takenNudge(for: group.catalogID) != nil {
+            return "Load changed · tap to review or undo"
+        }
+        guard let next = group.sets.first(where: { !$0.isCompleted }) else { return "Ready" }
+        return "Set \(group.label(for: next)) · \(targetLabel(next))"
+    }
+
+    private func targetLabel(_ set: SetLog) -> String {
+        if set.tracking == .duration { return "\(set.seconds)s" }
+        let reps = set.targetRepsHigh > 0
+            ? (set.targetRepsLow == set.targetRepsHigh
+               ? "\(set.targetRepsLow)"
+               : "\(set.targetRepsLow)–\(set.targetRepsHigh)")
+            : "\(set.reps)"
+        if set.weightKg == 0 { return "\(reps) reps" }
+        return "\(set.loadScale.format(set.weightKg)) × \(reps)"
     }
 }
 
@@ -496,9 +550,24 @@ private struct ExerciseLogCard: View {
     @State private var showsQueuedSets = false
     @State private var noteDraft = ""
     @FocusState private var noteFocused: Bool
+    /// The logged set whose numbers are open for a typo to be fixed. One at a
+    /// time, and only ever opened from the long-press menu, so a lifter who
+    /// never mistypes never sees it.
+    @State private var correctingSetID: UUID?
 
-    private var lastTime: [SetLog] { workout.lastPerformance(for: group.catalogID) }
-    private var planItem: PlanItem? { workout.planItem(for: group.catalogID) }
+    /// The row the card is about: the next set to log, else the last one. A
+    /// day that repeats a movement gives each plan slot its own rest, rep range
+    /// and last time, and asked by exercise the back-off would read the top
+    /// set's.
+    private var subjectRow: SetLog? { group.sets.first(where: { !$0.isCompleted }) ?? group.sets.last }
+    private var lastTime: [SetLog] {
+        guard let row = subjectRow else { return workout.lastPerformance(for: group.catalogID) }
+        return workout.lastPerformance(for: row)
+    }
+    private var planItem: PlanItem? {
+        guard let row = subjectRow else { return workout.planItem(for: group.catalogID) }
+        return workout.planItem(for: row)
+    }
     private var note: ExerciseNote? { workout.note(for: group.catalogID) }
 
     /// The first set the user hasn't logged — expanded for immediate input.
@@ -533,6 +602,7 @@ private struct ExerciseLogCard: View {
                     Image(systemName: "arrow.up.forward.circle.fill")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.accent.wash)
+                        .accessibilityHidden(true)
                     Text(suggestion)
                         .font(Theme.rounded(12, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
@@ -553,8 +623,8 @@ private struct ExerciseLogCard: View {
             }
 
             setLogger
-            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.pendingNudge)
-            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.takenNudge)
+            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.pendingNudge(for: group.catalogID))
+            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.takenNudge(for: group.catalogID))
 
             HStack(spacing: 8) {
                 Button { workout.addSet(to: group) } label: {
@@ -564,7 +634,10 @@ private struct ExerciseLogCard: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
 
-                if group.sets.count > 1 {
+                // Only while there is a row nobody has logged. On a finished
+                // exercise opened for review every row is a lift, and a button
+                // sitting beside *Add set* there could only ever erase one.
+                if workout.removableSet(in: group) != nil {
                     Button { workout.removeLastSet(from: group) } label: {
                         Label("Remove", systemImage: "minus")
                             .font(Theme.rounded(12, weight: .semibold))
@@ -590,6 +663,11 @@ private struct ExerciseLogCard: View {
                 }
             }
         }
+        // Logging a set means the lifter has moved on. Left open, the editor
+        // would still be sitting on an old set, or come back on one that was
+        // taken back and logged again, and the next steppers they reach for
+        // could be the wrong ones.
+        .onChange(of: workout.lastLoggedSetID) { _, _ in correctingSetID = nil }
         .gtCard(padding: 12, dimmed: group.isComplete)
         .sheet(isPresented: $showingDetail) {
             if let catalog = group.catalog {
@@ -627,6 +705,7 @@ private struct ExerciseLogCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(Theme.positive)
+                        .accessibilityHidden(true)
                     Text("Exercise complete")
                         .font(Theme.rounded(13, weight: .bold))
                         .foregroundStyle(Theme.textSecondary)
@@ -665,9 +744,9 @@ private struct ExerciseLogCard: View {
             set: set,
             label: group.label(for: set),
             isExpanded: expanded,
-            previous: previousSet(for: set),
+            previous: workout.previousSet(for: set),
             isPR: workout.isPR(set),
-            onLog: { workout.complete(set, restSeconds: planItem?.restSeconds) },
+            onLog: { workout.complete(set, restSeconds: workout.planItem(for: set)?.restSeconds) },
             onUndo: { workout.uncomplete(set) },
             onStart: { workout.announceStart(set) },
             onCancelStart: { workout.cancelStart(set) },
@@ -675,20 +754,30 @@ private struct ExerciseLogCard: View {
             isResting: workout.restTimer.isRunning,
             onRate: { workout.rate(set, feel: $0) },
             onClearRating: { workout.clearRating(set) },
-            onEdit: { workout.numbersChanged() }
+            onEdit: { numbersEdited(on: set) },
+            isCorrecting: isCorrecting(set),
+            onDoneCorrecting: { correctingSetID = nil },
+            onRemoveContinuation: set.isContinuation && !set.isCompleted && expanded
+                ? { workout.removeContinuation(set) } : nil
         )
         // Long press, and nothing on screen. A lifter who only does straight
         // sets has to be able to use this app for a year without ever learning
         // that drop sets are in it.
-        .contextMenu { effortMenu(for: set) }
+        //
+        // Never on the row that is open with its steppers: holding − on a drop
+        // to take a plate off is the same long press, and lifting a menu that
+        // offers to remove the row halfway down a set is the worst place for
+        // one. That row takes its removal from a control in its own header, and
+        // VoiceOver keeps the action either way.
+        .contextMenu { if !expanded { effortMenu(for: set) } }
         .accessibilityActions { effortMenu(for: set) }
 
-        if let nudge = workout.pendingNudge, nudge.setID == set.id {
+        if let nudge = workout.pendingNudge(for: set.catalogID), nudge.setID == set.id {
             LoadNudgeRow(nudge: nudge,
                          onTake: { workout.apply(nudge) },
-                         onDismiss: { workout.dismissNudge() })
-        } else if let taken = workout.takenNudge, taken.nudge.setID == set.id {
-            NudgeTakenRow(taken: taken, onUndo: { workout.undoTakenNudge() })
+                         onDismiss: { workout.dismissNudge(nudge) })
+        } else if let taken = workout.takenNudge(for: set.catalogID), taken.nudge.setID == set.id {
+            NudgeTakenRow(taken: taken, onUndo: { workout.undoTakenNudge(taken) })
         }
     }
 
@@ -734,16 +823,22 @@ private struct ExerciseLogCard: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            Text("\(group.completedCount)/\(group.sets.count)")
+            Text("\(workout.loggedEffortCount(in: group))/\(group.effortCount)")
                 .font(Theme.number(13, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
             noteButton
-            Button { showingDetail = true } label: {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.textTertiary)
+            // Only for an exercise the catalog still knows. The sheet is built
+            // from the catalog entry, so for a deleted custom exercise the
+            // button opened an empty sheet with nothing on it to dismiss.
+            if group.catalog != nil {
+                Button { showingDetail = true } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Details for \(group.name)")
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -819,30 +914,61 @@ private struct ExerciseLogCard: View {
 
     // MARK: Taking a set further
 
-    /// What can be done to this row that isn't already a button on it: take the
-    /// set further without resting, or undo having said so.
+    /// What can be done to this row that isn't already a button on it: fix a
+    /// logged set's numbers, take the set further without resting, or undo
+    /// having said so.
     ///
-    /// The offer is only ever on the set at the front of the exercise — the one
-    /// just logged, with nothing logged after it. A continuation slotted in
-    /// behind work already done would claim a drop happened at a point in the
-    /// session where the record says the lifter had moved on.
+    /// The offer to continue is only ever on the set at the front of the
+    /// exercise — the one just logged, with nothing logged after it. A
+    /// continuation slotted in behind work already done would claim a drop
+    /// happened at a point in the session where the record says the lifter had
+    /// moved on.
+    ///
+    /// The row being corrected gets no menu at all. Its steppers repeat while
+    /// held, and the same long press would lift this menu over them.
     @ViewBuilder
     private func effortMenu(for set: SetLog) -> some View {
-        if canContinue(set) {
-            Button { workout.continueSet(set) } label: {
-                Label("Continue without resting", systemImage: SetContinuation.symbol)
+        if !isCorrecting(set) {
+            if set.isCompleted {
+                Button { correctingSetID = set.id } label: {
+                    Label("Edit numbers", systemImage: "pencil")
+                }
+            }
+            if canContinue(set) {
+                Button { workout.continueSet(set) } label: {
+                    Label("Continue without resting", systemImage: SetContinuation.symbol)
+                }
+            }
+            if set.isContinuation {
+                if set.isCompleted {
+                    Button { workout.separate(set) } label: {
+                        Label("Separate from the set above", systemImage: "scissors")
+                    }
+                } else {
+                    Button(role: .destructive) { workout.removeContinuation(set) } label: {
+                        Label("Remove this row", systemImage: "minus.circle")
+                    }
+                }
             }
         }
-        if set.isContinuation {
-            if set.isCompleted {
-                Button { workout.separate(set) } label: {
-                    Label("Separate from the set above", systemImage: "scissors")
-                }
-            } else {
-                Button(role: .destructive) { workout.removeContinuation(set) } label: {
-                    Label("Remove this row", systemImage: "minus.circle")
-                }
-            }
+    }
+
+    /// Whether this row is open for its numbers to be fixed. Only a logged set
+    /// can be: one the wrist took back while it was open is a pending row
+    /// again, and its steppers are the ordinary ones.
+    private func isCorrecting(_ set: SetLog) -> Bool {
+        correctingSetID == set.id && set.isCompleted
+    }
+
+    /// A stepper on this row moved. A set nobody has logged only needs the
+    /// copies of it told; a logged one is a correction, and goes through
+    /// `correct` so that the record trophy and any standing offer follow the
+    /// new numbers while the moment it was logged stays where it was.
+    private func numbersEdited(on set: SetLog) {
+        if set.isCompleted {
+            workout.correct(set, weightKg: set.weightKg, reps: set.reps, seconds: set.seconds)
+        } else {
+            workout.numbersChanged()
         }
     }
 
@@ -852,14 +978,6 @@ private struct ExerciseLogCard: View {
         guard set.isCompleted, let index = group.sets.firstIndex(where: { $0.id == set.id })
         else { return false }
         return group.sets[(index + 1)...].allSatisfy { !$0.isCompleted }
-    }
-
-    /// Last session's matching set, paired by position within the exercise —
-    /// and nothing for a row that continued another, which has no opposite
-    /// number in a session that may not have had one there.
-    private func previousSet(for set: SetLog) -> SetLog? {
-        guard let position = group.pairingPosition(of: set), position < lastTime.count else { return nil }
-        return lastTime[position]
     }
 
     private var lastTimeSummary: String {
@@ -906,6 +1024,14 @@ private struct SetRow: View {
     /// itself; this is what tells everything drawing a copy of that set — the
     /// wrist above all — that it has moved.
     let onEdit: () -> Void
+    /// Whether this logged row has been opened, from its long-press menu, to
+    /// fix a number that was typed wrong.
+    let isCorrecting: Bool
+    let onDoneCorrecting: () -> Void
+    /// Set only on a drop or cluster row that is open and unlogged: taking back
+    /// a "Continue without resting" that was a mis-tap. A button rather than a
+    /// menu item, because this row's steppers repeat while held.
+    let onRemoveContinuation: (() -> Void)?
 
     @State private var showingKeypad = false
     @State private var showingScale = false
@@ -916,8 +1042,20 @@ private struct SetRow: View {
     /// than the app-wide unit, so a stack stamped in pounds stays in pounds.
     private var scale: LoadScale { self.set.loadScale }
 
+    /// What the weight caption does when tapped: open the machine's scale. Not
+    /// when the exercise no longer resolves, because the sheet is built from
+    /// the catalog entry and a custom exercise deleted mid-plan has none, so it
+    /// presented as an empty sheet with no title and no Done. The caption then
+    /// stays as plain text, and the ladder the set was already on still steps.
+    private var scaleSheetAction: (() -> Void)? {
+        guard set.catalog != nil else { return nil }
+        return { showingScale = true }
+    }
+
     var body: some View {
-        if set.isCompleted {
+        if set.isCompleted && isCorrecting {
+            correctionRow
+        } else if set.isCompleted {
             completedRow
         } else if isExpanded {
             expandedRow
@@ -960,6 +1098,8 @@ private struct SetRow: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Undo this set")
+                .accessibilityHint("Erases what you logged for it")
             }
 
             if showsEffortStrip {
@@ -1174,25 +1314,19 @@ private struct SetRow: View {
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
-            }
-
-            HStack(spacing: 14) {
-                if set.tracking == .duration {
-                    StepperField(title: "Time", value: secondsBinding, step: 5,
-                                 format: { String(format: "%.0f", $0) }, unit: "seconds")
-                } else {
-                    if set.tracking == .weightReps || set.weightKg > 0 {
-                        StepperField(title: "Weight", value: weightBinding,
-                                     scale: scale,
-                                     format: { $0 == 0 && set.tracking == .bodyweightReps ? "BW" : scale.text($0) },
-                                     unitAction: { showingScale = true },
-                                     unitIsCustom: LoadScaleBook.shared.isCustomised(set.catalogID))
+                if let onRemoveContinuation {
+                    Button(action: onRemoveContinuation) {
+                        Image(systemName: "minus.circle")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 34, height: 28)
                     }
-                    StepperField(title: "Reps", value: repsBinding, step: 1,
-                                 format: { String(format: "%.0f", $0) }, unit: "reps")
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove this row")
                 }
             }
-            .frame(maxWidth: .infinity)
+
+            numberSteppers(unitAction: scaleSheetAction)
 
             // Stacked, in the order the two things happen, rather than side
             // by side. Beside a full-strength lime button the start was a grey
@@ -1247,6 +1381,65 @@ private struct SetRow: View {
         }
     }
 
+    // MARK: Correcting (a logged set's numbers)
+
+    /// A logged set opened to fix a typo: the steppers it was logged with,
+    /// writing through the same bindings, and nothing else. No start and no
+    /// *Log set*, because the set has been lifted and when is not what is being
+    /// fixed. No undo either, so a slip of the thumb while dialling can't erase
+    /// the set the lifter came here to keep.
+    private var correctionRow: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                indexBadge(filled: false)
+                Text("SET \(label) · EDITING")
+                    .font(Theme.eyebrow)
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
+                Button("Done", action: onDoneCorrecting)
+                    .font(Theme.rounded(12, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.plain)
+            }
+
+            // What the machine is marked in is not a number on this set, so
+            // the unit stays a label here rather than opening the scale sheet,
+            // whose answer would move the sets still to come as well.
+            numberSteppers(unitAction: nil)
+        }
+        .padding(12)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+            shape.fill(Theme.panel)
+                .overlay { shape.strokeBorder(Theme.edge(.working), lineWidth: 1) }
+        }
+    }
+
+    /// The steppers a set's numbers are dialled on. Shared by the set being
+    /// worked and a logged one being corrected, so a correction moves along the
+    /// same ladder and through the same bindings as the number it replaces.
+    private func numberSteppers(unitAction: (() -> Void)?) -> some View {
+        HStack(spacing: 14) {
+            if set.tracking == .duration {
+                StepperField(title: "Time", value: secondsBinding, step: 5,
+                             format: { String(format: "%.0f", $0) }, unit: "seconds")
+            } else {
+                StepperField(title: set.tracking == .bodyweightReps ? "Added weight" : "Weight",
+                             value: weightBinding,
+                             scale: scale,
+                             format: { $0 == 0 && set.tracking == .bodyweightReps ? "BW" : scale.text($0) },
+                             unitAction: unitAction,
+                             unitIsCustom: LoadScaleBook.shared.isCustomised(set.catalogID))
+                StepperField(title: "Reps", value: repsBinding, step: 1,
+                             format: { String(format: "%.0f", $0) }, unit: "reps",
+                             maximum: Double(StepperEntry.maximumReps))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     // MARK: Pieces
 
     /// The set's number — or, on a row that continues one, the glyph that says
@@ -1258,6 +1451,7 @@ private struct SetRow: View {
             if set.isContinuation {
                 Image(systemName: SetContinuation.symbol)
                     .font(.system(size: 11, weight: .black))
+                    .accessibilityLabel("Continues the set above")
             } else {
                 Text(label)
                     .font(Theme.number(12, weight: .bold))
@@ -1305,26 +1499,47 @@ private struct SetRow: View {
 
     // MARK: Bindings (display unit in, kilograms out)
 
+    // Each binding refuses what `StepperEntry` refuses, whatever the field in
+    // front of it lets through: this is the last step before the number is a
+    // measured set, and the reps field shares a generic ceiling with every
+    // other fixed-step field. A refused number leaves the set as it was.
+
     private var weightBinding: Binding<Double> {
         Binding(
             get: { scale.display(set.weightKg) },
-            set: { set.weightKg = scale.kilograms(max(0, $0)); onEdit() }
+            set: { typed in
+                guard StepperEntry.accepts(typed, maximum: scale.displayCeiling,
+                                           current: scale.display(set.weightKg)) else { return }
+                set.weightKg = scale.kilograms(typed)
+                onEdit()
+            }
         )
     }
 
     private var repsBinding: Binding<Double> {
-        Binding(get: { Double(set.reps) }, set: { set.reps = max(0, Int($0)); onEdit() })
+        Binding(get: { Double(set.reps) }, set: { typed in
+            guard let reps = StepperEntry.count(typed, maximum: StepperEntry.maximumReps,
+                                                current: set.reps) else { return }
+            set.reps = reps
+            onEdit()
+        })
     }
 
     private var secondsBinding: Binding<Double> {
-        Binding(get: { Double(set.seconds) }, set: { set.seconds = max(0, Int($0)); onEdit() })
+        Binding(get: { Double(set.seconds) }, set: { typed in
+            guard let seconds = StepperEntry.count(typed, maximum: StepperEntry.maximumSeconds,
+                                                   current: set.seconds) else { return }
+            set.seconds = seconds
+            onEdit()
+        })
     }
 }
 
 // MARK: - Saying you're starting
 
-/// The announcement, and the clock it becomes: one tap to say the set is
-/// beginning now, and a running readout of how long you've been under the bar.
+/// The announcement, and the clock it becomes: one tap to say the set is about
+/// to begin, a short count to get to the bar — see `SetLeadIn` — and
+/// then a running readout of how long you've been under it.
 ///
 /// It sits between the numbers and *Log set*, which is the order the two things
 /// happen in — dial the weight, say you're going, log what you did — and it
@@ -1382,14 +1597,17 @@ private struct SetStartStrip: View {
         }
         .buttonStyle(StartSetButtonStyle())
         .accessibilityLabel("Start set")
-        .accessibilityHint("Optional. Records the moment this set begins, so the rest before it and the set itself are separate numbers")
+        .accessibilityHint("Optional. Counts you in, then records the moment this set begins, so the rest before it and the set itself are separate numbers")
         .transition(.opacity)
     }
 
-    /// The clock ticks off a `TimelineView` rather than a timer of its own:
-    /// the view already knows when the set began, and a second ticking object
-    /// per expanded row — there is one on every unfinished exercise — would be
-    /// several timers running to draw one number each.
+    /// The count-in and the clock it becomes both tick off one `TimelineView`
+    /// rather than a timer of their own: the view already knows when the set
+    /// begins, and a second ticking object per expanded row — there is one on
+    /// every unfinished exercise — would be several timers running to draw one
+    /// number each. The count reaching zero is silent on purpose: the tap was
+    /// felt, and a second buzz at zero would be the app nagging somebody who is
+    /// already gripping the bar.
     private func working(since start: Date) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "stopwatch.fill")
@@ -1399,17 +1617,8 @@ private struct SetStartStrip: View {
                 .background(Circle().fill(SessionPhase.working.gradient))
                 .shadow(color: Theme.accent.opacity(0.4), radius: 7)
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text("WORKING")
-                    .font(Theme.microCaps)
-                    .tracking(0.9)
-                    .foregroundStyle(Theme.accent.wash)
-                TimelineView(.periodic(from: start, by: 1)) { context in
-                    Text(max(0, context.date.timeIntervalSince(start)).clockString)
-                        .font(Theme.number(19, weight: .bold))
-                        .foregroundStyle(Theme.ink)
-                        .monospacedDigit()
-                }
+            TimelineView(.periodic(from: SetLeadIn.tickAnchor(for: start), by: 1)) { context in
+                readout(SetStartReading(start: start, now: context.date))
             }
 
             Spacer(minLength: 0)
@@ -1440,6 +1649,21 @@ private struct SetStartStrip: View {
         }
         .accessibilityElement(children: .contain)
         .transition(.opacity)
+    }
+
+    private func readout(_ reading: SetStartReading) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(reading.eyebrow)
+                .font(Theme.microCaps)
+                .tracking(0.9)
+                .foregroundStyle(Theme.accent.wash)
+            Text(reading.figure)
+                .font(Theme.number(19, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(reading.spoken)
     }
 }
 
@@ -1520,10 +1744,12 @@ struct RestTimerBar: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().stroke(Color.black.opacity(0.18), lineWidth: 4)
-                Circle()
-                    .trim(from: 0, to: max(0.001, 1 - timer.progress))
-                    .stroke(Color.black.opacity(0.85), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+                RestCountdown(timer: timer, step: 0.25) { _, elapsed in
+                    Circle()
+                        .trim(from: 0, to: max(0.001, 1 - elapsed))
+                        .stroke(Color.black.opacity(0.85), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
             }
             .frame(width: 34, height: 34)
 
@@ -1532,9 +1758,11 @@ struct RestTimerBar: View {
                     .font(Theme.eyebrow)
                     .tracking(1.2)
                     .foregroundStyle(.black.opacity(0.55))
-                Text(timer.remaining.clockString)
-                    .font(Theme.number(22))
-                    .foregroundStyle(.black)
+                RestCountdown(timer: timer) { remaining, _ in
+                    Text(remaining.clockString)
+                        .font(Theme.number(22))
+                        .foregroundStyle(.black)
+                }
             }
 
             Spacer()
@@ -1556,6 +1784,8 @@ struct RestTimerBar: View {
                     .background(Color.black.opacity(0.13), in: Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("End rest")
+            .accessibilityHint("Stops the rest timer without starting the next set")
         }
     }
 
@@ -1718,6 +1948,7 @@ private struct LoadNudgeRow: View {
             Image(systemName: nudge.isBackOff ? "arrow.down.right.circle.fill" : "arrow.up.forward.circle.fill")
                 .font(.system(size: 15))
                 .foregroundStyle(tint)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(headline)
@@ -1792,6 +2023,7 @@ private struct NudgeTakenRow: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 15))
                 .foregroundStyle(Theme.positive)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Moved to \(scale.format(taken.nudge.toKg))")
@@ -1831,6 +2063,21 @@ private struct NudgeTakenRow: View {
 }
 
 // MARK: - Live heart rate
+
+/// The header's heart-rate pill, reading the watch's numbers itself.
+///
+/// The watch merges a new reading every few seconds. Read in the logger's
+/// body, that put the whole screen through a pass at each one, to change a
+/// number in the corner; read here, only this is asked again.
+private struct HeaderHeartRate: View {
+    @State private var watch = WatchBridge.shared
+
+    var body: some View {
+        if let heartRate = watch.liveMetrics?.currentHeartRate {
+            LiveHeartRatePill(bpm: heartRate)
+        }
+    }
+}
 
 /// The watch's current reading, shown in the logger while it's recording. It
 /// beats rather than animating a number, so it reads at a glance from arm's
