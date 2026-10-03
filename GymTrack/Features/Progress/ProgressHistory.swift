@@ -234,10 +234,18 @@ final class ProgressHistory {
         return WindowFigures(
             windowed: windowed,
             previous: previous,
-            averageDuration: windowed.isEmpty ? 0 : windowed.reduce(0.0) { $0 + $1.duration } / Double(windowed.count),
+            averageDuration: averageDuration(of: windowed),
             totals: totals(of: windowed, digests: digests),
             previousTotals: totals(of: previous, digests: digests)
         )
+    }
+
+    /// Over the sessions that were timed. One logged afterwards has a window
+    /// of nothing, and counting it would pull the average down by a workout
+    /// nobody measured.
+    private static func averageDuration(of sessions: [WorkoutSession]) -> Double {
+        let timed = sessions.filter { !$0.isLoggedAfterwards }
+        return timed.isEmpty ? 0 : timed.reduce(0.0) { $0 + $1.duration } / Double(timed.count)
     }
 
     /// `TrainingStats.total`, with each session's value read from its digest.

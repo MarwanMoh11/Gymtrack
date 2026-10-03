@@ -153,6 +153,12 @@ a measured recovery score.
   so a proposal can cite a set and adherence can be computed without matching
   free-text names. Restore keeps set IDs, so a citation survives a restore, and
   a file that repeats one is refused;
+- sessions written down afterwards, for a workout the app could not log as it
+  happened: `loggedAfterwards: true`. Only the day of `startedAt` is meant, its
+  hour being a placeholder; the session has no `endedAt`, its sets have no
+  times, and it carries no heart rate or energy. Its sets are what the lifter
+  entered as done, so they count as training, but nothing timed (duration,
+  rests, density) may be worked out from it;
 - where and when the file was written: `exportedAt`, `timeZone` (an IANA
   identifier, such as `Africa/Cairo`), `appVersion` and `appBuild`. Every date
   is UTC and a plan day's `weekday` is the lifter's local one, so the zone is

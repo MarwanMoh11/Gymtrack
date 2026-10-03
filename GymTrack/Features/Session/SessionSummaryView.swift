@@ -373,10 +373,20 @@ struct SessionDetailView: View {
         ScrollView {
             VStack(spacing: 14) {
                 HStack(spacing: 10) {
-                    StatTile(value: session.duration.durationString, label: "Duration")
+                    if !session.isLoggedAfterwards {
+                        StatTile(value: session.duration.durationString, label: "Duration")
+                    }
                     StatTile(value: "\(session.effortSets.count)", label: "Sets")
                     StatTile(value: AppSettings.shared.weight(session.totalVolumeKg, showUnit: false),
                              label: "Volume \(AppSettings.shared.weightUnit.short)")
+                }
+
+                if session.isLoggedAfterwards {
+                    Label("Logged afterwards on \(session.startedAt.formatted(date: .abbreviated, time: .omitted)). No times or heart rate were recorded.",
+                          systemImage: "square.and.pencil")
+                        .font(Theme.rounded(12, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 HealthMetricsCard(session: session)

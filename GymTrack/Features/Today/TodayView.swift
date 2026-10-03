@@ -11,6 +11,7 @@ struct TodayView: View {
 
     @State private var showingDayPicker = false
     @State private var showingSettings = false
+    @State private var showingPastWorkout = false
     @State private var pastSession: WorkoutSession?
 
     private var activePlan: Plan? { Plan.displayed(among: plans) }
@@ -41,6 +42,7 @@ struct TodayView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     greeting
+                    if let expiry = BuildExpiry.upcoming() { expiryNotice(expiry) }
                     heroCard
                     weekStrip
                     statsRow
@@ -71,8 +73,37 @@ struct TodayView: View {
                     start(day: day)
                 }
             }
+            .sheet(isPresented: $showingPastWorkout) {
+                if let activePlan {
+                    PastWorkoutSheet(plan: activePlan, history: finishedSessions)
+                }
+            }
             .navigationDestination(item: $pastSession) { SessionDetailView(session: $0) }
         }
+    }
+
+    // MARK: - Signing
+
+    /// Shown a few days before this build stops opening, and never otherwise.
+    /// Nothing to dismiss: a fresh install moves the date and it goes.
+    private func expiryNotice(_ expiry: Date) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .foregroundStyle(Theme.warning)
+            Text("This build stops opening \(Self.expiryMoment(expiry)). Reinstall it from your Mac with scripts/install-phone.sh before then; your workouts stay.")
+                .font(Theme.rounded(13, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .gtCard(padding: 12)
+    }
+
+    private static func expiryMoment(_ expiry: Date) -> String {
+        let calendar = Calendar.current
+        let time = expiry.formatted(date: .omitted, time: .shortened)
+        if calendar.isDateInToday(expiry) { return "today at \(time)" }
+        if calendar.isDateInTomorrow(expiry) { return "tomorrow at \(time)" }
+        return "on \(expiry.formatted(.dateTime.weekday(.wide))) at \(time)"
     }
 
     // MARK: - Greeting
@@ -247,7 +278,11 @@ struct TodayView: View {
                         .font(Theme.rounded(24, weight: .heavy))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
-                    if let endedAt = session.endedAt {
+                    if session.isLoggedAfterwards {
+                        Text("Logged afterwards")
+                            .font(Theme.rounded(12, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                    } else if let endedAt = session.endedAt {
                         Text("Finished at \(endedAt.formatted(.dateTime.hour().minute()))")
                             .font(Theme.rounded(12, weight: .medium))
                             .foregroundStyle(Theme.textSecondary)
@@ -262,7 +297,7 @@ struct TodayView: View {
                 completionDivider
                 completionStat(AppSettings.shared.weight(session.totalVolumeKg), label: "moved")
                 completionDivider
-                completionStat(session.duration.durationString, label: "time")
+                completionStat(session.isLoggedAfterwards ? "—" : session.duration.durationString, label: "time")
             }
             .gtWell(vertical: 12, horizontal: 8)
 
@@ -488,7 +523,7 @@ struct TodayView: View {
 
     private var recentSection: some View {
         VStack(spacing: 10) {
-            SectionHeader("Recent sessions")
+            SectionHeader("Recent sessions", action: pastWorkoutAction)
             ForEach(finishedSessions.prefix(4)) { session in
                 Button { pastSession = session } label: {
                     SessionRow(session: session)
@@ -497,6 +532,14 @@ struct TodayView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    /// Only with a plan to log against. The sheet builds its rows from a plan
+    /// day, and a freestyle session remembered afterwards would be a list of
+    /// exercises picked from memory with nothing to check them against.
+    private var pastWorkoutAction: (label: String, perform: () -> Void)? {
+        guard let activePlan, activePlan.trainingDayCount > 0 else { return nil }
+        return ("Log past workout", { showingPastWorkout = true })
     }
 
     // MARK: - Actions
@@ -541,7 +584,7 @@ struct SessionRow: View {
                     .font(Theme.rounded(15, weight: .bold))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
-                Text("\(session.effortSets.count) sets · \(AppSettings.shared.weight(session.totalVolumeKg)) · \(session.duration.durationString)")
+                Text("\(session.effortSets.count) sets · \(AppSettings.shared.weight(session.totalVolumeKg)) · \(session.lengthText)")
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)

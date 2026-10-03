@@ -157,6 +157,19 @@ struct BackupRoundTripTests {
         _ = set(0x201, "dumbbell-curl", "Dumbbell Curl", order: 0, index: 0, weight: 14, reps: 12,
                 tracking: .weightReps, in: bare, offset: 60)
 
+        // Written down afterwards: closed at its own start, sets done but never timed.
+        let remembered = WorkoutSession(title: "Push", planName: "Push Pull", startedAt: base.addingTimeInterval(20_000))
+        remembered.id = uuid(3)
+        remembered.endedAt = remembered.startedAt
+        remembered.isLoggedAfterwards = true
+        context.insert(remembered)
+        let recalled = SetLog(catalogID: "barbell-bench-press", exerciseName: "Barbell Bench Press",
+                              exerciseOrder: 0, setIndex: 0, weightKg: 62.5, reps: 8, tracking: .weightReps)
+        recalled.id = uuid(0x301)
+        recalled.isCompleted = true
+        recalled.session = remembered
+        context.insert(recalled)
+
         for (offset, kg) in [(100.0, 80.2), (200, 79.9)] {
             context.insert(BodyMetric(date: base.addingTimeInterval(offset), weightKg: kg))
         }
@@ -237,7 +250,7 @@ struct BackupRoundTripTests {
         let sessionKeys = keys(in: sessions)
         for key in ["planDayID", "averageHeartRate", "maxHeartRate", "activeEnergyKcal", "healthWorkoutID",
                     "wasWatchDriven", "heartRateSource", "energySource", "heartRateReadings", "noteTags",
-                    "exerciseNotes", "notes", "endedAt"] {
+                    "exerciseNotes", "notes", "endedAt", "loggedAfterwards"] {
             check(sessionKeys.contains(key), "Fixture never exercises session field \(key) \(tag)")
         }
         for key in ["bodyMetrics", "customExercises", "loadScales", "hiddenExercises", "exerciseCatalog",
@@ -274,6 +287,17 @@ struct BackupRoundTripTests {
         check(bareSet != nil && Set(bareSet!.keys).isDisjoint(with: optional),
               "A set with nothing recorded gained keys through the round trip: "
               + "\(bareSet.map { Set($0.keys).intersection(optional).sorted() } ?? [])  \(tag)")
+
+        // A session logged afterwards goes out with no end, which would read as
+        // a workout that took no time, and comes back closed rather than open.
+        let rememberedOut = sessions.first { ($0["id"] as? String) == uuid(3).uuidString }
+        check(rememberedOut?["endedAt"] == nil && rememberedOut?["loggedAfterwards"] as? Bool == true,
+              "A session logged afterwards was exported with an end or without its flag \(tag)")
+        check(sessions.allSatisfy { $0["id"] as? String == uuid(3).uuidString || $0["loggedAfterwards"] == nil },
+              "A session logged as it happened was exported with loggedAfterwards \(tag)")
+        let rememberedIn = try fresh.fetch(FetchDescriptor<WorkoutSession>()).first { $0.id == uuid(3) }
+        check(rememberedIn?.isLoggedAfterwards == true && rememberedIn?.endedAt == rememberedIn?.startedAt,
+              "A session logged afterwards was restored open or unmarked \(tag)")
 
         // A second restore of the second export changes nothing either.
         let third = try BackupService.exportData(context: fresh, stamp: stampB)

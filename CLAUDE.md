@@ -90,6 +90,16 @@ xcodebuild -project GymTrack.xcodeproj -scheme GymTrackWatch -configuration Debu
 Build all three before claiming a change is done — the shared folder reaches the
 watch and the widgets, and breaking them is easy to miss.
 
+To put a build on the phone, use `sh scripts/install-phone.sh`, not Xcode's
+Run button. A free Apple ID signs for seven days counted from when the
+provisioning profile was made, and Xcode reuses a cached one, so a fresh
+install can have two days left; the script fetches new profiles first. It also
+records what was installed, and a background job (`--schedule`, installed)
+re-signs and reinstalls that same source every two days. Installing another
+way leaves the job unsure what is on the phone, and it stops and says so.
+The app shows a line on Today three days before its signing runs out; seeing
+it means the refresh has stopped reaching the phone.
+
 If every build suddenly exits 69, Xcode's licence needs re-accepting after a
 major upgrade (`sudo xcodebuild -license accept`). Only the user can run that.
 

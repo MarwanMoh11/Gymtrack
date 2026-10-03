@@ -265,6 +265,14 @@ final class WorkoutSession {
     /// seven hundred readings is a workout; over a dozen it is a sample.
     var heartRateReadings: Int?
 
+    /// True when the session was written down afterwards rather than logged as
+    /// it happened — a workout done while the app couldn't be opened. No clock
+    /// ran, so only the day of `startedAt` means anything: `endedAt` is set to
+    /// the same instant to close the session, and nothing may read a length,
+    /// a set time or a heart rate off it. Reading Health over that window would
+    /// file whatever the wrist saw at noon as the workout's.
+    var isLoggedAfterwards: Bool = false
+
     @Relationship(deleteRule: .cascade, inverse: \SetLog.session)
     var sets: [SetLog] = []
 

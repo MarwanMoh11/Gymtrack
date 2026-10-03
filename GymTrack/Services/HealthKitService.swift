@@ -718,8 +718,10 @@ final class HealthKitService {
     /// still arriving can be read again once more of it has; see
     /// `SetHeartRateAttribution.updates`.
     func backfillVitals(for session: WorkoutSession) async {
+        // A session logged afterwards has a window made up to hold its date,
+        // and whatever Health holds for it belongs to some other part of the day.
         guard AppSettings.shared.healthReadVitals, !session.isGoneFromStore,
-              let end = session.endedAt else { return }
+              !session.isLoggedAfterwards, let end = session.endedAt else { return }
         let sessionID = session.id
         // Heart rate is taken or left as a pair, so its source describes both
         // numbers: a peak from Health beside an average the wrist recorded

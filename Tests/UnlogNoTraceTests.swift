@@ -90,6 +90,7 @@ struct UnlogNoTraceTests {
         ("heartRateSourceRaw", .identity, { text($0.heartRateSourceRaw) }),
         ("energySourceRaw", .identity, { text($0.energySourceRaw) }),
         ("heartRateReadings", .identity, { text($0.heartRateReadings) }),
+        ("isLoggedAfterwards", .identity, { text($0.isLoggedAfterwards) }),
         ("sets", .identity, { text($0.sets.map(\.id).sorted { $0.uuidString < $1.uuidString }) }),
         ("exerciseNotes", .identity, { text($0.exerciseNotes.map(\.id)) }),
     ]

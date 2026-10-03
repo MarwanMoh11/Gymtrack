@@ -146,7 +146,14 @@ enum BackupService {
         var id: UUID
         var title: String
         var startedAt: Date
+        /// Absent on a session logged afterwards, which had no clock running.
         var endedAt: Date?
+        /// `true` on a session written down after the workout rather than
+        /// logged during it. Only the day of `startedAt` is meant; its hour is
+        /// a placeholder, and the session has no `endedAt`, no set times and
+        /// no heart rate. Its sets are what the lifter entered as done. Absent
+        /// on every session logged as it happened, and on older files.
+        var loggedAfterwards: Bool?
         /// What the lifter said about the whole session. Absent on a session
         /// nobody wrote about; older files wrote an empty string on every
         /// session, so it stays optional for them.
@@ -640,7 +647,11 @@ enum BackupService {
 
     private static func sessionDTO(_ session: WorkoutSession) -> SessionDTO {
         return SessionDTO(id: session.id, title: session.title, startedAt: session.startedAt,
-                          endedAt: session.endedAt,
+                          // The stored end is the start again, there only to
+                          // close the session; written out, it would read as a
+                          // workout that took no time.
+                          endedAt: session.isLoggedAfterwards ? nil : session.endedAt,
+                          loggedAfterwards: session.isLoggedAfterwards ? true : nil,
                           // Trimmed: a field that was opened and cleared again
                           // shouldn't reach the file as a note made of spaces.
                           notes: written(session.trimmedNotes), planName: session.planName,
@@ -1352,7 +1363,10 @@ enum BackupService {
                                       context: ModelContext) {
         let session = WorkoutSession(title: dto.title, planName: dto.planName, startedAt: dto.startedAt)
         session.id = dto.id
-        session.endedAt = dto.endedAt
+        session.isLoggedAfterwards = dto.loggedAfterwards == true
+        // Closed at its own start, as the past-workout sheet closes it. Left
+        // open, it would come back as a workout in progress.
+        session.endedAt = dto.endedAt ?? (session.isLoggedAfterwards ? dto.startedAt : nil)
         session.planDayID = dto.planDayID
         session.notes = dto.notes ?? ""
         session.averageHeartRate = dto.averageHeartRate

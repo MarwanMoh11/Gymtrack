@@ -15,8 +15,48 @@ enum SessionFactory {
         let session = WorkoutSession(title: day.name, planDayID: day.id, planName: plan?.name ?? "")
         context.insert(session)
 
+        for row in openingRows(for: day, history: history) {
+            let set = SetLog(
+                catalogID: row.item.catalogID,
+                exerciseName: row.item.name,
+                exerciseOrder: row.exerciseIndex,
+                setIndex: row.setIndex,
+                weightKg: row.weightKg,
+                reps: row.reps,
+                seconds: row.seconds,
+                targetRepsLow: row.item.targetRepsLow,
+                targetRepsHigh: row.item.targetRepsHigh,
+                tracking: row.item.tracking
+            )
+            set.session = session
+            context.insert(set)
+        }
+        // A plan may prescribe the same catalog exercise in several slots.
+        // The logger and watch treat it as one exercise, so those rows must
+        // follow one another with unique indices before either screen sees it.
+        session.normalizeExerciseSlots()
+        return session
+    }
+
+    /// One row as a day opens: its slot, and the numbers the progression
+    /// offers for it.
+    struct OpeningRow {
+        let item: PlanItem
+        let exerciseIndex: Int
+        let setIndex: Int
+        let weightKg: Double
+        let reps: Int
+        let seconds: Int
+    }
+
+    /// The rows `build` inserts, worked out without inserting anything. The
+    /// past-workout sheet offers the same numbers, and a draft held in the
+    /// store would be a session a cancel or a force-quit leaves behind.
+    @MainActor
+    static func openingRows(for day: PlanDay, history: [WorkoutSession]) -> [OpeningRow] {
         let items = day.orderedItems
         let lastTimes = lastPerformances(of: Set(items.map(\.catalogID)), in: history)
+        var rows: [OpeningRow] = []
         for (exerciseIndex, item) in items.enumerated() {
             let last = lastPerformance(of: item, among: items, merged: lastTimes[item.catalogID] ?? [])
             let suggestion = TrainingStats.suggestion(for: item, lastSets: last)
@@ -34,27 +74,17 @@ enum SessionFactory {
                 // copied onto a squat it would be exported as a set that lasted
                 // 45 seconds — a length nobody timed, read as measured.
                 let isTimed = item.tracking == .duration
-                let set = SetLog(
-                    catalogID: item.catalogID,
-                    exerciseName: item.name,
-                    exerciseOrder: exerciseIndex,
+                rows.append(OpeningRow(
+                    item: item,
+                    exerciseIndex: exerciseIndex,
                     setIndex: setIndex,
                     weightKg: startingWeight,
                     reps: isTimed ? 0 : startingReps,
-                    seconds: isTimed ? item.targetSeconds : 0,
-                    targetRepsLow: item.targetRepsLow,
-                    targetRepsHigh: item.targetRepsHigh,
-                    tracking: item.tracking
-                )
-                set.session = session
-                context.insert(set)
+                    seconds: isTimed ? item.targetSeconds : 0
+                ))
             }
         }
-        // A plan may prescribe the same catalog exercise in several slots.
-        // The logger and watch treat it as one exercise, so those rows must
-        // follow one another with unique indices before either screen sees it.
-        session.normalizeExerciseSlots()
-        return session
+        return rows
     }
 
     /// Last time's high-end reps belong to last time's load. Whenever the
