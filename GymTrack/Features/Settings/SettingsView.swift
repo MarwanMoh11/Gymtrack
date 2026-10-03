@@ -49,6 +49,22 @@ struct SettingsView: View {
         return count == 0 ? "All default" : "\(count) set up"
     }
 
+    /// The row exists only for a lifter the coach has reached: a proposal, a
+    /// decision, or a file that arrived and could not be read. Anyone else has
+    /// no way to tell the feature is there.
+    private var showsPlanReview: Bool {
+        let coach = CoachInbox.shared
+        return coach.proposal != nil || coach.latestDecision != nil || coach.unreadableReason != nil
+    }
+
+    private var planReviewSummary: String {
+        let coach = CoachInbox.shared
+        if coach.showsOnToday { return "Ready" }
+        if coach.unreadableReason != nil { return "Can't be read" }
+        guard let decision = coach.latestDecision else { return "Nothing to apply" }
+        return decision.decidedAt.formatted(.dateTime.month(.abbreviated).day())
+    }
+
     private struct AlertPayload: Identifiable {
         let id = UUID()
         let title: String
@@ -169,6 +185,25 @@ struct SettingsView: View {
                     Text("Sessions in Health, heart rate back from your watch, and logging from your wrist.")
                 }
                 .listRowBackground(Theme.surface)
+
+                if showsPlanReview {
+                    Section {
+                        NavigationLink {
+                            CoachHistoryView()
+                        } label: {
+                            HStack {
+                                Label("Plan review", systemImage: "checklist")
+                                Spacer()
+                                Text(planReviewSummary)
+                                    .font(Theme.rounded(13, weight: .medium))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    } footer: {
+                        Text("What your coach suggested, what you decided, and how it went.")
+                    }
+                    .listRowBackground(Theme.surface)
+                }
 
                 Section {
                     Button {

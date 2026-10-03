@@ -11,6 +11,7 @@ struct TodayView: View {
 
     @State private var showingDayPicker = false
     @State private var showingSettings = false
+    @State private var showingCoachReview = false
     @State private var showingPastWorkout = false
     @State private var pastSession: WorkoutSession?
 
@@ -43,6 +44,7 @@ struct TodayView: View {
                 VStack(spacing: 18) {
                     greeting
                     if let expiry = BuildExpiry.upcoming() { expiryNotice(expiry) }
+                    if CoachInbox.shared.showsOnToday { coachNotice }
                     heroCard
                     weekStrip
                     statsRow
@@ -67,6 +69,10 @@ struct TodayView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingCoachReview) {
+                NavigationStack { CoachReviewView(showsClose: true) }
+                    .gtSheetBackground()
+            }
             .sheet(isPresented: $showingDayPicker) {
                 DayPickerSheet(plan: activePlan) { day in
                     showingDayPicker = false
@@ -80,6 +86,27 @@ struct TodayView: View {
             }
             .navigationDestination(item: $pastSession) { SessionDetailView(session: $0) }
         }
+    }
+
+    // MARK: - Coach
+
+    /// Shown only while a review is waiting that has something to decide, and
+    /// never otherwise: no badge, no count, nothing to dismiss.
+    private var coachNotice: some View {
+        Button { showingCoachReview = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "checklist")
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+                Text("A plan review is ready")
+                    .font(Theme.rounded(13, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                DisclosureChevron()
+            }
+            .gtCard(padding: 12)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Signing
