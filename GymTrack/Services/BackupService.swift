@@ -115,7 +115,14 @@ enum BackupService {
         var items: [ItemDTO]
     }
 
-    struct ItemDTO: Codable {
+    struct ItemDTO: Codable, Equatable {
+        /// The slot's own identity, so a coach's proposal can name the exact
+        /// slot it means. Matching on the exercise instead is wrong the day a
+        /// plan holds the same lift twice, and on position is wrong the moment
+        /// a slot is added above it. Optional so older files, which carried
+        /// none, still decode; absent restores as a new ID, and so does one
+        /// the file repeats, because a slot is found by this alone.
+        var id: UUID?
         var catalogID: String
         var name: String
         var order: Int
@@ -773,9 +780,9 @@ enum BackupService {
     /// is measured, and none that are only a default or a zero standing in for
     /// "none". Read through `tracking`, the same answer the plan screen and
     /// the logger use, so the file prescribes what the app shows.
-    private static func itemDTO(_ item: PlanItem) -> ItemDTO {
+    static func itemDTO(_ item: PlanItem) -> ItemDTO {
         let timed = item.tracking == .duration
-        return ItemDTO(catalogID: item.catalogID, name: item.name, order: item.order,
+        return ItemDTO(id: item.id, catalogID: item.catalogID, name: item.name, order: item.order,
                        targetSets: item.targetSets,
                        targetRepsLow: repTarget(item.targetRepsLow, tracking: item.tracking),
                        targetRepsHigh: repTarget(item.targetRepsHigh, tracking: item.tracking),
@@ -1190,7 +1197,9 @@ enum BackupService {
         // stand in for the first wherever a session is matched to its plan, and
         // a repeated plan or session ID does the same to whatever cites it. A
         // hand-edited file or a copy-pasted block is how it happens. Plan slots
-        // have no ID in the file, so there is nothing to compare there.
+        // are not compared: their ID is optional, and a repeated one is
+        // replaced by a new one on restore rather than refused, since nothing
+        // in the file cites a slot.
         var seenPlanIDs: Set<UUID> = []
         var seenDayIDs: Set<UUID> = []
         // A custom exercise is looked up by its ID, from a set, a plan slot and
@@ -1324,6 +1333,7 @@ enum BackupService {
             context.insert(record)
         }
 
+        var takenItemIDs: Set<UUID> = []
         for dto in archive.plans {
             let plan = Plan(name: dto.name, summary: dto.summary, isActive: dto.isActive)
             plan.id = dto.id
@@ -1348,6 +1358,11 @@ enum BackupService {
                                         targetWeightKg: itemDTO.targetWeightKg ?? 0,
                                         restSeconds: itemDTO.restSeconds)
                     if let seconds = itemDTO.targetSeconds { item.targetSeconds = seconds }
+                    // Kept so a proposal written against the exported plan
+                    // still finds its slot after a restore. One the file
+                    // repeats keeps its first owner; the rest stay as new.
+                    if let id = itemDTO.id, !takenItemIDs.contains(id) { item.id = id }
+                    takenItemIDs.insert(item.id)
                     item.notes = itemDTO.notes ?? ""
                     item.trackingRaw = slotTracking(of: itemDTO, customTracking: customTracking)?.rawValue
                     item.day = day

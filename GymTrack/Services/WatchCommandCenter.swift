@@ -474,6 +474,7 @@ final class WatchCommandCenter {
         WatchBridge.shared.clearMetrics()
         publishWidgets(context: context)
         recordToHealth(session, context: context)
+        NotificationCenter.default.post(name: .gymTrackWorkoutFinished, object: nil)
     }
 
     /// Deletes a running session and says so everywhere a Discard is heard.

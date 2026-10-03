@@ -226,6 +226,14 @@ enum SessionFactory {
     }
 }
 
+extension Notification.Name {
+    /// Posted on the main thread once a workout has been finished and saved,
+    /// from the phone's Finish and from the wrist's alike. Anything that wants
+    /// to react to a finished session listens for this instead of being called
+    /// from two places that would each have to remember it.
+    static let gymTrackWorkoutFinished = Notification.Name("GymTrack.workoutFinished")
+}
+
 /// Drives an in-progress session. The session and its sets are SwiftData
 /// objects written as you go, so force-quitting mid-workout loses nothing —
 /// the app finds the unfinished session on next launch and offers to resume.
@@ -1582,6 +1590,7 @@ final class ActiveWorkout {
         WatchBridge.shared.clearMetrics()
         WidgetPublisher.updateSession(nil)
         recordToHealth()
+        NotificationCenter.default.post(name: .gymTrackWorkoutFinished, object: nil)
         Haptics.success()
         return true
     }

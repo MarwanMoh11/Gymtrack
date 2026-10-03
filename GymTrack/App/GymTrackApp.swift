@@ -78,6 +78,26 @@ struct GymTrackApp: App {
         // background to hand it a watch message, and the link has to be up and
         // able to apply it without a view hierarchy.
         WatchCommandCenter.shared.configure(container: container)
+
+        // After the watch link, which must be up first. The coach loop only
+        // reads and writes its own files, so nothing above waits on it.
+        configureCoach(container: container)
+    }
+
+    /// Brings up the coach loop: the inbox, and the snapshot the Mac pulls.
+    /// A finished workout, from the phone or the wrist, asks for a fresh one.
+    private static func configureCoach(container: ModelContainer) {
+        CoachInbox.shared.configure(container: container)
+        CoachSnapshot.shared.start(container: container)
+        NotificationCenter.default.addObserver(forName: .gymTrackWorkoutFinished, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { CoachSnapshot.shared.request() }
+        }
+        // A proposal can be pushed while the app is open, so the inbox is read
+        // again whenever the app comes forward.
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
+                                               object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { CoachInbox.shared.reload() }
+        }
     }
 
     private func retryStore() {
