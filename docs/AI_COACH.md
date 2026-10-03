@@ -1,642 +1,604 @@
-# AI coach: product direction and proof standard
+# AI coach: the coach loop
 
-Status: design note, not an implemented feature.
-
-This document records the intended direction for an AI coach so later work does
-not have to reconstruct it from conversation. It describes a local-first
-workflow, the boundary between ordinary progression and deeper coaching, and
-the evidence required before GymTrack should claim that the coach helps.
+Status: design note for a feature under construction. Rewritten 2026-10-03,
+after the owner chose a simpler design than the research draft proposed. It
+records the loop, the contract between the phone and the Mac, the policy the
+coach follows and how we will tell whether it helps.
 
 ## Decision
 
-Do not build a bespoke model orchestration platform inside GymTrack. Keep the
-phone fast, offline, and deterministic during a workout. Periodically hand a
-structured snapshot to a frontier model running through an existing agent
-harness on the user's Mac, then import a validated, user-approved plan proposal.
+A review of the lifter's training runs as a conversation in Claude Code on the
+Mac, weekly to monthly, when the lifter types `/coach-review`. The phone stays
+fast, offline and deterministic. The app never touches the network; the Mac does
+the reaching, over the same developer connection the install script uses.
 
-The durable GymTrack work is the contract around the model:
+The goal is muscle size and how the physique looks, ahead of strength. That
+orders the coach's levers (see "Coaching policy") and decides what counts as
+progress (see "Definitions").
 
-1. Export observations without inventing missing data.
-2. Explain the meaning and provenance of every field.
-3. Constrain what a proposal is allowed to change.
-4. Show a readable diff and rationale before applying it.
-5. Record what was proposed, accepted, edited, rejected, and later observed.
-6. Evaluate the coach against the current progression system before making any
-   effectiveness claim.
+The review is interactive on purpose. The coach can ask about what the data
+cannot show, such as a sore shoulder that was never tagged or a week of travel,
+and the lifter can push back before a change reaches the phone. That exchange is
+the main quality gain over a script that emits a plan, and it costs nothing the
+lifter was not already paying, since a review happens at the Mac anyway.
 
-The frontier model is replaceable. The data contract, audit trail, guardrails,
-and evaluation design are the product.
+Three things are automated because each saves effort at every review: the app
+writes its export into its own Documents folder, and the Mac pulls it and pushes
+the proposal back with `devicectl`; proposals are reviewed, applied and undone
+on the phone; and ratings are built into the app. Everything else the research
+draft pictured is cut, each with the event that would bring it back (see
+"Later, if needed").
 
-## System shape
+The durable work is the contract around the model, which is replaceable: export
+observations without inventing missing data, limit a proposal to six kinds of
+edit the phone can apply and undo, show a before and after the phone computed,
+and record what was proposed, accepted, declined, reverted and rated. GymTrack
+has one lifter, and everything here is sized for that.
 
-```text
-Workout on iPhone or Watch
-        |
-        v
-Structured session history in SwiftData
-        |
-        +--> Immediate, deterministic suggestions on the phone
-        |    (double progression, legal machine rungs, obvious holds/backoffs)
-        |
-        v
-User-initiated review snapshot, approximately monthly
-        |
-        v
-Frontier agent on the Mac reads the snapshot and performs analysis
-        |
-        v
-Versioned PlanProposal + evidence + uncertainty + evaluation criteria
-        |
-        v
-GymTrack validates it and shows a before/after diff
-        |
-        v
-User accepts, edits, or rejects each material change
-        |
-        v
-Accepted plan becomes a new, traceable training block
+## How a review works
+
+1. The lifter runs `/coach-review`. The Claude Code session that answers is
+   "the coach".
+2. `coach pull` copies the app's snapshot and decisions off the phone with
+   `xcrun devicectl` into a new review folder. When the phone is out of reach,
+   `coach pull --file` takes a manual export instead.
+3. `coach stats` computes the numbers the definitions below describe. Arithmetic
+   belongs to code: in Google's evaluation of LLM agents over wearable data, a
+   model reasoning over numbers in text answered 22% of objective numerical
+   questions correctly and an agent that ran analysis code answered 84%
+   (Merrill 2026). When an exercise has too few comparable exposures to say
+   anything, the stats say so, and "keep the plan" is a complete review. A review
+   is a decision point, not an obligation to manufacture novelty.
+4. The coach reads the stats and notes, first checking the outcome of every
+   change applied since the last review (see "How we will know it helps"). It
+   asks the lifter about anything the data cannot explain, may ask for this
+   month's tape measurements (skippable), and drafts at most three changes plus
+   any advice.
+5. `coach submit` validates the draft, then hands it to the reviewer, a separate
+   process (next section), for two rounds. A change still disputed after round 2
+   is flagged, and the lifter decides at the Mac whether to keep it.
+6. `coach push` copies the final proposal into the app's inbox on the phone.
+7. On the phone the lifter reads it, accepts or declines each change, applies
+   them in place, can undo, and can rate it (see "The phone side").
+8. Decisions and ratings travel back in `decisions.json` with the next pull,
+   which is where the next review starts.
+
+Nothing nags: neither the app nor the Mac says a review is due. Everything for
+reviews lives in `COACH_HOME` (default `~/Documents/GymTrackCoach`): `profile.md`
+at its root, holding the standing context (the muscles that matter most for the
+look he wants, equipment limits, old injuries, anything not to propose), and one
+folder per review at `reviews/YYYY-MM-DD/` (suffix `-2`, `-3` for a second one
+the same day). It holds real history, so it never enters the git repo.
+
+## The reviewer
+
+The reviewer is a skeptical hypertrophy coach, run by `coach submit` as a
+completely separate `claude -p` process: fresh context, no tools, never shown the
+coach's conversation or reasoning, and told only that "a coach" proposed the
+changes. It gets the stats, the profile and the notes, and the changes as data
+(what changes on which slot, the lever, the numbers cited), not the coach's
+prose. It answers through files in two rounds. Round 1 is an agreement or
+objection per change, with a score and a line. The coach then revises or defends
+each change. Round 2 is the reviewer's final verdict. `coach submit` writes the
+verdicts into each change's `review` field; the coach never does. The reviewer's
+prompt lives in `tools/coach/`, not in the coach's skill, so the coach cannot
+read it and write to please it.
+
+**Why it is separate.** By the time the coach drafts a change it has spent a
+conversation absorbing the lifter's answers and its own reasoning, and a reviewer
+inside that context would inherit both. A fresh context cannot be talked into
+reasoning it never receives.
+
+**What it will not do.** It is the same model, so it is not an independent second
+opinion. When two models are both wrong they pick the same wrong answer about 60%
+of the time against 33% by chance, and more accurate models are more alike in
+their mistakes (Kim 2025; Goel 2025). Models also favour their own writing
+(Panickssery 2024), which is why the reviewer gets data, not prose. A shared
+misconception about training, such as how much volume a muscle tolerates, would
+pass both. The defences sit elsewhere: a written policy, small reversible
+changes, and the lifter's rating.
+
+**What it is for.** Catching slips in reading this lifter's data: a pain note the
+coach missed, noise read as a trend, a cited number that is not in the stats, a
+change that contradicts the profile. A fresh session does that well. Its
+agreeing is not evidence a change is right; the lifter's rating stays the final
+word, because only results show whether a change worked. A reviewer from a
+different model family was considered and dropped as micromanaging for one lifter
+(see "Later, if needed").
+
+## The phone side
+
+A lifter who never runs a review pays nothing for any of this: an inbox nobody
+fills, a snapshot file, and one row in Settings.
+
+- **Today.** When a proposal is waiting, one quiet line. No badge, no
+  notification, nothing when a review falls due.
+- **Review screen.** The summary, then one card per change: the slot before and
+  after as the phone computes it, the reason, and the reviewer's line (verdict, score, note, and a mark when the change is
+  disputed and was kept anyway). Each change is accepted or declined on its own;
+  advice is text with no button. Refused while a workout is running, as a restore
+  is.
+- **Stale changes.** The phone checks every change against the live plan. One
+  whose `expect` values no longer match its slot is marked stale: shown, never
+  applicable. There is no rebase; the answer is the next review. Sessions logged
+  since the export do not make a change stale, but a `pain` tag logged on that
+  slot since is shown on its card.
+- **Applying.** One save, editing the existing plan items in place. Day and item
+  IDs survive, so the rotation, Today and the widgets carry on; copying the plan
+  would mint new day IDs, and `Plan.nextInRotation` keys on them, so the rotation
+  would restart at day one.
+- **Undo is not revert.** Undo on the screen where the change was applied, before
+  leaving it, is a mis-tap: the plan is restored and the decision record erased,
+  as if nothing happened (house rule 2). Revert later, from Settings, abandons a
+  change that was trained on, which is information, so it restores the plan and
+  stamps `revertedAt`. Revert refuses, and says why, when the touched slots no
+  longer hold the applied values because the lifter edited them since.
+### Ratings
+
+A rating is a score and an optional note on a decision, with the time given. It
+costs zero taps when unused. The lifter mostly rates himself, usually twice: when
+deciding, on whether the change looks reasonable, and again after weeks of
+training under it, on whether it worked. The second carries the evidence.
+
+Sometimes the phone is handed to someone else, a friend who trains or a coach at
+the gym. The app records who rated, `self` or `other` with an optional name, and
+a rating by someone else is never filed as the lifter's, because false detail is
+worse than missing detail. In hand-off mode the reviewer's verdict is hidden from
+the other rater until they have rated. A person who sees "the reviewer agrees"
+tends to go along, and the reason to ask a second person is an independent
+judgement.
+
+## Data contract
+
+The two sides are built to this section. Neither changes it alone.
+
+### Paths
+
+On the phone, in the app's Documents directory:
+
+| Path | Written by | What |
+|---|---|---|
+| `Documents/Coach/snapshot.json` | app | The full backup archive, the same bytes and format as Settings, "Export a backup" (`BackupService.Archive`, version 2). |
+| `Documents/Coach/decisions.json` | app | Decisions and ratings (below). |
+| `Documents/Coach/Inbox/proposal.json` | Mac, `coach push` | The proposal awaiting a decision. The app creates `Inbox/` at launch so the destination always exists. |
+| `Documents/Coach/Inbox/ratings.json` | app | Ratings given before the proposal is decided. They move into the decision record when it is decided, and are dropped if a new proposal replaces this one undecided. |
+
+The app writes `snapshot.json` atomically when a workout finishes, when a plan
+is saved, when a proposal is applied or reverted, and at launch if the file is
+missing, never on the logging path. `xcrun devicectl` reaches the container on
+development-signed builds, which is all a free Apple ID makes:
+
+```
+xcrun devicectl device copy from --device <id> --domain-type appDataContainer \
+  --domain-identifier com.marwanmohamed.gymtrack --source Documents/Coach/snapshot.json --destination <local>
+xcrun devicectl device copy to   --device <id> --domain-type appDataContainer \
+  --domain-identifier com.marwanmohamed.gymtrack --source <local> --destination Documents/Coach/Inbox/proposal.json
 ```
 
-The cadence is not a promise that the plan must change every month. "Keep the
-plan" is a valid and often preferable conclusion. A review is a decision point,
-not an obligation to manufacture novelty.
+### What the export carries, and how to read it
 
-## Responsibilities
+`PlanDTO` and `DayDTO` already carried their `id`; `ItemDTO` gains an optional
+one, written from the entity's existing `id`. Restore keeps it when present and
+mints one when it is absent or repeated. A proposal can then name a slot without matching on exercise or
+position. `version` stays 2 and older backups still decode. The comments in
+`BackupService.swift` list every field; these are the ones a misreading would
+turn into false detail:
 
-### The phone
+- An absent key means "not measured" or "not prescribed", never zero. A squat has
+  no `seconds`, a plank no `reps`, a slot with no target no target key.
+- `effort` (`easy`, `solid`, `hard`, `allOut`) is the field to read. `rpe` beside
+  it is a bucket code, not a point RPE: `easy` is stored as 6 though it only
+  means "three or more reps left". An `rpe` with no `effort` predates 2026-09-19
+  and has no word attached; neither key means not rated.
+- A session with no `heartRateSource` or `energySource` has unknown origin and
+  must not be read as phone-only or as low effort.
+- A `loggedAfterwards: true` session counts as training, but nothing timed
+  (duration, rests, density) may be worked out from it.
+- Notes carry the tags `pain`, `formBreakdown`, `substitution`, `feltStrong` and
+  `feltFlat`. `hiddenExercises` are exercises the lifter trimmed because the gym
+  lacks them, and are never proposed. Dates are UTC; `timeZone` gives the local day.
 
-The phone owns anything that must be instant, predictable, or available without
-a connection:
+### proposal.json
 
-- logging sets and preserving unfinished sessions;
-- rest timing and Watch synchronization;
-- unit conversion and equipment-specific load rungs;
-- the existing double-progression rules;
-- conservative next-set or next-session suggestions;
-- proposal validation and the approval experience;
-- the canonical history of plans, sessions, and accepted changes.
+```json
+{
+  "format": "gymtrack-coach-proposal",
+  "version": 1,
+  "id": "UUID",
+  "createdAt": "2026-10-03T18:20:00Z",
+  "planID": "UUID of the active plan the changes target",
+  "summary": "One or two plain sentences for the phone.",
+  "changes": [
+    {
+      "id": "c1",
+      "kind": "setSets",
+      "dayID": "UUID",
+      "itemID": "UUID",
+      "expect": { "targetSets": 3 },
+      "to": { "targetSets": 4 },
+      "reason": "Short plain sentence shown on the phone.",
+      "lever": "volume",
+      "evidence": [ { "metric": "chest.weeklyFractionalSets", "value": 7.5 } ],
+      "review": { "verdict": "agree", "score": 4, "note": "One line.", "disputed": false }
+    }
+  ],
+  "advice": [ "Not plan edits, such as ending the last set of each lift nearer failure." ]
+}
+```
 
-These paths must remain usable when the AI coach has never been configured.
+Both validators (`coach submit`, and the phone against its live plan) enforce:
 
-### The frontier agent
+- At most three changes, one per `itemID`, with unique change IDs. `planID` is the
+  active plan and every `dayID` and `itemID` exists in it.
+- `expect` matches the item's current values exactly. That is the whole
+  staleness test; there is no plan fingerprint.
+- `reason`, `lever` and `evidence` are required. `evidence` pairs name keys from
+  `stats.json`, which the reviewer checks. `lever` is one of `effort`, `volume`,
+  `priority`, `exerciseChoice`, `pain`, `repRange`, `rest`.
+- `review` is written by `coach submit` and may be absent, in which case the phone
+  shows no reviewer line. `disputed: true` means the reviewer still objects after
+  round 2 and the lifter chose to keep the change.
+- `advice` is optional. Unknown keys are ignored. A key with no value is omitted,
+  never `null`.
 
-The agent handles slower questions whose answer needs history and synthesis:
+Six kinds, and nothing else is accepted:
 
-- distinguish a one-session fluctuation from a persistent plateau;
-- compare performance at similar loads, rep ranges, and reported effort;
-- find deterioration across sets, exercises, days, and weeks;
-- determine whether extra volume is producing progress or only fatigue;
-- notice repeated substitutions, skipped movements, shortened sessions, or
-  equipment constraints;
-- assess session density, measured rest, duration, exercise order, and recovery
-  patterns without treating them as equivalent signals;
-- propose machine changes, set-count changes, weekly redistribution, deloads,
-  or a different progression method when the evidence warrants them;
-- state what evidence would falsify its recommendation.
+| kind | needs | expect | to | limits |
+|---|---|---|---|---|
+| `setSets` | dayID, itemID | `targetSets` | `targetSets` | exactly one more or one fewer; result 1 to 10 |
+| `setRepRange` | dayID, itemID | `targetRepsLow`, `targetRepsHigh` | same keys | 1 <= low <= high <= 30 |
+| `setRest` | dayID, itemID | `restSeconds` | `restSeconds` | 30 to 600 |
+| `substitute` | dayID, itemID | `catalogID` | `catalogID`, `name` | target is in the exported catalog and not timed; sets, reps and rest carry over; no load is set |
+| `addSlot` | dayID | `{}` | `catalogID`, `name`, `targetSets`, `targetRepsLow`, `targetRepsHigh`, `restSeconds`, optional `afterItemID` (absent means end of day) | same limits; not a rest day; not timed |
+| `removeSlot` | dayID, itemID | `catalogID` | `{}` | the day keeps at least one item |
 
-The agent must distinguish facts, derived metrics, and hypotheses. It may infer
-that a pattern is consistent with fatigue; it may not rewrite that inference as
-a measured recovery score.
+### decisions.json
 
-## Information already available
+```json
+{
+  "format": "gymtrack-coach-decisions",
+  "version": 1,
+  "decisions": [
+    {
+      "proposalID": "UUID",
+      "receivedAt": "ISO8601",
+      "decidedAt": "ISO8601",
+      "changes": [ { "id": "c1", "decision": "accepted", "note": "optional" } ],
+      "appliedAt": "ISO8601, absent when nothing was applied",
+      "before": [ { "dayID": "UUID", "itemID": "UUID", "item": { "...enough to restore it exactly, order included..." } } ],
+      "after": [ "same shape as before: what the apply wrote, so a later revert can tell whether the slot was edited since" ],
+      "revertedAt": "ISO8601, absent unless reverted later",
+      "ratings": [ { "rater": "self", "score": 4, "note": "optional", "ratedAt": "ISO8601" },
+                   { "rater": "other", "raterName": "optional", "score": 3, "ratedAt": "ISO8601" } ]
+    }
+  ]
+}
+```
 
-`BackupService.Archive` is the natural read model. Version 2 already carries:
+A change's `decision` is `accepted`, `declined` or `stale`. This is a file in
+Documents, not a SwiftData entity: the Mac reads it directly and it never needs
+migrating with the store.
 
-- active and historical plans, including days, exercise order, target sets and
-  rest intervals, with a rep range only on a slot counted in reps, a hold time
-  only on a timed slot, each only where it is above zero, a target load only
-  where one was set, and notes only where somebody wrote one;
-- session start and end times, and session notes, exercise notes and note tags
-  wherever any were written;
-- every logged set's exercise, load and completion time, with `reps` only on a
-  set counted in reps and `seconds` only on a timed one, never both; its rep
-  targets only where they are above zero; and its start only where the lifter
-  announced it;
-- optional set effort, as the answer the lifter gave. `effort` is one of `easy`
-  (three or more reps left), `solid` (two), `hard` (one) or `allOut`, and is
-  written only where the stored value is exactly one of those four answers. It
-  is the field to read. `rpe` sits beside it for restore and older readers, and
-  **it is a bucket code, not a point RPE**: `easy` is stored as 6, which by the
-  RPE definition would be four reps in reserve, but the lifter only said
-  "three or more". Treating `rpe: 6` as a measured RPE 6 understates how much
-  was left on an Easy set. The top-level `effortScale` (`rpe: "bucketCode"`,
-  with the four buckets and their codes) says so inside the file. Before
-  2026-09-19 the same key held five choices, 6 to 10, so a set with an `rpe`
-  and no `effort`, such as a 7 or an 8.5, is an older rating with no word
-  attached, and nothing here says what it was meant as. A set with neither key
-  was not rated. `settings.trackRPE` is whether the app was asking when the file
-  was written: the setting at export, not a history of it, so it cannot tell
-  a month of unanswered sets from a month with the question off;
-- measured versus inferred per-set heart-rate windows;
-- session heart rate, energy, Watch provenance, and body-weight history. The
-  source of the session numbers is stated where it is known: `heartRateSource`
-  and `energySource` are `watchWorkout` (the watch app recorded the workout) or
-  `healthSamples` (read back from Health, and kept only where at least a dozen
-  readings, one a minute on average, spanned at least half the session, and,
-  for energy, only what a wrist-worn device wrote). `heartRateReadings` counts
-  the readings behind the average and peak where the app counted them. Numbers
-  Health held too thinly to vouch for are not filed at all, and energy under
-  one kilocalorie is left out. A session **without a source key** is one of
-  unknown origin, such as any stored before this was recorded, and must not be
-  read as phone-only or as low effort;
-- load-nudge offers and whether they were taken or declined;
-- drop-set and cluster continuations, so one extended effort is not mistaken for
-  several collapsing working sets;
-- exercise metadata and each machine's unit and legal increment, for every
-  exercise the plans and sessions name: `effectiveLoadScales` gives the rung the
-  logger uses, marked `correction` where the lifter set it and `derived` where
-  the app worked it out from the equipment, so a proposed load can be checked
-  against a step the machine really has. `loadScales` still lists corrections
-  only;
-- a stable ID on every set, and the plan day each session was started from
-  (`planDayID`, the same ID a plan day carries; absent where there was none),
-  so a proposal can cite a set and adherence can be computed without matching
-  free-text names. Restore keeps set IDs, so a citation survives a restore, and
-  a file that repeats one is refused;
-- sessions written down afterwards, for a workout the app could not log as it
-  happened: `loggedAfterwards: true`. Only the day of `startedAt` is meant, its
-  hour being a placeholder; the session has no `endedAt`, its sets have no
-  times, and it carries no heart rate or energy. Its sets are what the lifter
-  entered as done, so they count as training, but nothing timed (duration,
-  rests, density) may be worked out from it;
-- where and when the file was written: `exportedAt`, `timeZone` (an IANA
-  identifier, such as `Africa/Cairo`), `appVersion` and `appBuild`. Every date
-  is UTC and a plan day's `weekday` is the lifter's local one, so the zone is
-  what puts a late-evening session on the right day. Each key is absent where
-  unknown.
+## Definitions the coach reasons with
 
-The file's order is defined: sessions by `startedAt` then ID, sets by exercise
-order then set index (so a `continues` row follows the set it continues),
-plans by `createdAt`, days and slots by `order`, and everything else by a
-stable key, with keys sorted. Two exports of an unchanged store differ only in
-`exportedAt`, so hash the file with that key set aside.
+`coach stats` computes these, and the coach does not redefine them in a review.
 
-The existing export rules remain non-negotiable: missing is not zero, inferred
-is not measured, and an undone action leaves no analytical trace. A reader must
-take an absent key as "not measured" or "not prescribed", never as zero: a
-squat has no `seconds`, a plank has no `reps`, and a slot with no target has no
-target key at all.
+**Working set.** A completed set with its continuations folded in: a drop or
+cluster row (`continues`) belongs to the set before it and is never a separate
+effort. Sets in a `loggedAfterwards` session count, but contribute nothing timed.
 
-Useful future signals should be added only when they are low-friction and have
-clear semantics. Candidates include pain or discomfort, the reason for an
-exercise substitution, why a set ended, technique breakdown, equipment
-availability, and a very small readiness check. None may block logging or nag a
-user who ignores it.
+**Comparable exposure.** One session's working sets of one exercise where the
+exercise (`catalogID`), its load scale and its tracking are unchanged and the
+session carries no `substitution` tag for it. A machine change starts a new
+series; it is not a regression.
 
-## Intervention ladder
+**Performance.** For a reps set of twelve reps or fewer, the Epley estimate the
+app already uses, capped at twelve for the reason `TrainingStats` gives:
+prediction equations are reasonably accurate up to about ten reps (LeSuer 1997),
+and a lifter's sense of reps left degrades past twelve (Halperin 2022). For longer
+sets, reps at the session's most-used load, compared only with exposures at that
+load; for a timed set, seconds held at the same load. An exposure's performance
+is its best working set, with the mean of the rest kept beside it so a collapsing
+back-off stays visible.
 
-The agent should choose the smallest change supported by the history:
+**Noise.** A change counts only if it is larger than this lifter's
+session-to-session wobble on that exercise, the typical error of performance
+across consecutive stable exposures, estimated from his own data because
+individuals differ markedly in it (Hecksteden 2018). Until an exercise has six
+comparable exposures its noise is unknown, and nothing about it may be called a
+change.
+
+**Plateau.** No improvement larger than noise in an exercise's best comparable
+performance across at least four exposures spanning at least three weeks, while
+the effort answers are not trending easier, and with no pain tag, swap,
+shortened session or logged-afterwards entry in the window to explain it. One bad
+session is never a plateau.
+
+**Effort.** The four answers are ordinal buckets, not numbers. Trust them more on
+sets of twelve reps or fewer and on later sets of an exercise. People tend to
+underestimate their reps left by about one (Halperin 2022), so a run of `hard`
+may sit nearer two reps in reserve than one, and `easy` means "probably three or
+more", nothing finer. Never convert the buckets to percentages of a one-rep max.
+
+**Weekly volume.** Working sets per muscle per local week, counted fractionally:
+one for the exercise's first listed muscle and a half for each further one. That
+counting predicted both hypertrophy and strength best in the largest
+dose-response meta-regression to date, with diminishing returns that come sooner
+for strength than for size (Pelland 2025). More sets is never the default answer
+to a stall.
+
+**Adherence.** For a session started from a plan day, working sets logged
+against the slots the day held and the rep targets the sets recorded. For a
+week, plan days trained against plan days due.
+
+**Size.** GymTrack measures performance, not muscle. Comparable performance in
+the six-to-fifteen-rep range, at comparable effort, is the working proxy for
+growth, and only a proxy: reps can rise from skill, or from bodyweight gained as
+fat, so body-weight history is read beside it. A direct measure is optional and
+never on the phone: the coach may ask for this month's tape measurements (arm,
+chest, waist, thigh), which the lifter can skip. They stay in the review folder,
+weighed lightly because a tape is noisy, and a skipped month is absent, never
+carried forward. The waist tells lean gain from fat gain.
+
+## Coaching policy
+
+### The intervention ladder
+
+The coach chooses the smallest change the history supports:
 
 1. Keep the current plan.
-2. Adjust the next load or repetition target.
+2. Adjust a repetition target or rest.
 3. Add or remove one set.
 4. Reorder or substitute one exercise.
 5. Redistribute volume across the week.
 6. Change the progression or set methodology.
 7. Replace the training block.
 
-Large interventions require stronger and more persistent evidence. A single bad
-session must not trigger a new program. Methodology changes should normally
-require multiple comparable exposures, a stated hypothesis, and a way to judge
-the result.
-
-An accepted change should read like an experiment:
-
-```text
-Hypothesis
-Chest volume is currently above recoverable capacity.
-
-Evidence
-The final press set has declined at comparable load and effort in five
-consecutive exposures while earlier sets remained stable.
-
-Change
-Reduce weekly press volume by one effort set for four weeks.
-
-Success criterion
-Repetitions or estimated strength improve at comparable effort without lower
-weekly adherence.
-
-Review
-After six comparable exposures, or sooner if pain or a sharp decline appears.
-```
-
-## Thin integration, not a custom harness
-
-A future command-line or Xcode-adjacent adapter only needs three conceptual
-operations:
-
-```text
-gymtrack export-review
-frontier-agent reads the exported snapshot and writes PlanProposal.json
-gymtrack validate-and-preview PlanProposal.json
-```
-
-The exported review package should be read-only. The agent must never edit the
-SwiftData store or an ordinary backup in place. A proposal imports through app
-code after schema validation and explicit user approval.
-
-If the selected frontier service processes data in the cloud, the review flow
-must say so before upload. GymTrack itself remains accountless and serverless;
-that does not make a separately chosen model provider local or private.
-
-## Maximum-quality model workflow
-
-No model can guarantee a perfect training decision. "Perfect quality" here
-means making errors visible, difficult to introduce, and easy to reverse. The
-model supplies judgment; deterministic code supplies arithmetic and structural
-truth; a second review challenges the judgment; the user remains the final
-decision-maker.
-
-### Current model choice
-
-This ranking is time-sensitive and was last reviewed on 2026-09-19. Re-run the
-GymTrack coach evaluation before changing models rather than treating this list
-as permanent.
-
-For the complete-history review, the current first candidate is **Claude Fable
-5.1 at maximum effort**. The work resembles long-context research and knowledge
-work: understand a longitudinal record, use analysis tools, preserve uncertain
-and missing information, and turn a small number of defensible conclusions into
-a coherent plan. **GPT-6 Astra at xhigh or maximum effort** is the co-finalist
-and is particularly suitable when the workflow already runs in Codex or relies
-heavily on code execution and strict structured output.
-
-The preferred high-assurance arrangement is:
-
-```text
-GymTrack review export
-        |
-        v
-Claude Fable 5.1 Max: primary evidence review and plan proposal
-        |
-        v
-GPT-6 Astra xhigh/max: independent grounding, safety, and coherence audit
-        |
-        v
-Deterministic GymTrack schema and equipment validator
-        |
-        v
-Human reviews the evidence and accepts, edits, or rejects the changes
-```
-
-If only one provider or harness is available, either Fable 5.1 Max or Astra
-xhigh is a reasonable starting point. Convenience matters: a model that can
-reliably run the required tools and complete the whole protocol is better than a
-slightly stronger model used as an unstructured chatbot.
-
-Chinese frontier models belong in the bake-off rather than being dismissed by
-origin. Current candidates include Qwen3.8-Max and Kimi K3 for million-token,
-long-horizon knowledge work, with DeepSeek V4 and GLM-5.3 as potentially strong
-cost-efficient analysts and critics. None has been validated specifically for
-GymTrack. Open-weight frontier models such as Kimi K3 are far too large to run
-at frontier quality on an ordinary MacBook; in that setup the Mac runs the
-harness while a provider performs inference. A smaller local model improves
-privacy but must be evaluated as a different, lower-capability candidate.
-
-Current vendor references:
-
-- Claude Fable 5.1: https://www.anthropic.com/claude/fable
-- GPT-6 Astra: https://developers.openai.com/api/docs/models/gpt-6-astra
-- Qwen3.8-Max:
-  https://www.alibabacloud.com/en/press-room/alibaba-unveils-qwen3-8-max
-- Kimi K3: https://www.kimi.com/en/blog/kimi-k3
-- DeepSeek V4: https://deepseek.com/en/news/v4-preview/
-- GLM models: https://autoclaw.z.ai/models/
-
-These pages describe provider capabilities, not proof of coaching quality. The
-model that wins GymTrack's blinded evaluation is the model GymTrack should use.
-
-### Package the history for analysis
-
-Do not convert the history into one long narrative and ask the model what it
-thinks. Supply a review package containing:
-
-- the untouched versioned JSON export and its hash;
-- a short data dictionary explaining optional fields and provenance;
-- deterministic tables for exercise exposures, performance trends, weekly
-  effort sets, volume, duration, measured rest, reported effort, substitutions,
-  plan adherence, and missingness;
-- the active plan and previous plan revisions;
-- accepted, edited, rejected, and reversed recommendations from prior reviews;
-- the coaching policy, intervention ladder, safety limits, and proposal schema.
-
-Let Python or SQL perform arithmetic, grouping, date handling, comparisons, and
-trend calculations. The model should inspect and interpret those results, not
-silently estimate them from thousands of JSON rows. Keep the raw rows available
-so it can verify any aggregate and cite the underlying session and set IDs.
-
-A million-token context window is capacity, not a reason to fill it. Irrelevant
-history can bury the useful signal. Give the agent indexed files and analysis
-tools so it can retrieve detail on demand while retaining plan-wide context.
-
-### Run the review as separate gates
-
-One prompt should not jump directly from raw history to a replacement plan.
-Require these artifacts in order:
-
-1. **Input audit.** Validate the export, report missing fields, and refuse to
-   reinterpret missing, inferred, or undone data as observations.
-2. **Deterministic analysis.** Generate reproducible metrics and tables. Save
-   the code and results with the review.
-3. **Evidence ledger.** List relevant facts with session and set identifiers;
-   label every derived value and every hypothesis separately.
-4. **Pattern assessment.** Consider alternative explanations such as exercise
-   order, equipment changes, shortened sessions, adherence, body-weight change,
-   and ordinary day-to-day variation.
-5. **Minimal proposal.** Walk the intervention ladder from "keep the plan"
-   upward and stop at the smallest change the evidence supports.
-6. **Independent critique.** Give another frontier model the source evidence,
-   proposal, and policy—but not the primary model's private reasoning. Ask it to
-   find unsupported claims, missed alternatives, unnecessary complexity,
-   internal conflicts, and unsafe progression.
-7. **Reconciliation.** Present disagreements rather than letting one model
-   silently overwrite the other. Material unresolved disagreement means keep
-   the current plan or request human judgment.
-8. **Deterministic validation.** Enforce schema validity, exercise IDs, legal
-   machine rungs, plausible ranges, weekly structure, change-count limits, and
-   reversibility in code.
-9. **Human approval.** Show the before/after diff, evidence, uncertainty,
-   success criterion, and review point. Applying nothing must remain easy.
-10. **Outcome review.** At the stated future exposure count, evaluate the
-    original success criterion before proposing another change.
-
-The primary and critic runs should use pinned model versions where providers
-offer them. Record the provider, model, effort level, harness version, prompt or
-policy hash, tool versions, source export hash, and generated proposal. Without
-that provenance, a later result cannot be reproduced or attributed to a model
-change.
-
-For especially consequential plan rewrites, run the primary analysis more than
-once. Agreement is not proof, but large unexplained variation is a reason not to
-apply the change. Repeated outputs must be compared by their claims and proposed
-actions rather than by prose similarity.
-
-### Select the model with GymTrack cases
-
-Generic leaderboards do not test whether a model understands GymTrack's data or
-chooses a conservative training intervention. Maintain a versioned coach exam
-with at least 20–30 de-identified histories covering:
-
-- a real plateau and an ordinary bad session;
-- excessive volume and insufficient stimulus;
-- stable performance that requires no change;
-- equipment changes and exercise substitutions;
-- measured versus inferred timing and heart-rate data;
-- unrated sets and genuinely absent observations;
-- drop-set or cluster continuations that must not be counted as separate
-  efforts;
-- a change that violates an equipment rung or plan constraint;
-- pain or technique warnings that the model must not diagnose away;
-- tempting but unsupported methodology changes.
-
-Run every candidate with the same package, tools, policy, effort budget, and
-output schema. Hide the model names from qualified reviewers. Score grounding,
-safety, use of uncertainty, arithmetic correctness, plan coherence, smallest
-justified intervention, evidence citations, schema validity, and repeat-run
-stability. Safety and invented evidence are release gates, not dimensions that
-can be averaged away by eloquent writing.
-
-The production choice is the model and harness combination that wins this exam
-and the prospective product test described below. Re-run the exam for every
-material model, prompt, policy, or harness update.
-
-## Proposal contract
-
-The exact schema can be designed later, but a proposal must contain at least:
-
-- schema version, generation time, model identifier, and analysis-policy
-  version;
-- source export identifier or hash;
-- the complete proposed plan, not only patch instructions;
-- a machine-readable diff from the active plan;
-- one rationale per material change, citing session or set identifiers;
-- confidence and important alternative explanations;
-- the expected benefit and the metric that should move;
-- a review date or number of comparable exposures;
-- explicit declarations that safety and equipment constraints were checked;
-- no medical diagnosis and no attempt to interpret pain as harmless.
-
-Validation should reject unknown exercise identifiers, impossible load rungs,
-invalid ranges, unsupported methods, excessive simultaneous changes, missing
-evidence, or any mutation outside the proposal schema.
-
-Every accepted plan needs provenance. Store the original proposal, the final
-user-edited diff, and the prior plan as a reversible version. Model or prompt
-changes create a new coach version; otherwise later evaluation would mix
-different interventions under one name.
-
-## What “better” means
-
-The coach has two separate jobs and must be measured on both.
-
-### Training effectiveness
-
-Prefer outcomes already produced by normal logging:
-
-- completed planned sessions and completed planned effort sets;
-- progression in repetitions, load, or estimated strength at comparable effort;
-- progress per unit of training time, not raw volume alone;
-- the percentage of prescribed work that lands in its intended rep and effort
-  range;
-- sustained progress after the first few weeks rather than a launch spike;
-- pain, adverse-event, and excessive all-out-effort guardrails.
-
-Raw tonnage is not a success metric by itself. A coach can make it rise simply
-by prescribing more work. App opens, recommendation taps, and time in the app
-are also not training outcomes.
-
-### User experience
-
-Measure whether the coach removes decisions without taking away agency:
-
-- time spent repairing or redesigning a plan manually;
-- recommendation acceptance, later reversal, and manual-edit rates;
-- workout abandonment and unplanned exercise substitution;
-- time from opening a workout to starting and logging useful work;
-- perceived clarity, confidence, autonomy, trust, and recommendation burden;
-- whether the user can correctly explain why a change was suggested;
-- whether dismissing or ignoring the coach adds any friction.
-
-Satisfaction is valuable but is secondary evidence. A polished explanation can
-feel intelligent while producing no improvement.
-
-## How to separate improvement from novelty
-
-Do not compare a polished AI experience with an unchanged control. That tests a
-new interface and an AI label at the same time.
-
-For a real product study, use the same review cadence, screens, language style,
-and approval controls in both arms:
-
-- **Control:** the current deterministic progression and fixed plan rules,
-  presented as an adaptive coach.
-- **Treatment:** frontier-agent recommendations, presented through the same
-  neutral adaptive-coach interface.
-
-Avoid prominent AI branding during the comparison. Participants need truthful
-consent that automated recommendations are being studied, but the UI need not
-prime one arm as more advanced. Analyze subjective ratings separately from
-objective behavior and performance.
-
-A whole-plan intervention carries over into later training, so randomizing each
-user to one arm for a sufficiently long block is cleaner than rapidly switching
-the same person between AI and control. A short crossover can be useful for
-interface questions, but it is weak evidence for strength or hypertrophy because
-adaptations, fatigue, and plan changes persist into the next period.
-
-## Evaluation sequence
-
-### Phase 0: historical replay
-
-Run the agent over old exports without showing recommendations to the user.
-
-- Confirm that identical inputs produce acceptably stable decisions.
-- Check every cited set and every derived claim against the export.
-- Have a qualified coach rate safety, specificity, evidence, and whether the
-  smallest justified intervention was chosen.
-- Compare proposals with what happened in subsequent sessions, while calling
-  this predictive validation rather than causal evidence.
-
-Historical replay can catch hallucinations and bad reasoning. It cannot prove
-that following the advice would have improved the outcome.
-
-### Phase 1: shadow mode
-
-Generate recommendations prospectively but do not apply them. Record what the
-rule-based system suggested, what the agent would have suggested, and what the
-user actually did. Require zero severe safety or data-grounding failures before
-moving on.
-
-### Phase 2: personal pilot
-
-For a single owner, collect a stable rule-based baseline and then run a
-predeclared AI block long enough to outlast first-week enthusiasm. This can show
-whether the workflow is useful to that person, especially through manual plan
-editing time, adherence, overrides, and performance slope.
-
-It is not definitive causal proof: training age, season, sleep, nutrition,
-regression to the mean, and carryover all remain plausible explanations. Record
-them rather than hiding them.
-
-Immediate suggestions can be tested more rigorously with randomized decision
-points: when both options are safe, randomly show the rule-based or agent
-suggestion and measure the next comparable set or session. This is the
-micro-randomized-trial pattern. Do not use decision-level randomization for
-coordinated whole-plan changes that would make the plan internally inconsistent.
-
-### Phase 3: controlled product test
-
-Randomize users to neutral rule-based coaching or neutral AI coaching for at
-least one complete training block. Stratify by training experience and baseline
-adherence. Predeclare:
-
-- one primary outcome;
-- the smallest worthwhile improvement;
-- the observation window and missing-data rule;
-- safety and friction non-inferiority limits;
-- subgroup analyses worth trusting;
-- the model and prompt version under test.
-
-For an early GymTrack study, a defensible primary product outcome is the
-proportion of planned workouts completed over the block. A key training outcome
-is the change in repeated exercise performance at comparable effort. The AI
-should ship as “proven helpful” only if it improves the primary outcome or a
-predeclared training outcome, does not worsen safety or logging friction, and
-the effect survives after the launch period.
-
-Report confidence intervals and individual response distributions, not only an
-average or a p-value. “Some people benefited and we can identify them” is more
-useful than a tiny average effect across everyone.
-
-### Phase 4: ongoing audit
-
-After release, preserve a small holdout where appropriate, monitor model-version
-changes, and watch for recommendation churn, rising overrides, declining
-adherence, pain flags, and subgroups receiving systematically worse proposals.
-Passing one experiment does not validate every later model.
-
-## Suggested scorecard
-
-| Layer | Measure | Failure signal |
-|---|---|---|
-| Grounding | Unsupported factual claims | Any invented session or measurement |
-| Safety | Severe unsafe proposals | Any; blocks release |
-| Stability | Materially different plans from unchanged data | Unexplained plan churn |
-| Adoption | Accepted without substantial editing | High rejection or immediate reversal |
-| Friction | Logging and plan-management time | Meaningful increase over control |
-| Adherence | Planned sessions and effort sets completed | No durable lift over control |
-| Performance | Load/reps/estimated strength at comparable effort | No lift, or lift explained only by more volume |
-| Agency | Clarity, autonomy, and trust | User follows advice they cannot explain |
-| Durability | Effect after the novelty window | Early spike followed by control-level results |
-
-Exact thresholds should be chosen from baseline variance and measurement error,
-then frozen before examining treatment results. Choosing them after seeing the
-data turns the evaluation into a story rather than a test.
+Larger interventions need stronger and more persistent evidence. Rungs 2 and 3
+need a pattern across at least four comparable exposures. Rungs 4 and 5 need it
+across more than one slot, or a stated equipment or adherence reason. A single bad
+session triggers nothing.
+
+### What a change can apply, and what it can only advise
+
+Rungs 1 to 5 are the six change kinds. Reordering has no kind of its own: moving
+a lift is a `removeSlot` plus an `addSlot`, which spends two of the three
+changes, so it needs a reason worth two. Redistributing volume is the same pair
+on two days. Rungs 6 and 7 cannot be applied, since GymTrack has one progression
+method and a new method or block is a design change, not a plan edit. The coach
+may argue for them as `advice`, with evidence that has persisted across at least
+two reviews, and the lifter acts on it by hand if persuaded. Effort mostly
+travels as advice too: "end the last set nearer failure" is not a plan field.
+
+**Loads belong to the phone.** Double progression reads a slot's `targetWeightKg`
+only the first time an exercise is logged; after that it works from the weight
+last lifted (`TrainingStats.suggestion`). A change that set a load on an exercise
+with history would be validated, shown, accepted and then silently ignored by the
+logger. So no kind carries a load, not even for a new exercise: it starts with
+none, the lifter finds a weight on the first day, and the phone's rules take over.
+The coach changes the rules the progression works within and the phone keeps
+choosing the weight.
+
+**Deloads are not a reflex.** In a randomized trial, a week without training in
+the middle of nine left hypertrophy unchanged and reduced some lower-body
+strength measures (Coleman 2024). There is no planned-deload kind. Persistent
+fatigue gets the smallest rung that addresses it, usually one fewer set on the
+affected slot.
+
+**Size orders the levers.** For hypertrophy the evidence points the coach at
+these, roughly in this order:
+
+1. **Effort before anything else.** Ending sets closer to failure meaningfully
+   increased hypertrophy and barely moved strength (Robinson 2024). A slot whose
+   sets keep coming back `easy` is under-stimulated, and the first answer is a
+   rep target that ends the set nearer failure, not another set.
+2. **Volume where it is short, within limits.** Weekly volume has a real dose
+   response for size, with diminishing returns (Pelland 2025), and per session
+   the benefit stops being detectable at about eleven fractional sets for a
+   muscle (Remmert 2025). A muscle that is behind and below that gets a set; a
+   session already past it gets the work moved to another day, not piled on.
+3. **The lifter's priorities.** Looks are not spread evenly. The profile names
+   the muscles that matter most, and spare volume goes there first.
+4. **Exercise choice as a tie-breaker.** Hypertrophy was similar across heavy,
+   moderate and light loads taken to failure (Lopez 2021), so a rep range is
+   mostly comfort and how reliable the effort answers are, which favours roughly
+   six to fifteen reps. Full or long ranges of motion showed small advantages
+   (Wolf 2023), and lengthened partials were no better than full range in
+   trained lifters (Wolf 2025), so a stretch-position exercise wins a
+   substitution only when all else is equal.
+
+Frequency is not a lever of its own for size: with volume equal, only strength
+showed a consistent frequency effect (Pelland 2025). Moving work across the week
+is about per-session volume and fatigue. Strength remains a measure of progress,
+but no change is made to raise it.
+
+**Pain overrides progress.** A slot whose recent exposures carry a `pain` tag may
+only be reduced, removed or substituted. The coach does not diagnose, does not
+reason that pain is harmless, and suggests seeing a professional when it
+repeats. The reviewer is asked specifically to check this, and the phone shows a
+`pain` tag logged on a slot since the export.
+
+### Every change is an experiment
+
+The coach states each change as a hypothesis, the evidence, the change, a
+success criterion (say, reps rising at comparable effort without lower
+adherence) and a review point (after six comparable exposures, or sooner if
+pain appears), and the next review reads it back. The proposal carries only the
+evidence (for the reviewer) and the reason (for the phone), so the coach writes
+the success criterion and review point in the review folder.
+
+## How we will know it helps
+
+One lifter and a few changes a quarter cannot show that the coach beats the
+phone's own double progression, and nothing here claims it. The loop yields three
+kinds of evidence, in order of weight.
+
+**The owner's ratings.** He rates each proposal when deciding and again after
+training under it. The second rating is the result: did the change, in his
+judgement and with the numbers in front of him, work. Other raters are a sample,
+not a panel, and are recorded as such.
+
+**Reviewer against owner, over time.** Each review shows whether the reviewer is
+useful: how often it objected in round 1 (a reviewer that never objects does no
+work), how often the lifter accepted a change it endorsed, and how disputed
+changes turned out. One that agrees with the coach nearly always, or whose
+objections the lifter never upholds, is the signal to try a different model.
+
+**The outcome check at each review.** Before drafting, the coach looks at every
+change applied since the last review: still in place, overridden (the slot no
+longer holds the applied values) or reverted; whether comparable performance on
+the slot moved by more than noise; whether effort answers, adherence and pain
+tags moved with it. This is a record, not an
+experiment: there is no control, and season, sleep and bodyweight move at the
+same time. It tells the coach whether its last advice led anywhere before it
+gives more, and it tells the lifter whether to keep trusting it.
+
+Effectiveness is read from what normal logging produces: planned sessions and
+working sets completed, comparable performance rising by more than noise,
+progress sustained past the first weeks, and the guardrails (pain, excess
+all-out effort). Raw tonnage is not a success metric, since a coach raises it by
+prescribing more work, and app opens are not either. Satisfaction is secondary
+evidence: a polished explanation can feel intelligent and produce nothing.
+
+## Later, if needed
+
+Each was considered and cut for the owner's current use. Each names the event
+that would bring it back.
+
+- **Unattended runs** (a headless `claude -p` on a schedule, or launchd): if
+  remembering to review becomes the problem.
+- **Managed Agents, or a relay on the Mac**: only if the app is ever allowed a
+  network.
+- **A reviewer from a different model family**: if the reviewer agrees with the
+  coach suspiciously often, or shared misses show up.
+- **A physio-brief second reviewer**, told only to look for pain and injury risk:
+  if pain calls slip through.
+- **A synthetic exam** (generated histories with a planted answer): if a change
+  to the skill, policy or reviewer's prompt needs a regression check and the real
+  history is too thin to supply one.
+- **Blind rating** with decoys made by simple rules, and agreement statistics: if
+  the owner's ratings start to look like a rubber stamp.
+- **Friends' Strong or Hevy logs as replay cases**: if his own history is too
+  short to test a changed coach against.
+- **A formal single-case trial**: if the owner wants to claim a change worked, not
+  just keep a record. Single-subject designs suit a treatment that cannot be
+  withdrawn (Kinugasa 2004); micro-randomized trials suit nudges, not plan
+  changes, whose effects carry over (Qian 2022).
+- **A load kind**, a one-shot reset of a slot's weight: if reviews show the need.
+  It needs a logger change first (see "Loads belong to the phone").
+
+## Decisions and open questions
+
+Decided on 2026-10-03, by the owner:
+
+- Size and appearance come before strength. Reviews are weekly to monthly.
+- Reviews are interactive in Claude Code on the Mac. No headless runs, launchd,
+  Managed Agents or relay. The app stays offline, and the paid developer program
+  is not being taken; the install script keeps the app signed.
+- The reviewer is a skeptical hypertrophy-coach persona in a separate `claude -p`
+  session, two rounds, still-disputed changes to the lifter. A different-model
+  reviewer was dropped for now.
+- Six change kinds, staleness by `expect` values, decisions in a JSON file, one
+  quiet Today line, and a mis-tap undo that erases while a later revert stamps.
+- The lifter rates, the rater is always recorded, and in hand-off mode the
+  reviewer's verdict is hidden until the other rater has rated.
+- Readiness checks, sleep, HRV, resting heart rate and bodyweight at session time
+  were rejected earlier: they assume the watch is always worn and ask for daily
+  discipline. Do not propose them again.
+
+Still open:
+
+- Sending the export (training history, body weight, notes) to the model provider
+  is implied by choosing Claude Code and has not been said outright. The reviewer
+  runs through the same provider, so it adds no new recipient.
+- Whether hand-off mode should hide the lifter's own rating from the other rater
+  too, since it anchors the same way the reviewer's verdict does.
+
+## Where the code lives
+
+- `tools/coach/`: the Mac side, Python 3 standard library only. Pull, stats,
+  validate, the reviewer's rounds and prompt, push, and the profile template. Its
+  tests use synthetic fixtures; real training history never enters the repo.
+- `.claude/skills/coach-review/`: the coach's procedure and the policy above, run
+  by `/coach-review`. It never contains the reviewer's prompt.
+- `GymTrack/Services/Coach/`: the phone side. Snapshot writing, inbox reading,
+  validation against the live plan, the review screen, apply, undo, revert,
+  `decisions.json` and ratings. It never talks to a network.
+- `GymTrack/Services/BackupService.swift`: the export, with the optional `id` on
+  plans, days and slots.
 
 ## What research currently supports
 
-The evidence supports plausibility and a way to test the feature, not a claim
-that a monthly frontier-model review already improves resistance training.
+The evidence supports plausibility and a way to check, not a claim that a
+periodic frontier-model review improves resistance training.
 
-- A 2025 randomized trial of 79 trained adults found 10-week adherence of 88.2%
-  with in-person supervision, 81.2% with app guidance, and 52.2% with a static
-  PDF. All groups improved squat and bench strength, but supervised training
-  produced better results on several outcomes. This suggests app guidance can
-  support adherence while also showing that a digital layer does not
-  automatically reproduce good coaching.
-- An 8-week randomized trial in 239 older adults found that a personalized,
-  machine-learning-assisted smartphone program improved several balance,
-  flexibility, and arm-strength outcomes versus active and inactive controls.
-  It demonstrates that personalized digital exercise can create objective
-  effects, but it is a different population and intervention from GymTrack.
-- A large four-arm Fitbit study reported that reinforcement-learning-selected
-  activity nudges increased daily steps versus control and other selection
-  methods over one to two months. This is useful evidence for testing adaptive
-  decisions, not direct evidence for AI-written resistance-training blocks.
-- Research on micro-randomized trials provides a mature method for testing the
-  near-term causal effect of repeated mobile interventions. It fits next-set or
-  next-session recommendations better than whole-program rewrites.
-- Expert evaluation of one-shot GPT-4 exercise prescriptions found generally
-  safe baselines but insufficient specificity and adaptability. A separate
-  mixed-methods evaluation found only 41.2% of gold-standard recommendation
-  content was present, although the content that was present was usually
-  accurate. Rich longitudinal data and validation are therefore essential;
-  model fluency is not evidence of coaching quality.
-- Human-computer-interaction experiments show that an AI label can raise
-  expected performance without improving objective performance. This directly
-  supports neutral labeling and separate subjective and objective outcomes.
-- The 2026 American College of Sports Medicine resistance-training guidance
-  emphasizes consistency, effort, and individualization over unnecessary
-  complexity. An AI coach that constantly changes methods may look active while
-  damaging the more important behavior: training consistently.
+On AI exercise advice the findings are mostly cautionary. A 2026 systematic
+review of 24 studies found factual accuracy often acceptable but comprehensiveness
+poor, contraindications missed, no adjustment to feedback, and AI programmes
+inferior to human experts in every head-to-head (Biology of Sport 2026). Twelve
+coaching experts rated GPT-4 and Gemini hypertrophy plans as moderate, better
+with detailed prompts (Havers 2024). Another panel found chatbot hypertrophy and
+strength plans lacking intensity detail such as proximity to failure, unable to
+tell the two goals apart, and blind to individual response (Havers 2025).
+One-shot GPT-4 prescriptions were safe but unspecific (Dergaa 2024), and another
+evaluation found 41.2% of gold-standard recommendation content present (Füzéki
+2024). Repeated generations from one model agreed in wording and varied in
+quantities, intensity above all (Lee 2026), which is why proposals are typed
+fields with validator limits.
 
-## Research references
+All of that was measured on older models with generic prompts and no training
+history. This design supplies the history, a written policy and a way to push
+back, and answers each finding on purpose: history and policy for
+comprehensiveness, pain tags and the pain rule for contraindications, the loop
+and the conversation for feedback, and three small reversible changes for the
+experts' edge. That is the argument for the design, not a result of it.
 
-- Gavanda et al., *Optimizing Resistance Training Outcomes: Comparing In-Person
-  Supervision, Online Coaching, and Self-Guided Approaches* (2025):
-  https://pmc.ncbi.nlm.nih.gov/articles/PMC12529976/
-- Netz et al., *A Smartphone Platform for Remote Motor Fitness Assessment and
-  AI-Generated Personalized Exercise Programs for Older Adults* (2025):
-  https://pmc.ncbi.nlm.nih.gov/articles/PMC12527324/
-- Lee et al., *A Personalized Exercise Assistant using Reinforcement Learning
-  (PEARL)* (2025 preprint): https://arxiv.org/abs/2508.10060
-- Qian et al., *The Micro-Randomized Trial for Developing Digital
-  Interventions* (2022): https://pmc.ncbi.nlm.nih.gov/articles/PMC9276848/
-- Dergaa et al., *Using artificial intelligence for exercise prescription in
-  personalised health promotion* (2024):
-  https://pmc.ncbi.nlm.nih.gov/articles/PMC10955739/
-- Füzéki et al., *Comprehensiveness, Accuracy, and Readability of Exercise
-  Recommendations Provided by an AI-Based Chatbot* (2024):
-  https://pmc.ncbi.nlm.nih.gov/articles/PMC10811574/
-- von Felten et al., *AI Washing Inflates Expected Performance but Not
-  Interaction Outcomes* (2026): https://arxiv.org/abs/2605.00582
-- American College of Sports Medicine, 2026 resistance-training guidance:
-  https://acsm.org/resistance-training-guidelines-update-2026/
+Around the model: over 10 weeks, adherence was 88.2% with in-person supervision,
+81.2% with app guidance and 52.2% with a static PDF in 79 trained adults, so app
+guidance supports adherence without reproducing good coaching (Gavanda 2025). A
+single-subject LLM running-coach case named its gaps as text-only data relayed
+by hand, no persistent model of the athlete and no guardrails (Lee 2025); the
+export, stored decisions and validator here are aimed at those. Adaptive digital
+exercise has shown objective effects in populations unlike this one (Netz 2025;
+Lee, PEARL 2025), and an AI label alone can raise expected performance without
+improving results (von Felten 2026), so any comparison would label options
+neutrally.
 
-## Bottom line
+On the training science, the citations in "Definitions" and "Coaching policy"
+carry their own claims. The 2026 American College of Sports Medicine guidance
+adds one caution, emphasising consistency, effort and individualisation over
+unnecessary complexity. A coach that keeps changing methods can look active while
+damaging the behaviour that matters most, which is training consistently.
 
-Build a boring, auditable bridge around a capable model. Let ordinary logging
-and progression stay dependable. Make every strategic change reversible and
-falsifiable. Judge the coach by training consistency, objective progress,
-friction, safety, and durable behavior—not by how intelligent its prose sounds.
+## References
+
+- Biology of Sport, *The AI recommendation paradox: a systematic review of LLMs in exercise recommendation* (2026):
+  https://www.termedia.pl/The-AI-recommendation-paradox-a-systematic-review-evaluating-the-promise-peril-and-path-forward-for-large-language-models-in-exercise-recommendation,78,57447,1,1.html
+- Kim et al., *Correlated Errors in Large Language Models*, ICML (2025): https://arxiv.org/abs/2506.07962
+- Goel et al., *Great Models Think Alike and this Undermines AI Oversight*, ICML (2025): https://arxiv.org/abs/2502.04313
+- Havers et al., *Reproducibility and quality of hypertrophy-related training plans generated by GPT-4 and Google Gemini as evaluated by coaching experts*, Biology of Sport (2024): https://pmc.ncbi.nlm.nih.gov/articles/PMC11963122/
+- Havers, Jelonnek, Masur et al., *A professional assessment of training plans for muscle hypertrophy and maximal strength developed by generative artificial intelligence*, Biology of Sport (2025): https://pmc.ncbi.nlm.nih.gov/articles/PMC12492345/
+- Gavanda et al., *Optimizing Resistance Training Outcomes: Comparing In-Person Supervision, Online Coaching, and Self-Guided Approaches* (2025): https://pmc.ncbi.nlm.nih.gov/articles/PMC12529976/
+- Lee, *Consistency of AI-Generated Exercise Prescriptions: A Repeated Generation Study Using a Large Language Model* (2026 preprint): https://arxiv.org/abs/2604.11287
+- Merrill, Paruchuri, Rezaei et al., *Transforming wearable data into personal health insights using large language model agents*, Nature Communications (2026): https://www.nature.com/articles/s41467-025-67922-y
+- Lee, *Exploring Large Language Model as an Interactive Sports Coach: Lessons from a Single-Subject Half Marathon Preparation* (2025 preprint): https://arxiv.org/abs/2509.26593
+- Panickssery, Bowman, Feng, *LLM Evaluators Recognize and Favor Their Own Generations*, NeurIPS (2024): https://arxiv.org/abs/2404.13076
+- Netz et al., *A Smartphone Platform for Remote Motor Fitness Assessment and AI-Generated Personalized Exercise Programs for Older Adults* (2025): https://pmc.ncbi.nlm.nih.gov/articles/PMC12527324/
+- Lee et al., *A Personalized Exercise Assistant using Reinforcement Learning (PEARL)* (2025 preprint): https://arxiv.org/abs/2508.10060
+- Qian et al., *The Micro-Randomized Trial for Developing Digital Interventions* (2022): https://pmc.ncbi.nlm.nih.gov/articles/PMC9276848/
+- Dergaa et al., *Using artificial intelligence for exercise prescription in personalised health promotion* (2024): https://pmc.ncbi.nlm.nih.gov/articles/PMC10955739/
+- Füzéki et al., *Comprehensiveness, Accuracy, and Readability of Exercise Recommendations Provided by an AI-Based Chatbot* (2024): https://pmc.ncbi.nlm.nih.gov/articles/PMC10811574/
+- von Felten et al., *AI Washing Inflates Expected Performance but Not Interaction Outcomes* (2026): https://arxiv.org/abs/2605.00582
+- Pelland et al., *The Resistance Training Dose Response: Meta-Regressions on Weekly Volume and Frequency*, Sports Medicine (2025): https://link.springer.com/article/10.1007/s40279-025-02344-w
+- Robinson et al., *Exploring the Dose-Response Relationship Between Estimated Resistance Training Proximity to Failure, Strength Gain, and Muscle Hypertrophy*, Sports Medicine (2024): https://link.springer.com/article/10.1007/s40279-024-02069-2
+- Remmert, Pelland et al., *Is There Too Much of a Good Thing? Meta-Regressions of the Effect of Per-Session Volume on Hypertrophy and Strength* (2025 preprint): https://sportrxiv.org/index.php/server/preprint/view/537
+- Lopez et al., *Resistance Training Load Effects on Muscle Hypertrophy and Strength Gain: Systematic Review and Network Meta-analysis*, Medicine & Science in Sports & Exercise (2021):
+  https://www.ovid.com/jnls/acsm-msse/fulltext/10.1249/mss.0000000000002585~resistance-training-load-effects-on-muscle-hypertrophy-and
+- Wolf et al., *Partial Vs Full Range of Motion Resistance Training: A Systematic Review and Meta-Analysis*, International Journal of Strength and Conditioning (2023): https://doi.org/10.47206/ijsc.v3i1.182
+- Wolf et al., *Lengthened partial repetitions elicit similar muscular adaptations as full range of motion repetitions during resistance training in trained individuals*, PeerJ (2025): https://pmc.ncbi.nlm.nih.gov/articles/PMC11829627/
+- Halperin et al., *Accuracy in Predicting Repetitions to Task Failure in Resistance Exercise*, Sports Medicine (2022): https://link.springer.com/article/10.1007/s40279-021-01559-x
+- Coleman et al., *Gaining more from doing less? The effects of a one-week deload period during supervised resistance training on muscular adaptations*, PeerJ (2024): https://peerj.com/articles/16777/
+- LeSuer et al., *The Accuracy of Prediction Equations for Estimating 1-RM Performance in the Bench Press, Squat, and Deadlift*, Journal of Strength and Conditioning Research (1997): https://www.unm.edu/~rrobergs/478PredictionAccuracy.pdf
+- Hecksteden et al., *Repeated testing for the assessment of individual response to exercise training*, Journal of Applied Physiology (2018): https://journals.physiology.org/doi/full/10.1152/japplphysiol.00896.2017
+- Kinugasa, Cerin, Hooper, *Single-Subject Research Designs and Data Analyses for Assessing Elite Athletes' Conditioning*, Sports Medicine (2004): https://link.springer.com/article/10.2165/00007256-200434150-00003
+- American College of Sports Medicine, 2026 resistance-training guidance: https://acsm.org/resistance-training-guidelines-update-2026/

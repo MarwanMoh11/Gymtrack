@@ -61,9 +61,13 @@ negotiable:
   2**; every field added since is optional so older backups still decode. Read
   the comments on `bodyMetrics` / `loadScales` / `exerciseCatalog` before adding
   one.
-- `docs/AI_COACH.md` — the proposed local-first AI coaching workflow, its
-  intervention rules, and the experiment needed before claiming it improves
-  training or the logging experience. Read it before designing AI coach work.
+- `docs/AI_COACH.md` — the coach loop: the Mac-side review run in Claude Code,
+  the phone↔Mac file contract, the coaching policy and the reviewer, and how we
+  will know the coach helps. Read it before designing AI coach work.
+- `tools/coach/` and `.claude/skills/coach-review/` — the Mac side of that loop
+  (pull the export, compute stats, run the reviewer, push a proposal), driven by
+  `/coach-review`. Review data lives in `~/Documents/GymTrackCoach` and never
+  enters the repo.
 - `Services/LoadScaleBook.swift` — what each machine is marked in and what one
   step on it is worth. Every weight the app suggests must be a rung the equipment
   actually has.
