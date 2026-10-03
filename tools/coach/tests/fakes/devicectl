@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""A stand-in for `xcrun devicectl`, backed by a directory (FAKE_PHONE_DIR).
+
+FAKE_PHONE_STATE is "available" (default), "unavailable" or "absent".
+Every call is appended to FAKE_PHONE_DIR/calls.log as one JSON line.
+"""
+import json
+import os
+import shutil
+import sys
+
+root = os.environ["FAKE_PHONE_DIR"]
+state = os.environ.get("FAKE_PHONE_STATE", "available")
+args = sys.argv[1:]
+os.makedirs(root, exist_ok=True)
+with open(os.path.join(root, "calls.log"), "a") as handle:
+    handle.write(json.dumps(args) + "\n")
+
+
+def option(name):
+    return args[args.index(name) + 1]
+
+
+if args[:2] == ["list", "devices"]:
+    print("Name  Hostname  Identifier  State  Model  Reality")
+    print("----  --------  ----------  -----  -----  -------")
+    if state != "absent":
+        flag = "available (paired)" if state == "available" else "unavailable"
+        print(f"Test iPhone    00008150-000504383447401C (UDID)   {flag}   iPhone 17 Pro Max (iPhone18,2)   physical")
+    sys.exit(0)
+
+if state != "available":
+    print("ERROR: device is not connected", file=sys.stderr)
+    sys.exit(1)
+
+phone = os.path.join(root, "phone")
+if args[:3] == ["device", "copy", "from"]:
+    source = os.path.join(phone, option("--source"))
+    if not os.path.exists(source):
+        print("ERROR: no such file on the device", file=sys.stderr)
+        sys.exit(1)
+    shutil.copyfile(source, option("--destination"))
+    sys.exit(0)
+if args[:3] == ["device", "copy", "to"]:
+    target = os.path.join(phone, option("--destination"))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    shutil.copyfile(option("--source"), target)
+    sys.exit(0)
+print("unknown call", args, file=sys.stderr)
+sys.exit(2)
