@@ -22,6 +22,7 @@ struct WatchLoggerView: View {
     let session: WatchSessionSnapshot
     var connector: WatchConnector
     var rest: WatchRestTimer
+    var focus: WatchRestFocus
 
     @State private var weightDisplay: Double = 0
     @State private var repsValue: Double = 0
@@ -74,6 +75,12 @@ struct WatchLoggerView: View {
             .onChange(of: session.effortEnabled) { _, enabled in
                 if enabled != true { dismissEffort() }
             }
+            // Initial too: a logger that went with its session while the
+            // question was up never said it had gone, and the next session's
+            // logger is the one to say so.
+            .onChange(of: effortSet != nil, initial: true) { _, waiting in
+                focus.questionWaiting = waiting
+            }
             .task(id: effortSetID) {
                 guard effortSetID != nil, !voiceOverEnabled else { return }
                 // Ignoring the question never requires a dismissal. It sits below
@@ -116,6 +123,7 @@ struct WatchLoggerView: View {
                     undoButton
                 }
                 .padding(.horizontal, 2)
+                .reportsScrolling(to: focus)
             }
             // A rest begins with the lifter's thumb still on *Log set*, which
             // is at the bottom of the list — so the countdown that has just
@@ -133,6 +141,22 @@ struct WatchLoggerView: View {
                     proxy.scrollTo(Self.topID, anchor: .top)
                 }
             }
+            // The rest of the rest: once the watch has gone untouched for a
+            // while, the countdown comes back. See `WatchRestFocus`.
+            .onChange(of: focus.returns) { _, _ in
+                bringCountdownBack(proxy)
+            }
+        }
+    }
+
+    /// Scrolls to the countdown for `WatchRestFocus`. The crown is handed back
+    /// to the scroll first: left on a number that has just scrolled out of
+    /// sight, its next turn would change a weight nobody can see.
+    private func bringCountdownBack(_ proxy: ScrollViewProxy) {
+        editing = nil
+        isCrownFocused = false
+        withAnimation(.easeOut(duration: 0.25)) {
+            proxy.scrollTo(Self.topID, anchor: .top)
         }
     }
 
@@ -327,6 +351,8 @@ struct WatchLoggerView: View {
             isHapticFeedbackEnabled: true
         )
         .onChange(of: crownValue) { _, turned in
+            // Dialling scrolls nothing, but it is the lifter at the watch.
+            focus.touch(at: .now)
             write(turned)
         }
         // Claimed after the pass that made the row focusable, not inside
@@ -428,6 +454,7 @@ struct WatchLoggerView: View {
     /// Tapping the number the crown is already on releases it, so the screen
     /// scrolls again without having to log the set first.
     private func select(_ field: Field) {
+        focus.touch(at: .now)
         if editing == field {
             editing = nil
         } else {
@@ -661,6 +688,10 @@ struct WatchLoggerView: View {
                 onPick: { feel in
                     connector.rateSet(subject, rpe: subject.rpe == feel.rawValue ? nil : feel.rawValue)
                     WatchHaptics.tick()
+                    // An answer is a touch, so the countdown waits its full
+                    // delay after it. A question left to fold away is not, and
+                    // the countdown can come back as it goes.
+                    focus.touch(at: .now)
                     dismissEffort()
                 }
             )
