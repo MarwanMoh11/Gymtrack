@@ -88,6 +88,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 | PR | `@claude <change request>` | Claude amends the PR. A comment on a line of the diff works too |
 | Issue | `@claude plan this` | Claude splits the issue into ordered sub-issues and comments with the plan, without writing code |
 | Issue | `@claude just do it` | With `CLAUDE_AUTO_SPLIT` on: implement this issue as one PR rather than splitting it |
+| PR | `@claude fix the conflicts` | Claude merges the latest `main` into the PR, resolves the conflicts, rebuilds, runs the suites and pushes |
 
 **Several issues at once.** One comment starts one run, so comment `@claude implement this` on each
 issue you want built; each run gets its own Mac and its own PR. Two or three at a time works best:
@@ -96,7 +97,6 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 - start only parts whose **Depends on** line says "nothing" or names merged parts;
 - when two PRs edit the same code, the one merged second conflicts: comment `@claude fix the
   conflicts` on it.
-| PR | `@claude fix the conflicts` | Claude merges the latest `main` into the PR, resolves the conflicts, rebuilds, runs the suites and pushes |
 
 ## 2. How it's implemented here
 
@@ -140,11 +140,14 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   environment. Its own create-PR tool (`mcp__github__create_pull_request`) runs in Docker, which
   macOS runners don't have: the first run on a Mac reported "the GitHub MCP server didn't connect"
   and could only leave a "Create PR" link.
-- `fetch-depth: 0`, `Bash(git merge origin/main:*)`, `git merge --abort` and read-only `git status`,
-  `git diff` and `git log` let `@claude fix the conflicts` work. A shallow clone has no common
-  ancestor to merge from, and the whole history is a few MB. Merging rather than rebasing means
-  the branch is never rewritten, so no force-push is needed, and the squash merge flattens the
-  merge commit anyway. The merge is limited to `main`.
+- `fetch-depth: 0`, `git fetch origin main` (exactly that), `Bash(git merge origin/main:*)`,
+  `git merge --abort` and `git status` let `@claude fix the conflicts` work, with the action's own
+  `git add`, `git commit` and `git push`. A shallow clone has no common ancestor to merge from, and
+  the whole history is a few MB; with full history the action also fetches a PR branch without a
+  depth limit. Merging rather than rebasing means the branch is never rewritten, so no force-push
+  is needed, and the squash merge flattens the merge commit anyway. The merge is limited to
+  `main`. `git diff` and `git log` stay out: their `--output` option writes any file, the
+  checker's copy included.
 - `runs-on: macos-26`, so the run has Xcode and can build its own change before pushing it. Free
   on a public repo. The limit is 180 minutes, a ceiling for hard bugs that need many build rounds;
   a normal run takes 10 to 30. A run that needs more is usually an issue worth splitting.
@@ -315,7 +318,8 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | The action fails within seconds and the log says nothing | Hidden output: the action shows Claude's log only when asked | Re-running with debug logging isn't enough. Add `show_full_output: "true"`, or set the repository variable `ACTIONS_STEP_DEBUG` to `true`, then remove it: the log can show file contents |
 | 401 "OAuth access token is invalid" or "Invalid bearer token" | The token was mangled in the copy: line wraps from the terminal, or the clipboard held the sign-in code instead | Copy the token with nothing else, then `pbpaste \| tr -d '[:space:]' \| gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>` and clear the clipboard |
 | CI can't build what builds locally ("compiling for iOS 15.0" or "unable to type-check this expression") | The runner's Xcode differs from yours. New test targets defaulted to `$(RECOMMENDED_*_DEPLOYMENT_TARGET)`, which each Xcode resolves differently, and an older compiler gives up on long view bodies sooner | Pin deployment targets to numbers; split long view bodies into named properties |
-| Merge conflicts | Another PR changed the same lines | Tap **Update branch** if GitHub offers it. Otherwise comment `@claude redo this on latest main` on the issue, and close the old PR |
+| Merge conflicts | Another PR changed the same lines | Tap **Update branch** if GitHub offers it. Otherwise comment `@claude fix the conflicts` on the PR |
+| Claude's push is refused: "refusing to allow a GitHub App to create or update workflow ... without `workflows` permission" | `main` gained a change to a workflow file after the run's branch started, so the branch looks like it changes that workflow, and Claude's app may never touch workflows. The first run on #7 lost its work this way when two pipeline PRs merged mid-run | Claude merges the new `main` and retries once by itself. If that is refused too: for a run with no PR yet, comment `@claude implement this` again; for a PR, tap **Update branch** yourself, then comment `@claude` again. Avoid merging workflow changes while a run is going |
 | "Workflow initiated by non-human actor" | A bot opened the PR or comment | `allowed_bots: "*"` on the review job covers Claude's PRs. Never add it to `claude.yml` |
 | 401 or "OAuth token has expired" in the action log | The year-long token expired or was revoked | Run `claude setup-token` in Terminal.app, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>` |
 
