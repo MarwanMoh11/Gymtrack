@@ -94,16 +94,30 @@ struct UnitsTests {
         #expect(WeightUnit.lb.short == "lb")
     }
 
-    @Test(arguments: [3.0, 6, 11])
+    @Test(arguments: [3.0, 6, 11, 12, 13, 22])
     func aWholeNumberOfPoundsReadsAsWhole(pounds: Double) {
+        // 3 / 2.20462262 * 2.20462262 is 3.0000000000000004. These are the
+        // first pound values whose trip through kilograms left that noise, and
+        // each was labelled "3.0 lb" rather than "3 lb" (#3).
         let stored = WeightUnit.lb.toKg(pounds)
-        let expected = "\(Int(pounds)) lb"
-        // 3 / 2.20462262 * 2.20462262 is 3.0000000000000004, which the
-        // whole-number test reads as fractional, so a 3 lb weigh-in is labelled
-        // "3.0 lb". About one pound value in ten does this.
-        withKnownIssue("WeightUnit.format treats float noise from kg->lb as a fraction and prints '3.0 lb' (#3)") {
-            #expect(WeightUnit.lb.format(stored) == expected)
+        #expect(WeightUnit.lb.format(stored) == "\(Int(pounds)) lb")
+    }
+
+    @Test func everyWholePoundUpToTheCeilingReadsAsWhole() {
+        // About one whole pound value in ten picks up noise on the way through
+        // kilograms, so a handful of examples cannot show none is left.
+        let ceiling = Int(LoadScale.standard(.lb).displayCeiling)
+        for pounds in 0...ceiling {
+            let stored = WeightUnit.lb.toKg(Double(pounds))
+            #expect(WeightUnit.lb.format(stored) == "\(pounds) lb")
         }
+    }
+
+    @Test(arguments: [(0.1, "0.1 lb"), (2.5, "2.5 lb"), (100.1, "100.1 lb"), (2_199.9, "2199.9 lb")])
+    func aFractionOfAPoundKeepsItsDecimal(pounds: Double, label: String) {
+        // The whole-number test forgives float noise, not a tenth the lifter
+        // typed in.
+        #expect(WeightUnit.lb.format(WeightUnit.lb.toKg(pounds)) == label)
     }
 
     // MARK: - Volume and duration labels
