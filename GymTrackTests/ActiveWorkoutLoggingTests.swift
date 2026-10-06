@@ -273,6 +273,27 @@ struct ActiveWorkoutLoggingTests {
         }
     }
 
+    @Test func aRepeatedUndoOfTheParentDoesNotTakeBackADropLoggedSince() throws {
+        try WorkoutBench.run { testBench in
+            let (session, rows, workout) = testBench.standard()
+            workout.complete(rows[0], restSeconds: nil, at: at(60))
+            workout.continueSet(rows[0])
+            let drop = try #require(session.sets.first { $0.isContinuation })
+            workout.complete(drop, restSeconds: nil, at: at(100))
+            workout.uncomplete(rows[0])
+            #expect(!rows[0].isCompleted && !drop.isCompleted)
+
+            // The rows keep their numbers, so the drop can be lifted again on its
+            // own. A second undo of the parent, from a stale button or a message
+            // delivered twice, is about a log that is already gone.
+            workout.complete(drop, restSeconds: nil, at: at(200))
+            workout.uncomplete(rows[0])
+
+            #expect(drop.isCompleted)
+            #expect(drop.completedAt == at(200))
+        }
+    }
+
     // MARK: Correcting a set
 
     @Test func correctChangesTheNumbersButNotWhenOrHowTheSetHappened() throws {

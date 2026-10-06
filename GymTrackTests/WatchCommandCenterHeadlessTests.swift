@@ -180,6 +180,25 @@ struct WatchCommandCenterHeadlessTests {
         }
     }
 
+    @Test func aRedeliveredLogIsStillRecognisedByTheRowWhenTheMemoryOfItIsGone() throws {
+        try withRig { rig in
+            let (_, sets) = try rig.seed()
+            let command = rig.log(sets[0], weight: 80, reps: 5, at: 600)
+            rig.send(command)
+            sets[1].weightKg = 70
+
+            // The remembered log expires after a week and is dropped with the rest
+            // of the defaults; the row itself still holds the completion, and that
+            // alone has to stop the load being carried a second time.
+            DroppedSetMemory.shared.replaceStore(with: TestClock.freshDefaults("memoryGone"))
+            #expect(!DroppedSetMemory.shared.wasHeardLog(sets[0].id, loggedAt: rig.at(600)))
+            rig.send(command)
+
+            #expect(sameMoment(sets[0].completedAt, rig.at(600)))
+            #expect(sets[1].weightKg == 70)
+        }
+    }
+
     @Test func aLogRedeliveredAfterThePhoneUndidItStaysUndone() throws {
         try withRig { rig in
             let (_, sets) = try rig.seed()
