@@ -23,9 +23,15 @@ flowchart LR
 
 ## 1. Daily use (from a phone)
 
-**Write the issue.** In the title or body, say what should change, what the user sees, and what
-must not change. Mention `@claude` anywhere. One behavior per issue keeps the PR small enough to
-review on a phone.
+**Write the issue.** New issue offers two forms, **Bug report** and **Feature request**
+([`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/)). They label the issue `bug` or
+`enhancement` and ask for what Claude needs: the steps and the expected result for a bug, and for a
+feature the change, what must not change, and how you'll know it's done. Their last question, "Hand
+it to Claude now?", decides whether the issue starts a run. "Not yet" files it without `@claude`,
+and a later comment `@claude fix this` (or `implement this`) starts it. A blank issue works too:
+mention `@claude` anywhere. One behavior per issue keeps the PR small enough to review on a phone.
+Filter by label to see only bugs or only features:
+`https://github.com/<owner>/<repo>/issues?q=is%3Aopen+label%3Abug`.
 
 > **Title:** Show when each lift was last trained in the exercise picker
 >
@@ -73,6 +79,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 |---|---|---|---|
 | Implement workflow | [`.github/workflows/claude.yml`](../.github/workflows/claude.yml) | Runs Claude (Opus) when `@claude` appears in a new issue, a comment or a PR review comment | Generic |
 | PR workflow | [`.github/workflows/pr-check.yml`](../.github/workflows/pr-check.yml) | `build-and-test` on `macos-26`, plus the Claude review | `build-and-test` steps and the review's app description are specific; the rest is generic |
+| Issue forms | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | Bug report and Feature request: apply the label, ask for what Claude needs, and add `@claude` only if you choose "Yes" | Generic structure, GymTrack wording |
 | `CLAUDE.md` | [`CLAUDE.md`](../CLAUDE.md) | What every Claude run reads first: layout, data rules, test conventions, CI rules. 60 lines or fewer | Specific |
 | Local notes | [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) | Building, phone installs and simulator quirks, kept out of `CLAUDE.md` because cloud runs can't use them | Specific |
 | Test targets | `GymTrackTests/`, `GymTrackWatchTests/`, `GymTrackUITests/` | Swift Testing unit tests and XCUITest flows. Every PR extends them | Specific |
@@ -207,8 +214,8 @@ Filled in from the first runs on the setup PR (see section 9).
 
 ## 8. Porting to another repo
 
-1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml` and
-   `scripts/claude-pipeline/` into the new repo.
+1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml`, `.github/ISSUE_TEMPLATE/`
+   and `scripts/claude-pipeline/` into the new repo. Reword the issue forms' examples for that app.
 2. Replace the `build-and-test` steps for the new stack, keeping the job name. For example:
    - Xcode: `xcodebuild test -scheme App -destination "id=$SIM_ID" CODE_SIGNING_ALLOWED=NO` on `macos-26`
    - Node: `npm ci && npm test` on `ubuntu-latest`

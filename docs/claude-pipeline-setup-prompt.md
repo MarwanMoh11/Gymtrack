@@ -150,7 +150,9 @@ into `docs/DEVELOPMENT.md`. Include:
 
 ## Phase 5: Workflows
 
-Copy the template's `claude.yml` and `pr-check.yml`. Keep their structure and action inputs. Then:
+Copy the template's `claude.yml` and `pr-check.yml`, and its issue forms in `.github/ISSUE_TEMPLATE/`
+(Bug report and Feature request, whose last question adds `@claude` only on "Yes"). Keep the
+workflows' structure and action inputs. Then:
 - Check the current major versions of `actions/checkout`, `actions/upload-artifact` and
   `anthropics/claude-code-action` (`gh api repos/<owner>/<repo>/releases/latest`), and check the
   Opus model ID.
