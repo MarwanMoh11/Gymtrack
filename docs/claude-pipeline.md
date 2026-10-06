@@ -110,7 +110,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 
 **`claude.yml`**
 - The `if:` checks for `@claude` before a runner starts, so ordinary issues and comments cost
-  nothing. Issues trigger only on `opened`: editing an old issue to add `@claude` does nothing, so
+  nothing. It also skips anything a bot wrote: a review that quotes `@claude plan this` would
+  otherwise start a Mac only for the action to refuse the bot. Issues trigger only on `opened`: editing an old issue to add `@claude` does nothing, so
   comment instead.
 - No `allowed_non_write_users`. The action itself refuses anyone without write access, which is
   what keeps strangers on a public repo from spending the subscription.
