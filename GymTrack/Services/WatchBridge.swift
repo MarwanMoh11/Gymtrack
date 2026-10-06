@@ -44,8 +44,9 @@ final class WatchBridge: NSObject {
 
     /// Called once at launch. Safe on devices with no watch — `isSupported`
     /// stays false and every push below is a no-op.
+    /// A unit-test host stays unlinked too, so a test's push is the same no-op.
     func activate() {
-        guard WCSession.isSupported() else { return }
+        guard !LaunchMode.isUnitTestHost, WCSession.isSupported() else { return }
         isSupported = true
         let session = WCSession.default
         session.delegate = self
@@ -128,7 +129,9 @@ final class WatchBridge: NSObject {
 
     // MARK: - Receiving
 
-    private func handle(_ payload: [String: Any]) {
+    /// Internal rather than private so a test can feed a payload through the
+    /// same verdict the delegate callbacks reach.
+    func handle(_ payload: [String: Any]) {
         guard let command = WatchCommand.fromWatchPayload(payload, key: WatchLink.commandKey) else { return }
         // Judged before anything reads it, headless or not: this is the one
         // place both routes share. A refused command still costs a mirror, so

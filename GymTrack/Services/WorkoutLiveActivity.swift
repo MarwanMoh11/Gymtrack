@@ -22,8 +22,10 @@ final class WorkoutLiveActivity {
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack", category: "LiveActivity")
 
     /// False when the user has switched Live Activities off for GymTrack (or
-    /// system-wide). Everything below is then a no-op.
-    var isAvailable: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+    /// system-wide), and under test, where every `ActiveWorkout` a test built
+    /// would leave a real activity on the simulator. Everything below is then
+    /// a no-op.
+    var isAvailable: Bool { !LaunchMode.isTesting && ActivityAuthorizationInfo().areActivitiesEnabled }
 
     // MARK: - Lifecycle
 

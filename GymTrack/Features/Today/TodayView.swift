@@ -439,6 +439,7 @@ struct TodayView: View {
 
             Button("Start workout") { start(day: day) }
                 .buttonStyle(PrimaryButtonStyle())
+                .accessibilityIdentifier("today.startWorkout")
 
             Button("Train something else") { showingDayPicker = true }
                 .gtFont(size: 14, weight: .semibold, relativeTo: .subheadline)

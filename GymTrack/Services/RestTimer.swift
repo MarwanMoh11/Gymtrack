@@ -62,6 +62,9 @@ struct SystemRestNotifier: RestNotifying {
     }
 
     func requestPermission() {
+        // Under test the system alert would cover the logger and eat the taps
+        // a UI test makes on it.
+        guard !LaunchMode.isTesting else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 }
