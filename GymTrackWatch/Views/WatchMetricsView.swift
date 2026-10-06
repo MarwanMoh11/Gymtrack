@@ -5,6 +5,7 @@ import SwiftUI
 struct WatchMetricsView: View {
     let session: WatchSessionSnapshot
     var recorder: WatchWorkoutRecorder
+    var focus: WatchRestFocus
 
     var body: some View {
         ScrollView {
@@ -24,6 +25,7 @@ struct WatchMetricsView: View {
                 setsRow
             }
             .padding(.horizontal, 2)
+            .reportsScrolling(to: focus)
         }
         .navigationTitle("Session")
         .watchScreenTint(.working)
