@@ -81,8 +81,11 @@ Risk:
 - **Medium**: what a screen does, a calculation, a suggestion, or a new setting.
 - **High**: anything under `GymTrack/Models/` (the saved data), backup or restore, the watch link,
   or anything that could lose a set or block logging mid-workout. High adds the backup step and,
-  under **Then**, "Not merging: put the old build back, then Today, gear button, 'Restore from a
-  backup'". A build that changed the saved data can leave the old one unable to open it.
+  under **Then**, this line in place of the usual one: "Not merging: delete GymTrack from the phone,
+  install the old build (`git switch main && git pull && sh scripts/install-phone.sh`), then Today,
+  gear button, 'Restore from a backup'". A build that changed the saved data can leave the old one
+  unable to open it: it shows "Training data unavailable" with only "Try again", so the data has
+  to go before the backup can come back.
 
 ## When the pull request changes
 

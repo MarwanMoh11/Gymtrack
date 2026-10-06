@@ -97,7 +97,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 | Implement workflow | [`.github/workflows/claude.yml`](../.github/workflows/claude.yml) | Runs Claude (Opus) on `macos-26` when `@claude` appears in a new issue, a comment or a PR review comment | Generic, apart from the runner and the checker |
 | Planning instructions | [`.github/claude-planning.md`](../.github/claude-planning.md) | How a run splits an issue into sub-issues instead of implementing it | Generic |
 | Test checklist | [`.github/claude-test-checklist.md`](../.github/claude-test-checklist.md) | How every PR's **Test before you merge** section is written, with an "About the owner" part to edit | The format is generic; the owner part and the app's tabs are specific |
-| Checker | [`scripts/claude-pipeline/check.sh`](../scripts/claude-pipeline/check.sh) | `check.sh build` compiles all three targets, `check.sh test <Target/Suite>` runs suites; both print only errors and failures. The one command a cloud run may execute; also usable locally | Specific |
+| Checker | [`scripts/claude-pipeline/check.sh`](../scripts/claude-pipeline/check.sh) | `check.sh build` compiles all three targets, `check.sh test <Target/Suite>` runs suites; both print only errors and failures. The only build or test command a cloud run may execute; also usable locally | Specific |
 | PR workflow | [`.github/workflows/pr-check.yml`](../.github/workflows/pr-check.yml) | `build-and-test` on `macos-26`, plus the Claude review | `build-and-test` steps and the review's app description are specific; the rest is generic |
 | Issue forms | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | Bug report and Feature request: apply the label, ask for what Claude needs, and add `@claude` only if you choose "Yes" | Generic structure, GymTrack wording |
 | `CLAUDE.md` | [`CLAUDE.md`](../CLAUDE.md) | What every Claude run reads first: layout, data rules, test conventions, CI rules. 60 lines or fewer | Specific |
@@ -246,9 +246,10 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   - only a write-access user can start a run;
   - the run's token can push branches and open PRs, but `main` is protected by the ruleset;
   - nothing merges without the owner tapping the button after reading the diff;
-  - the subscription token is never handed to Claude's tools: the checker is the only command
-    they may run, it lives outside the checkout so Claude can't change it, and its first act is
-    to restart itself with an empty environment. Everything it then touches in the checkout (a
+  - no command Claude may run hands the subscription token to code from the checkout. Apart
+    from the checker, those commands are `git` and a few `gh` subcommands, which post only what
+    they're given (see "A run can post text" below). The checker lives outside the checkout so
+    Claude can't change it, and its first act is to restart itself with an empty environment. Everything it then touches in the checkout (a
     build script phase, a module Python might import, its own simulator cache) runs without the
     token. Python runs isolated (`-I`), and the cache is parsed as data, never run as shell.
   Still, don't trigger `@claude` on a thread where strangers have posted instructions.
