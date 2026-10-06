@@ -2,7 +2,7 @@
 # Runs every scripts/test-*.sh, one after another, and says which failed.
 #
 #   sh scripts/test-all.sh            all of them
-#   sh scripts/test-all.sh backup     only scripts whose name contains "backup"
+#   sh scripts/test-all.sh watch      only scripts whose name contains "watch"
 #
 # Each script's output goes to build/test-logs/<name>.log rather than the
 # terminal, because fifty compiles interleaved would bury the one line that
