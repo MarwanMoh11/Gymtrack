@@ -8,4 +8,11 @@ struct LaunchModeTests {
         #expect(LaunchMode.isUnitTestHost)
         #expect(!LaunchMode.isUITesting)
     }
+
+    /// The host's window would otherwise run `RootView`'s launch work against
+    /// the shared catalog and watch link whenever it got round to appearing,
+    /// emptying a custom exercise a test had just set up.
+    @MainActor @Test func hostShowsNoInterface() {
+        #expect(!GymTrackApp.showsInterface)
+    }
 }

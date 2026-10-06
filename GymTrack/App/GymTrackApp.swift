@@ -27,6 +27,16 @@ struct GymTrackApp: App {
         URL.applicationSupportDirectory.appending(path: "default.store")
     }
 
+    /// False in a unit-test host, whose window then stays empty.
+    ///
+    /// `RootView`'s launch work writes to the same singletons the tests set up
+    /// for themselves: the catalog's custom and hidden exercises, the watch
+    /// link's screen handler, the widgets. It runs whenever the window first
+    /// appears, which can be after a test has begun, and a test that had just
+    /// given the catalog a custom exercise would then find the catalog emptied
+    /// to match the host's empty store.
+    static let showsInterface = !LaunchMode.isUnitTestHost
+
     init() {
         // A UI test starts from a fresh install every time. Settings left by an
         // earlier run would otherwise decide which screen it lands on.
@@ -180,8 +190,10 @@ struct GymTrackApp: App {
             Group {
                 switch storeState {
                 case .ready(let container):
-                    RootView()
-                        .modelContainer(container)
+                    if Self.showsInterface {
+                        RootView()
+                            .modelContainer(container)
+                    }
                 case .failed(let detail):
                     StoreRecoveryView(detail: detail, onRetry: retryStore)
                 }
