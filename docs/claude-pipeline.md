@@ -112,7 +112,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   create-PR tool. Without it, Claude's only way to offer a PR is a "Create PR" link that you would
   have to tap.
 - `runs-on: macos-26`, so the run has Xcode and can build its own change before pushing it. Free
-  on a public repo. The limit is 90 minutes because a cold build plus a few test rounds can pass 45.
+  on a public repo. The limit is 180 minutes, a ceiling for hard bugs that need many build rounds;
+  a normal run takes 10 to 30. A run that needs more is usually an issue worth splitting.
 - **Install the checker** copies `check.sh` to `$RUNNER_TEMP` before Claude starts. Claude may edit
   any file in the checkout, so a checker it could edit would let it run any command; the copy
   outside the checkout is out of its reach.

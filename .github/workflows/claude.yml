@@ -21,9 +21,10 @@ jobs:
         (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
       (github.event_name != 'issues' && contains(github.event.comment.body, '@claude'))
     # A Mac, so the run can build and test its own change before pushing it
-    # (free on a public repo). Longer limit: a cold build alone takes minutes.
+    # (free on a public repo). The limit is a ceiling for hard bugs that need many
+    # build rounds; a normal run takes 10 to 30 minutes.
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 180
     permissions:
       contents: write
       pull-requests: write
