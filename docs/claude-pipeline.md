@@ -33,6 +33,17 @@ mention `@claude` anywhere. One behavior per issue keeps the PR small enough to 
 Filter by label to see only bugs or only features:
 `https://github.com/<owner>/<repo>/issues?q=is%3Aopen+label%3Abug`.
 
+**Big features: plan first.** A feature too big for one PR you could review on a phone gets
+split before anyone writes code. Pick "Yes, but it's big" in the feature form, or comment
+`@claude plan this` on any issue. Claude reads the code, opens one sub-issue per piece (each one
+behavior, each mergeable alone, in order), links them under the original so it shows a progress
+bar, and comments with the plan. It writes no code. Each part then starts like any issue: comment
+`@claude implement this` on it, merge its PR, and move on to the next. The parts never start on
+their own. Claude splits only when asked, unless the repository variable `CLAUDE_AUTO_SPLIT` is
+`true` (Settings → Secrets and variables → Actions → Variables; the phone's browser, not the
+GitHub app): then it also splits any issue it judges too big, and `@claude just do it` overrides
+that for one issue.
+
 > **Title:** Show when each lift was last trained in the exercise picker
 >
 > **Body:** @claude In the exercise picker, show "3 days ago" under every exercise that has a
@@ -72,6 +83,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 |---|---|---|
 | PR | `@claude fix the build` | Claude reads the failed check's log and pushes a fix to the same branch |
 | PR | `@claude <change request>` | Claude amends the PR. A comment on a line of the diff works too |
+| Issue | `@claude plan this` | Claude splits the issue into ordered sub-issues and comments with the plan, without writing code |
+| Issue | `@claude just do it` | With `CLAUDE_AUTO_SPLIT` on: implement this issue as one PR rather than splitting it |
 | Issue | `@claude redo this on latest main` | For a PR that conflicts: Claude starts again from current `main` |
 
 ## 2. How it's implemented here
@@ -79,6 +92,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 | Component | Where it lives | What it does | Generic or GymTrack-specific |
 |---|---|---|---|
 | Implement workflow | [`.github/workflows/claude.yml`](../.github/workflows/claude.yml) | Runs Claude (Opus) on `macos-26` when `@claude` appears in a new issue, a comment or a PR review comment | Generic, apart from the runner and the checker |
+| Planning instructions | [`.github/claude-planning.md`](../.github/claude-planning.md) | How a run splits an issue into sub-issues instead of implementing it | Generic |
 | Checker | [`scripts/claude-pipeline/check.sh`](../scripts/claude-pipeline/check.sh) | `check.sh build` compiles all three targets, `check.sh test <Target/Suite>` runs suites; both print only errors and failures. The one command a cloud run may execute; also usable locally | Specific |
 | PR workflow | [`.github/workflows/pr-check.yml`](../.github/workflows/pr-check.yml) | `build-and-test` on `macos-26`, plus the Claude review | `build-and-test` steps and the review's app description are specific; the rest is generic |
 | Issue forms | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | Bug report and Feature request: apply the label, ask for what Claude needs, and add `@claude` only if you choose "Yes" | Generic structure, GymTrack wording |
@@ -96,7 +110,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 
 **`claude.yml`**
 - The `if:` checks for `@claude` before a runner starts, so ordinary issues and comments cost
-  nothing. Issues trigger only on `opened`: editing an old issue to add `@claude` does nothing, so
+  nothing. It also skips anything a bot wrote: a review that quotes `@claude plan this` would
+  otherwise start a Mac only for the action to refuse the bot. Issues trigger only on `opened`: editing an old issue to add `@claude` does nothing, so
   comment instead.
 - No `allowed_non_write_users`. The action itself refuses anyone without write access, which is
   what keeps strangers on a public repo from spending the subscription.
@@ -118,6 +133,12 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   any file in the checkout, so a checker it could edit would let it run any command; the copy
   outside the checkout is out of its reach.
 - `CLAUDE_CODE_EFFORT_LEVEL: xhigh` runs Opus at its extra-high effort, in the review too.
+- `Bash(gh issue create:*)` and `Bash(gh api repos/<repo>/issues/:*)` let a planning run create
+  the parts and link them as sub-issues. `gh api` is limited to this repo's issues.
+- `${{ vars.CLAUDE_AUTO_SPLIT == 'true' && ... }}` in the system prompt is the toggle: with the
+  variable unset, Claude plans only when asked and otherwise implements, noting in the PR if the
+  issue should have been split. A variable rather than a code change, so it can be flipped
+  between runs without a PR.
 - `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` raise Claude Code's per-command limit (2
   minutes by default, 10 at most) to 40 minutes, which a cold build needs.
 - `Bash(${{ runner.temp }}/check.sh:*)` in `--allowedTools` is the only shell command Claude may
@@ -174,6 +195,11 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   reason teaches you to bypass gates.
 - **Claude opens the PR itself.** Otherwise the run ends with a "Create PR" link, which is one more
   tap and one more page on a phone, and the PR would lack the `Closes #N` and test steps.
+- **Splitting is on request by default.** A run that decides by itself to plan rather than build
+  surprises you on an issue you meant as one piece. So the default is: split only when asked,
+  implement otherwise and say in the PR if it should have been split. `CLAUDE_AUTO_SPLIT=true`
+  hands that judgement to Claude once you trust it. The parts never start themselves: chaining
+  them would need a workflow that starts runs without you, and each part is worth a look first.
 - **Opus at `xhigh` effort for both workflows** (`claude-opus-5-5`, `CLAUDE_CODE_EFFORT_LEVEL:
   xhigh` on the action step). Swift that compiles the first time saves build rounds in the
   implementing run, and the reviewer judges a diff it can't build. Both are worth the stronger
@@ -216,6 +242,9 @@ The merged branch is deleted, and `Closes #N` closes the issue.
     build script phase, a module Python might import, its own simulator cache) runs without the
     token. Python runs isolated (`-I`), and the cache is parsed as data, never run as shell.
   Still, don't trigger `@claude` on a thread where strangers have posted instructions.
+- **A planning run can create issues.** It may run `gh issue create` and `gh api` against this
+  repo's issues only. An issue it creates can't start a run: the action refuses bot actors, and
+  the planning instructions keep the mention out of what it writes.
 - **What the checker can't hide.** An empty environment keeps the Claude token out of a build,
   but the checkout's git credentials sit in `.git/config`, where a build phase Claude added could
   read them. `persist-credentials: false` wouldn't help: the action deletes the checkout's
@@ -246,6 +275,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| A plan comment but no sub-issues, or sub-issues not linked | A `gh` command was denied: the allowed patterns in `claude.yml` don't match what Claude ran | The run's log shows the denied command. Link by hand from the parent issue's "Create sub-issue" menu, or comment `@claude link the parts as sub-issues` |
+| Claude planned an issue you wanted built | `CLAUDE_AUTO_SPLIT` is `true` and it judged the issue too big | Comment `@claude just do it`, or unset the variable |
 | Claude says the checker was denied or timed out | The `--allowedTools` path doesn't match the copy, or the `BASH_*_TIMEOUT_MS` values are gone | Compare `claude.yml` with this document. The run's log shows the exact command Claude tried |
 | Nothing happens after opening an issue | `@claude` missing, issue edited rather than opened, author lacks write access, App not installed, secret missing, or `claude.yml` not on `main` | Check the Actions tab. If no run appears, comment `@claude` on the issue. If a run failed, its log names the cause |
 | Claude leaves a "Create PR" link instead of a PR | The create-PR tool wasn't allowed or failed | Tap the link, or comment `@claude open the pull request`. Check `--allowedTools` in `claude.yml` |
@@ -281,8 +312,8 @@ page reports it.
 
 ## 8. Porting to another repo
 
-1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml`, `.github/ISSUE_TEMPLATE/`
-   and `scripts/claude-pipeline/` into the new repo. Reword the issue forms' examples for that app.
+1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml`, `.github/ISSUE_TEMPLATE/`,
+   `.github/claude-planning.md` and `scripts/claude-pipeline/` into the new repo. Reword the issue forms' examples for that app.
 2. Replace the `build-and-test` steps for the new stack, keeping the job name. For example:
    - Xcode: `xcodebuild test -scheme App -destination "id=$SIM_ID" CODE_SIGNING_ALLOWED=NO` on `macos-26`
    - Node: `npm ci && npm test` on `ubuntu-latest`
