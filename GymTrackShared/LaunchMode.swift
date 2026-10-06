@@ -13,7 +13,14 @@ enum LaunchMode {
     /// Passed by `GymTrackUITests` when it launches the app.
     static let uiTestingArgument = "-GTUITesting"
 
+    /// Honoured only in debug builds, which is what tests run. It empties the
+    /// app's settings and opens a store that vanishes on quit, and a release
+    /// build must never do either, whatever it is launched with.
+    #if DEBUG
     static let isUITesting = ProcessInfo.processInfo.arguments.contains(uiTestingArgument)
+    #else
+    static let isUITesting = false
+    #endif
 
     /// XCTest sets the configuration path in the host's environment. Only that
     /// is trusted: a looser check that misfired on a real launch would open an

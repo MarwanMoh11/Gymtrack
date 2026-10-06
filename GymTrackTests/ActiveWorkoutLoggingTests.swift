@@ -454,7 +454,7 @@ struct ActiveWorkoutLoggingTests {
             // The screen never offers the question for a set that has not been
             // lifted, but the logger takes the answer as given: a rating on a
             // row with no lift would be exported with the set it later became.
-            withKnownIssue("rate(_:feel:) has no isCompleted guard; the UI and the wrist command path add their own") {
+            withKnownIssue("rate(_:feel:) has no isCompleted guard; the UI and the wrist command path add their own (#4)") {
                 workout.rate(rows[0], feel: .hard)
                 #expect(rows[0].rpe == nil)
             }

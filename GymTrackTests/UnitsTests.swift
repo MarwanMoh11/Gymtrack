@@ -101,7 +101,7 @@ struct UnitsTests {
         // 3 / 2.20462262 * 2.20462262 is 3.0000000000000004, which the
         // whole-number test reads as fractional, so a 3 lb weigh-in is labelled
         // "3.0 lb". About one pound value in ten does this.
-        withKnownIssue("WeightUnit.format treats float noise from kg->lb as a fraction and prints '3.0 lb'") {
+        withKnownIssue("WeightUnit.format treats float noise from kg->lb as a fraction and prints '3.0 lb' (#3)") {
             #expect(WeightUnit.lb.format(stored) == expected)
         }
     }

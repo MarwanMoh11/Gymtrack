@@ -22,7 +22,7 @@ final class WorkoutLoggingFlowUITests: GymTrackUITestCase {
     /// finished session with a set in it is what Today then offers to view.
     ///
     /// The undo takes the second set rather than the only one: undoing the only
-    /// logged set crashes the app today (see the report), and a crash cannot be
+    /// logged set crashes the app today (issue #2), and a crash cannot be
     /// wrapped as a known issue because XCTest raises it outside the wrapper.
     func testFreestyleSetsCanBeLoggedUndoneAndTheWorkoutFinished() throws {
         app = launchApp(onboarded: true)

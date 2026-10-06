@@ -205,7 +205,7 @@ struct BackupDecodingTests {
         // `validate` turns away a negative weight and a negative time, and a
         // rep count is the one measurement of the three it lets through. A
         // negative count restores as negative volume and negative total reps.
-        withKnownIssue("validate does not check SetDTO.reps, so a negative rep count restores") {
+        withKnownIssue("validate does not check SetDTO.reps, so a negative rep count restores (#5)") {
             #expect(throws: BackupService.RestoreError.self) {
                 try BackupService.restore(data: data, context: context)
             }
