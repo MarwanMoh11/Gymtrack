@@ -805,3 +805,177 @@ struct WatchBridgePayloadTests {
         }
     }
 }
+
+// MARK: - How the wrist hears a session end, and what can still reach it
+
+/// What the wrist is told when a session ends with no logger on screen is read
+/// from `WatchBridge.mirrorState`, the mirror the bridge would send next: a
+/// test host never activates the link, so nothing leaves the phone. The Live
+/// Activity is switched off under test and Health here is the real service,
+/// so neither is asserted.
+@MainActor
+extension WatchCommandCenterHeadlessTests {
+
+    private var endTheWristHeard: WatchSessionEnd? { WatchBridge.shared.mirrorState.endedSession }
+
+    @Test func aWristFinishWithNothingLoggedIsADiscardAndTheWristHearsOne() throws {
+        try withRig { rig in
+            let id = try rig.seed().session.id
+            let batch = WatchFinishBatch(sessionID: id, logs: [], undos: [], starts: [:], cancels: [],
+                                         ratings: [], endedAt: rig.at(900))
+
+            rig.send(.finishSession(batch, metrics: nil))
+
+            #expect(rig.sessions().isEmpty)
+            #expect(rig.allSets().isEmpty)
+            #expect(endTheWristHeard == WatchSessionEnd(sessionID: id, reason: .discarded))
+        }
+    }
+
+    /// The batch's own log counts: a Finish that overtook the wrist's only log
+    /// is not an empty one.
+    @Test func aWristFinishCarryingItsOnlyLogKeepsTheSessionAndTheSet() throws {
+        try withRig { rig in
+            let (session, sets) = try rig.seed()
+            let log = WatchPendingLog(setID: sets[0].id, weightKg: 60, reps: 8, seconds: 0,
+                                      completedAt: rig.at(600))
+            let batch = WatchFinishBatch(sessionID: session.id, logs: [log], undos: [], starts: [:], cancels: [],
+                                         ratings: [], endedAt: rig.at(900))
+
+            rig.send(.finishSession(batch, metrics: nil))
+
+            #expect(rig.sessions().map(\.id) == [session.id])
+            #expect(!session.isActive)
+            #expect(session.completedSets.map(\.id) == [sets[0].id])
+            #expect(endTheWristHeard == WatchSessionEnd(sessionID: session.id, reason: .finished))
+        }
+    }
+
+    /// Told as finished when it kept a set, so a watch still recording keeps
+    /// its workout rather than throwing it away; as discarded when it was
+    /// deleted for being empty.
+    @Test(arguments: [false, true])
+    func aStaleSessionTheNextMirrorRetiresIsToldToTheWristAsItEnded(withASet: Bool) throws {
+        try withRig { rig in
+            let longAgo = rig.started.addingTimeInterval(-(WorkoutSession.staleAfter + 3600))
+            let (session, sets) = try rig.seed(startedAt: longAgo)
+            let id = session.id
+            let lastSet = longAgo.addingTimeInterval(40 * 60)
+            if withASet {
+                rig.complete(sets[0], at: lastSet)
+                try rig.context.save()
+            }
+
+            rig.send(.requestMirror)
+
+            if withASet {
+                #expect(sameMoment(session.endedAt, lastSet))
+                #expect(endTheWristHeard == WatchSessionEnd(sessionID: id, reason: .finished))
+            } else {
+                #expect(rig.sessions().isEmpty)
+                #expect(endTheWristHeard == WatchSessionEnd(sessionID: id, reason: .discarded))
+            }
+        }
+    }
+
+    /// The Finish carried the wrist's final state of the set. A queued undo or
+    /// log delivered after it must not rewrite that closed record.
+    @Test func aQueuedUndoOrLogCannotRewriteASetInAClosedSession() throws {
+        try withRig { rig in
+            let (session, sets) = try rig.seed()
+            let set = sets[0]
+            set.weightKg = 55
+            rig.complete(set, at: rig.at(600))
+            session.close(at: rig.at(900), in: rig.context)
+            try rig.context.save()
+
+            rig.send(.undoSet(id: set.id, completedAt: nil))
+            rig.send(.undoSet(id: set.id, completedAt: rig.at(600)))
+            rig.send(.logSet(id: set.id, weightKg: 20, reps: 2, seconds: 0, at: rig.at(1000)))
+
+            // What was saved, not what this context holds.
+            let reader = ModelContext(rig.container)
+            let stored = try #require(reader.fetch(FetchDescriptor<SetLog>()).first { $0.id == set.id })
+            #expect(stored.isCompleted)
+            #expect(stored.weightKg == 55 && stored.reps == 8)
+            #expect(sameMoment(stored.completedAt, rig.at(600)))
+        }
+    }
+
+    // MARK: The logger's start rules, with no logger (LOG-10, SESS-06)
+
+    /// With the phone asleep, a start abandoned for another exercise is exactly
+    /// what the queue delivers minutes before the log that used to close it.
+    @Test func aWristLogOfAnotherSetOvertakesAStartAnnouncedBeforeIt() throws {
+        try withRig { rig in
+            let (_, sets) = try rig.seed(exercises: ["test-bench", "test-row"])
+            let bench = sets[0], row = sets[3]
+
+            rig.send(.announceStart(id: bench.id, at: rig.at(500)))
+            rig.send(rig.log(row, at: 550))
+            rig.send(rig.log(bench, at: 600))
+
+            #expect(bench.isCompleted && row.isCompleted)
+            #expect(bench.startedAt == nil)
+        }
+    }
+
+    @Test(arguments: [(gap: 1_500.0, kept: false), (gap: 60.0, kept: true)])
+    func aWristStartIsKeptOnlyIfTheSetCouldHaveFilledTheGapToItsLog(gap: Double, kept: Bool) throws {
+        try withRig { rig in
+            let set = try rig.seed().sets[0]
+            let start = rig.at(2_000 - gap)
+
+            rig.send(.announceStart(id: set.id, at: start))
+            rig.send(rig.log(set, at: 2_000))
+
+            #expect(set.isCompleted)
+            if kept {
+                #expect(sameMoment(set.startedAt, start))
+                #expect(set.timeUnderTension != nil)
+            } else {
+                // Dropped, not clamped.
+                #expect(set.startedAt == nil)
+                #expect(set.timeUnderTension == nil)
+            }
+        }
+    }
+
+    @Test func aLaterWristStartSupersedesAnEarlierOne() throws {
+        try withRig { rig in
+            let (_, sets) = try rig.seed(exercises: ["test-bench", "test-row"])
+
+            rig.send(.announceStart(id: sets[4].id, at: rig.at(500)))
+            rig.send(.announceStart(id: sets[5].id, at: rig.at(570)))
+
+            #expect(sets[4].startedAt == nil)
+            #expect(sameMoment(sets[5].startedAt, rig.at(570)))
+        }
+    }
+
+    /// As the phone's own undo takes them: left logged, the drops went into
+    /// the record as lifts taken without rest off a set that was never done.
+    @Test func aWristUndoTakesTheLoggedDropBelowItBackAndNothingElse() throws {
+        try withRig { rig in
+            let (_, sets) = try rig.seed()
+            for (offset, set) in sets.enumerated() {
+                rig.complete(set, at: rig.at(300 + Double(offset) * 20))
+                set.rpe = SetFeel.solid.rawValue
+            }
+            sets[1].continuesPreviousSet = true
+            sets[1].startedAt = rig.at(305)
+            try rig.context.save()
+
+            rig.send(.undoSet(id: sets[0].id, completedAt: sets[0].completedAt))
+
+            #expect(!sets[0].isCompleted)
+            #expect(sets[0].rpe == nil)
+            #expect(!sets[1].isCompleted)
+            #expect(sets[1].completedAt == nil && sets[1].rpe == nil && sets[1].startedAt == nil)
+            // Still a continuation: the undo takes back the lift, not what the row is.
+            #expect(sets[1].isContinuation)
+            // Not a continuation, so not this undo's to take back.
+            #expect(sets[2].isCompleted)
+        }
+    }
+}

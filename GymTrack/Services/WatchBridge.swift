@@ -33,7 +33,9 @@ final class WatchBridge: NSObject {
 
     /// Sends nothing until `WatchCommandCenter.configure` has read the store —
     /// see `WatchMirrorState` for the mid-workout recording this protects.
-    @ObservationIgnored private var mirrorState = WatchMirrorState()
+    /// Readable so a test can see how the wrist was told a session ended: a
+    /// test host never activates the link, so nothing it pushes leaves here.
+    @ObservationIgnored private(set) var mirrorState = WatchMirrorState()
     private let log = Logger(subsystem: "com.marwanmohamed.gymtrack", category: "WatchBridge")
 
     private override init() {
