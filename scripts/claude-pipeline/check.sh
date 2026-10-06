@@ -16,25 +16,30 @@
 
 set -u
 
-cd "$(git rev-parse --show-toplevel)" || exit 2
+# The script starts over with a bare environment before doing anything else.
+# The cloud run can write any file in the checkout, so anything read from there
+# may turn out to be code: a script phase in the project, a module Python finds
+# in the current directory, a cached file. With nothing secret in the
+# environment, none of it can reach the Claude token.
+if [ -z "${CHECK_SCRUBBED:-}" ]; then
+    root=${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)} || exit 2
+    exec env -i PATH="$PATH" HOME="$HOME" USER="${USER:-runner}" TMPDIR="${TMPDIR:-/tmp}" \
+        LANG=en_US.UTF-8 ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} \
+        CHECK_SCRUBBED=1 CHECK_ROOT="$root" /bin/sh "$0" "$@"
+fi
+
+cd "$CHECK_ROOT" || exit 2
 OUT=build/claude-check
 mkdir -p "$OUT"
 
-# xcodebuild gets a bare environment. A build runs whatever script phases the
-# project declares, and the cloud run can edit the project, so nothing secret in
-# this process's environment (the Claude token above all) may reach a build.
-xcb() {
-    env -i PATH="$PATH" HOME="$HOME" USER="${USER:-runner}" TMPDIR="${TMPDIR:-/tmp}" \
-        LANG=en_US.UTF-8 ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} \
-        xcodebuild "$@"
-}
-
-# The same choice CI makes: the newest iPhone Pro and 46mm watch on the newest
-# runtime, looked up because names change with every Xcode. Cached, because
-# asking simctl takes seconds and the answer can't change within a run.
+# The newest iPhone Pro and 46mm watch on the newest runtime, looked up because
+# names change with every Xcode. Cached, because asking simctl takes seconds and
+# the answer can't change within a run. Python runs isolated (-I), so it can't
+# import a module planted in the checkout, and the cache is read as data: only
+# a well-formed simulator ID is taken from it, never run as shell.
 pick_simulators() {
     if [ ! -s "$OUT/sims.env" ]; then
-        python3 - > "$OUT/sims.env" <<'PY' || exit 2
+        python3 -I - > "$OUT/sims.env" <<'PY' || exit 2
 import json, re, subprocess, sys
 devices = json.loads(subprocess.check_output(
     ["xcrun", "simctl", "list", "devices", "available", "-j"]))["devices"]
@@ -62,8 +67,13 @@ print("IPHONE_ID=" + pick("iOS", r"iPhone \d+ Pro$", "iPhone"))
 print("WATCH_ID=" + pick("watchOS", r"Apple Watch Series \d+ \(46mm\)$", "Apple Watch"))
 PY
     fi
-    # shellcheck source=/dev/null # written just above
-    . "./$OUT/sims.env"
+    IPHONE_ID=$(sed -n 's/^IPHONE_ID=\([0-9A-F-]\{36\}\)$/\1/p' "$OUT/sims.env")
+    WATCH_ID=$(sed -n 's/^WATCH_ID=\([0-9A-F-]\{36\}\)$/\1/p' "$OUT/sims.env")
+    if [ -z "$IPHONE_ID" ] || [ -z "$WATCH_ID" ]; then
+        rm -f "$OUT/sims.env"
+        echo "Could not pick simulators; run again" >&2
+        exit 2
+    fi
 }
 
 # Compiler errors and test failures, each once, with the repo path trimmed so
@@ -84,7 +94,7 @@ run() {
     label=$1 log=$2 verbosity=$3
     shift 3
     # shellcheck disable=SC2086 # an empty verbosity must vanish, not become ""
-    if xcb "$@" $verbosity CODE_SIGNING_ALLOWED=NO > "$log" 2>&1; then
+    if xcodebuild "$@" $verbosity CODE_SIGNING_ALLOWED=NO > "$log" 2>&1; then
         echo "ok: $label"
         return 0
     fi

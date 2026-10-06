@@ -211,13 +211,14 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   - the run's token can push branches and open PRs, but `main` is protected by the ruleset;
   - nothing merges without the owner tapping the button after reading the diff;
   - the subscription token is never handed to Claude's tools: the checker is the only command
-    they may run, it lives outside the checkout so Claude can't change it, and it runs
-    `xcodebuild` with an empty environment, so a build script phase added to the project can't
-    read the token either.
+    they may run, it lives outside the checkout so Claude can't change it, and its first act is
+    to restart itself with an empty environment. Everything it then touches in the checkout (a
+    build script phase, a module Python might import, its own simulator cache) runs without the
+    token. Python runs isolated (`-I`), and the cache is parsed as data, never run as shell.
   Still, don't trigger `@claude` on a thread where strangers have posted instructions.
-- **What the checker can't hide.** `env -i` keeps the Claude token out of a build, but the
-  checkout's git credentials sit in `.git/config`, where a build phase Claude added could read
-  them. Those tokens can do no more than the run already can (push a branch, open a PR, never
+- **What the checker can't hide.** An empty environment keeps the Claude token out of a build,
+  but the checkout's git credentials sit in `.git/config`, where a build phase Claude added could
+  read them. Those tokens can do no more than the run already can (push a branch, open a PR, never
   touch `main`) and expire with the job, so the risk is accepted rather than sandboxed away.
 
 ## 5. Costs and limits

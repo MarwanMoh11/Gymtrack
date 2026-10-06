@@ -42,7 +42,7 @@ The backup's `version` stays 2; every field added since is optional.
   `GymTrackWatchTests/` or `GymTrackUITests/`. Never add tests to `Tests/`; fix one there only when
   your change breaks it.
 - `@MainActor @Suite(.serialized)`, `@Test`, `#expect`, `@Test(arguments:)` for edge cases. Dates from
-  `TestClock`, never `Date()`; no sleeps; restore any singleton you touch in `defer`.
+  `TestClock`; `Date.now` only where the code checks its own clock; no sleeps; restore singletons in `defer`.
 - A test exposing a real bug stays, in `withKnownIssue`; never weaken an assertion. UI tests find
   controls by accessibility identifier and wait with `waitForExistence`.
 
