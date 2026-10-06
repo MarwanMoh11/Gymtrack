@@ -17,8 +17,8 @@ Planning replaces implementing: change no code, make no commits, open no pull re
    Usually 2 to 6. If the issue already fits one pull request, say so in your comment and create
    nothing; the owner can then ask you to implement it.
 3. For each piece, write its body to `build/plan/<n>.md` and create it:
-   `gh issue create --title "<short title>" --label enhancement --body-file build/plan/<n>.md`.
-   The body has the feature form's sections, in this order: **Part n of N of #parent**, **What
+   `gh issue create --title "Part <n> of <N>: <short title>" --label enhancement --body-file build/plan/<n>.md`.
+   The number leads the title so the order shows in an issue list on a phone. The body has the feature form's sections, in this order: **Part n of N of #parent**, **What
    should change**, **What must not change** (carry the parent's over), **Done when**, and
    **Depends on** (issue numbers, or "nothing").
 4. Link each one under the parent, in order. `gh api repos/<owner>/<repo>/issues/<n> --jq .id`

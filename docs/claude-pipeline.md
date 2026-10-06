@@ -57,7 +57,10 @@ that for one issue.
    branch. The **Actions** tab (on a phone: the repo → Actions) shows every run live, and each
    finished run's summary page has a report with the model, the turns and the duration.
 2. After about 5 to 15 minutes, it pushes a `claude/issue-N-...` branch and opens a PR whose body
-   says `Closes #N` and has a "How to test on device" section.
+   says `Closes #N` and ends with a **Test before you merge** checklist: what changed, how risky it
+   is, whether you need your phone at all, and the taps to try. Tick the boxes in the PR as you go.
+   How Claude writes it, and the part about you that you can edit, is in
+   [`.github/claude-test-checklist.md`](../.github/claude-test-checklist.md).
 3. `PR Check` starts. The review comment arrives in about 2 minutes. `build-and-test`, the only
    check that blocks merging, takes about 10 minutes; `ui-tests` and `script-tests` report later
    (see [timings](#7-timings-observed)).
@@ -93,6 +96,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 |---|---|---|---|
 | Implement workflow | [`.github/workflows/claude.yml`](../.github/workflows/claude.yml) | Runs Claude (Opus) on `macos-26` when `@claude` appears in a new issue, a comment or a PR review comment | Generic, apart from the runner and the checker |
 | Planning instructions | [`.github/claude-planning.md`](../.github/claude-planning.md) | How a run splits an issue into sub-issues instead of implementing it | Generic |
+| Test checklist | [`.github/claude-test-checklist.md`](../.github/claude-test-checklist.md) | How every PR's **Test before you merge** section is written, with an "About the owner" part to edit | The format is generic; the owner part and the app's tabs are specific |
 | Checker | [`scripts/claude-pipeline/check.sh`](../scripts/claude-pipeline/check.sh) | `check.sh build` compiles all three targets, `check.sh test <Target/Suite>` runs suites; both print only errors and failures. The one command a cloud run may execute; also usable locally | Specific |
 | PR workflow | [`.github/workflows/pr-check.yml`](../.github/workflows/pr-check.yml) | `build-and-test` on `macos-26`, plus the Claude review | `build-and-test` steps and the review's app description are specific; the rest is generic |
 | Issue forms | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | Bug report and Feature request: apply the label, ask for what Claude needs, and add `@claude` only if you choose "Yes" | Generic structure, GymTrack wording |
@@ -123,9 +127,11 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 - `display_report: "true"` puts a report on the run's summary page: the model, the turns and the
   duration, so a phone can see what ran without reading the raw log. The repo is public, so that
   report is too, the same as the log.
-- `--allowedTools "mcp__github__create_pull_request"` switches on the GitHub MCP server's
-  create-PR tool. Without it, Claude's only way to offer a PR is a "Create PR" link that you would
-  have to tap.
+- `Bash(gh pr create:*)`, `Bash(gh pr edit:*)` and the two read-only `view` commands let Claude
+  open its PR and keep the checklist current after a follow-up. The action puts its token in `gh`'s
+  environment. Its own create-PR tool (`mcp__github__create_pull_request`) runs in Docker, which
+  macOS runners don't have: the first run on a Mac reported "the GitHub MCP server didn't connect"
+  and could only leave a "Create PR" link.
 - `runs-on: macos-26`, so the run has Xcode and can build its own change before pushing it. Free
   on a public repo. The limit is 180 minutes, a ceiling for hard bugs that need many build rounds;
   a normal run takes 10 to 30. A run that needs more is usually an issue worth splitting.
@@ -194,7 +200,11 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   compiles or it doesn't. A model's verdict isn't, and a gate that sometimes says no for no
   reason teaches you to bypass gates.
 - **Claude opens the PR itself.** Otherwise the run ends with a "Create PR" link, which is one more
-  tap and one more page on a phone, and the PR would lack the `Closes #N` and test steps.
+  tap and one more page on a phone, and the PR would lack the `Closes #N` and the checklist.
+- **The checklist is written by the run that made the change.** It has read every view it touched,
+  so it can quote the real labels; the review sees only the diff. Its rules live in a file rather
+  than the workflow so the owner can personalise them from a phone, and a change takes effect on
+  the next run without touching `claude.yml`.
 - **Splitting is on request by default.** A run that decides by itself to plan rather than build
   surprises you on an issue you meant as one piece. So the default is: split only when asked,
   implement otherwise and say in the PR if it should have been split. `CLAUDE_AUTO_SPLIT=true`
@@ -242,9 +252,12 @@ The merged branch is deleted, and `Closes #N` closes the issue.
     build script phase, a module Python might import, its own simulator cache) runs without the
     token. Python runs isolated (`-I`), and the cache is parsed as data, never run as shell.
   Still, don't trigger `@claude` on a thread where strangers have posted instructions.
-- **A planning run can create issues.** It may run `gh issue create` and `gh api` against this
-  repo's issues only. An issue it creates can't start a run: the action refuses bot actors, and
-  the planning instructions keep the mention out of what it writes.
+- **A run can post text.** It may run `gh pr create`, `gh pr edit`, `gh issue create`, and `gh api`
+  against this repo's issues only. With `--body-file` any of these can post a file the run can read,
+  and the checkout's `.git/config` holds the run's GitHub token (see below), so a run steered by
+  planted instructions could publish it. That token expires within an hour, and only people with
+  write access can start a run. An issue a run creates can't start another: the action refuses bot
+  actors, and the planning instructions keep the mention out of what it writes.
 - **What the checker can't hide.** An empty environment keeps the Claude token out of a build,
   but the checkout's git credentials sit in `.git/config`, where a build phase Claude added could
   read them. `persist-credentials: false` wouldn't help: the action deletes the checkout's
@@ -279,7 +292,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 | Claude planned an issue you wanted built | `CLAUDE_AUTO_SPLIT` is `true` and it judged the issue too big | Comment `@claude just do it`, or unset the variable |
 | Claude says the checker was denied or timed out | The `--allowedTools` path doesn't match the copy, or the `BASH_*_TIMEOUT_MS` values are gone | Compare `claude.yml` with this document. The run's log shows the exact command Claude tried |
 | Nothing happens after opening an issue | `@claude` missing, issue edited rather than opened, author lacks write access, App not installed, secret missing, or `claude.yml` not on `main` | Check the Actions tab. If no run appears, comment `@claude` on the issue. If a run failed, its log names the cause |
-| Claude leaves a "Create PR" link instead of a PR | The create-PR tool wasn't allowed or failed | Tap the link, or comment `@claude open the pull request`. Check `--allowedTools` in `claude.yml` |
+| Claude leaves a "Create PR" link instead of a PR | `gh pr create` was denied or failed | Tap the link, or comment `@claude open the pull request`. Check `--allowedTools` in `claude.yml`, and the run's log for the command it tried |
+| A PR has no **Test before you merge** section, or an old one | The run skipped `.github/claude-test-checklist.md`, or a follow-up didn't update it | Comment `@claude write the test checklist` |
 | The review comment is missing | A fork PR (by design), a draft PR, a missing secret, or the PR changes `pr-check.yml` itself | For a PR that edits `pr-check.yml`, the action refuses to run a workflow that differs from `main`'s copy ("Workflow validation failed"). That's expected: merge it, and later PRs get reviews |
 | The build is red | A compile error or failing test | The failed step's log lists only the errors and failures; full logs are in the `*-logs-N` artifact. Comment `@claude fix the build` |
 | The review fails after posting its comment, or never posts | It ran out of turns. Past `--max-turns` the action marks even a posted review failed, and on a large PR the turns can run out before it posts | The prompt asks for the comment within 25 of the 40 turns, and the diff is saved to `pr.diff` so it can be read in parts. If it still happens, raise `--max-turns` in `pr-check.yml`, on `main` too |
@@ -313,7 +327,9 @@ page reports it.
 ## 8. Porting to another repo
 
 1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml`, `.github/ISSUE_TEMPLATE/`,
-   `.github/claude-planning.md` and `scripts/claude-pipeline/` into the new repo. Reword the issue forms' examples for that app.
+   `.github/claude-planning.md`, `.github/claude-test-checklist.md` and `scripts/claude-pipeline/`
+   into the new repo. Reword the issue forms' examples for that app, and rewrite the checklist's
+   "About the owner" part and its tab names.
 2. Replace the `build-and-test` steps for the new stack, keeping the job name. For example:
    - Xcode: `xcodebuild test -scheme App -destination "id=$SIM_ID" CODE_SIGNING_ALLOWED=NO` on `macos-26`
    - Node: `npm ci && npm test` on `ubuntu-latest`
