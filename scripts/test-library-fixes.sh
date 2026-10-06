@@ -4,8 +4,9 @@ cd "$(dirname "$0")/.."
 out=build/library-fixes
 mkdir -p "$out"
 cp GymTrack/Resources/exercises.json "$out/exercises.json"
-# StepperEntry is lifted out of Components.swift for the same reason as in
-# test-logger-entry.sh: the rest of that file needs SwiftUI.
+# StepperEntry lives beside StepperField in Components.swift, which needs
+# SwiftUI and iOS-only modifiers. The enum itself is Foundation-only, so it is
+# lifted out on its own rather than moving it into a new app source file.
 {
     echo "import Foundation"
     awk '/^enum StepperEntry /,/^}/' GymTrack/DesignSystem/Components.swift
