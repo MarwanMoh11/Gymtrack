@@ -94,7 +94,11 @@ struct BackupPacingTests {
         #expect(context.autosaveEnabled)
     }
 
-    @Test func aPacedRestoreThatFailsBeforeItsSaveLeavesThePhoneAsItWas() async throws {
+    /// In slices, and at the app's own setting, which never pauses. While the
+    /// wipe left slots and sets to the cascade, only the unpaced restore
+    /// trapped in its rollback; the pauses between slices hid it.
+    @Test(arguments: [0, BackupService.Pacer.restoreSliceMilliseconds])
+    func aPacedRestoreThatFailsBeforeItsSaveLeavesThePhoneAsItWas(sliceMilliseconds: Double) async throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }
         let disk = try DiskStores()
@@ -103,8 +107,6 @@ struct BackupPacingTests {
         let data = try BackupService.exportData(context: source, stamp: stamp)
         let failing = try disk.container("failing")
         let context = failing.mainContext
-        // `fill` puts no slot on its day: a rollback over a restored slot traps
-        // inside SwiftData (see `BackupRestoreTests`).
         try fill(context, sessions: 30, sets: 4, tag: 9)
         let before = try BackupService.exportData(context: context, stamp: stamp)
         struct Refused: Error {}
@@ -112,7 +114,8 @@ struct BackupPacingTests {
 
         do {
             try await BackupService.restoreOffMain(data: data, context: context, beforeCommit: { throw Refused() },
-                                                   sliceMilliseconds: 0, progress: { lastFraction = $0 })
+                                                   sliceMilliseconds: sliceMilliseconds,
+                                                   progress: { lastFraction = $0 })
             Issue.record("A restore whose beforeCommit threw went through")
         } catch is Refused {
         }
@@ -122,6 +125,7 @@ struct BackupPacingTests {
         #expect(stored.sessions == 30 && stored.sets == 120, "On disk")
         let held = try counts(context)
         #expect(held.sessions == 30 && held.sets == 120 && held.custom == 2, "In the context")
+        #expect(try context.fetchCount(FetchDescriptor<PlanItem>()) == 1, "The plan's slot")
         #expect(try BackupService.exportData(context: context, stamp: stamp) == before)
         #expect(context.autosaveEnabled)
     }
@@ -275,9 +279,9 @@ struct BackupPacingTests {
 
     // MARK: - Fixtures
 
-    /// `sessions` finished sessions of `sets` sets, a plan, two custom
-    /// exercises, notes and weigh-ins, so every part of the file has a row.
-    /// `tag` keeps two stores' IDs apart.
+    /// `sessions` finished sessions of `sets` sets, a plan with one slot, two
+    /// custom exercises, notes and weigh-ins, so every part of the file has a
+    /// row. `tag` keeps two stores' IDs apart.
     private func fill(_ context: ModelContext, sessions: Int, sets: Int, tag: Int = 0) throws {
         let uuid = PersistenceFixtures.uuid
         let plan = Plan(name: "Plan \(tag)", isActive: true)
@@ -287,6 +291,10 @@ struct BackupPacingTests {
         day.id = uuid(0x200 + tag)
         day.plan = plan
         context.insert(day)
+        let slot = PlanItem(catalogID: PersistenceFixtures.bench.id, name: PersistenceFixtures.bench.name, order: 0)
+        slot.id = uuid(0x300 + tag)
+        slot.day = day
+        context.insert(slot)
         for c in 0..<2 {
             let custom = CustomExerciseRecord(name: "Custom \(tag)-\(c)", muscles: [], equipment: ["cable"],
                                               tracking: c == 0 ? .weightReps : .duration)

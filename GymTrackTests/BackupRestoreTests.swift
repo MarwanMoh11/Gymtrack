@@ -520,17 +520,42 @@ struct BackupRestoreTests {
         try expectRollback(in: context, withSlot: false)
     }
 
-    @Test(.disabled("""
-        Traps inside ModelContext.rollback() (Unexpected backing data for snapshot creation: \
-        _FullFutureBackingData<PlanItem>) once a restore has wiped and reinserted a plan slot, \
-        which kills the test process before withKnownIssue can catch it. \
-        scripts/test-backup-service.sh still checks this case on macOS.
-        """))
-    func aRestoreThatFailsBeforeItsSaveRollsBackAPlansSlotsToo() throws {
+    @Test func aRestoreThatFailsBeforeItsSaveRollsBackAPlansSlotsToo() throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }
         let context = try TestStore.context()
         try expectRollback(in: context, withSlot: true)
+    }
+
+    /// A slot, a set or a note that the wipe left to its parent's cascade came
+    /// back from the rollback as a placeholder SwiftData trapped on, so the app
+    /// crashed instead of putting the phone back. The file here has none of
+    /// them, so only the rows being wiped can trip the rollback. Tried on the
+    /// context that wrote the store and on a fresh one, as after a relaunch.
+    @Test(arguments: [false, true])
+    func aRestoreThatFailsBeforeItsSaveRollsBackLoggedSetsAndNotesToo(afterRelaunch: Bool) throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let writer = try TestStore.context()
+        try loggedHistory(writer)
+        // Read through a context of its own, so the export can't be what keeps
+        // the restoring context's rows alive.
+        let before = try BackupService.exportData(context: ModelContext(writer.container), stamp: stamp)
+        let context = afterRelaunch ? ModelContext(writer.container) : writer
+        let donor = try donorBackup()
+        struct InjectedFailure: Error {}
+
+        do {
+            try BackupService.restore(data: donor.data, context: context,
+                                      beforeCommit: { throw InjectedFailure() })
+            Issue.record("A restore whose beforeCommit threw went through")
+        } catch is InjectedFailure {
+        }
+
+        #expect(try context.fetchCount(FetchDescriptor<SetLog>()) == 2)
+        #expect(try context.fetchCount(FetchDescriptor<ExerciseNote>()) == 1)
+        #expect(try context.fetchCount(FetchDescriptor<PlanItem>()) == 1)
+        #expect(try BackupService.exportData(context: context, stamp: stamp) == before)
     }
 
     // MARK: - Erase
@@ -995,6 +1020,25 @@ struct BackupRestoreTests {
         try context.save()
         AppSettings.shared.userName = "Before restore"
         return (start, workout)
+    }
+
+    /// A finished session with two logged sets and a note, and a plan whose day
+    /// holds one slot. Nothing is returned, so no row stays alive in the test.
+    private func loggedHistory(_ context: ModelContext) throws {
+        let start = TestClock.at("2026-03-10T18:00:00")
+        let session = PersistenceFixtures.session("Logged", startedAt: start, endedAt: start.addingTimeInterval(1800),
+                                                  in: context)
+        for index in 0..<2 {
+            let set = PersistenceFixtures.set(setIndex: index, completedAt: start.addingTimeInterval(Double(60 * (index + 1))))
+            PersistenceFixtures.add(set, to: session, in: context)
+        }
+        let note = ExerciseNote(catalogID: PersistenceFixtures.bench.id, exerciseName: PersistenceFixtures.bench.name)
+        note.text = "Felt heavy"
+        note.session = session
+        context.insert(note)
+        let plan = PersistenceFixtures.plan("Logged plan", createdAt: start, active: true, in: context)
+        PersistenceFixtures.day("Day one", order: 0, exercises: [PersistenceFixtures.squat], in: plan, context: context)
+        try context.save()
     }
 
     /// Restores a changed copy of `linkedStore` with a `beforeCommit` that
