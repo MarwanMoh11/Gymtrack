@@ -1124,6 +1124,11 @@ final class ActiveWorkout {
     /// away for next week: that's the whole difference between a question with
     /// a point and a quiz.
     func rate(_ set: SetLog, feel: SetFeel) {
+        // Only a lift can be rated. The effort strip and the wrist ask only
+        // after a log, but an answer taken on a row nobody has lifted would be
+        // exported with whatever set the row later became, and the offer it
+        // made would move the sets to come on the strength of nothing.
+        guard set.isCompleted else { return }
         // Tapping the answer it already holds takes it back, so the gesture
         // that answers the question also un-answers it.
         guard set.rpe != feel.rawValue else { return clearRating(set) }

@@ -448,16 +448,19 @@ struct ActiveWorkoutLoggingTests {
         }
     }
 
-    @Test func aRatingOnAnUnloggedSetIsNotKept() throws {
+    @Test(arguments: SetFeel.allCases)
+    func aRatingOnAnUnloggedSetIsNotKept(feel: SetFeel) throws {
         try WorkoutBench.run { testBench in
             let (_, rows, workout) = testBench.standard()
             // The screen never offers the question for a set that has not been
-            // lifted, but the logger takes the answer as given: a rating on a
-            // row with no lift would be exported with the set it later became.
-            withKnownIssue("rate(_:feel:) has no isCompleted guard; the UI and the wrist command path add their own (#4)") {
-                workout.rate(rows[0], feel: .hard)
-                #expect(rows[0].rpe == nil)
-            }
+            // lifted, and the logger refuses it too: a rating on a row with no
+            // lift would be exported with the set it later became. Top of the
+            // range, so an Easy here would otherwise offer a heavier rung.
+            rows[0].reps = 10
+            workout.rate(rows[0], feel: feel)
+            #expect(rows[0].rpe == nil)
+            #expect(workout.pendingNudge(for: bench) == nil)
+            #expect(rows[0].loadNudgeOutcome == nil)
         }
     }
 
