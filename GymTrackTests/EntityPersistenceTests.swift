@@ -454,9 +454,9 @@ struct PersistenceHealthReading: Sendable {
 
 // MARK: - Builders shared by the persistence and backup suites
 
-/// Builders and JSON helpers for `EntityPersistenceTests`, `BackupRestoreTests`
-/// and `BackupDecodingTests`. Named for what they serve so no other suite's
-/// helpers collide with them.
+/// Builders and JSON helpers for `EntityPersistenceTests` and the `Backup*Tests`
+/// suites. Named for what they serve so no other suite's helpers collide with
+/// them.
 @MainActor
 enum PersistenceFixtures {
 
@@ -498,6 +498,12 @@ enum PersistenceFixtures {
         ExerciseCatalog.shared.setCustom([])
         ExerciseCatalog.shared.setHidden([])
         return pin
+    }
+
+    /// The ID numbered `n`, for fixtures whose rows have to sort, or be found,
+    /// by a known ID.
+    nonisolated static func uuid(_ n: Int) -> UUID {
+        UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", n))!
     }
 
     /// A stamp with the clock and the zone held still, so two exports of one

@@ -7,9 +7,12 @@ import Testing
 /// same bytes for the same store, restoring it and exporting again gives that
 /// file back, and a restore that is refused leaves the phone as it was.
 ///
-/// Complements `Tests/BackupRoundTripTests.swift`, `Tests/PoundBackupTests.swift`
-/// and `Tests/BackupExportFidelityTests.swift`, which run against a stubbed
-/// store. Decoding of older and malformed files is in `BackupDecodingTests`.
+/// Decoding of older and malformed files is in `BackupDecodingTests`, the
+/// file's order and provenance in `BackupExportFidelityTests`, and the sliced
+/// export and restore in `BackupPacingTests`. That restore never asks Health
+/// to delete anything is still checked by `scripts/test-backup-service.sh`:
+/// `restore` takes no Health seam, so only a stubbed `HealthKitService` can
+/// see that no call was made.
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct BackupRestoreTests {
@@ -221,6 +224,125 @@ struct BackupRestoreTests {
         #expect(try target.fetch(FetchDescriptor<BodyMetric>()).first?.weightKg == 82.5)
     }
 
+    @Test(arguments: [WeightUnit.kg, .lb])
+    func everyFieldSurvivesARestoreIntoAFreshStoreAndOnlyTheStampIsWrittenAgain(_ unit: WeightUnit) throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        AppSettings.shared.weightUnit = unit
+        let source = try TestStore.context()
+        try fillEveryField(source)
+        let first = try BackupService.exportData(context: source, stamp: stamp)
+
+        // The file has to hold what the round trip is meant to protect.
+        let document = try PersistenceFixtures.object(first)
+        let sessions = try PersistenceFixtures.sessions(in: document)
+        let setKeys = Set(sessions.flatMap { ($0["sets"] as? [[String: Any]] ?? []).flatMap(\.keys) })
+        for key in ["id", "startedAt", "completedAt", "detectedStartedAt", "detectedEndedAt", "rpe", "effort",
+                    "averageHeartRate", "maxHeartRate", "heartRateWindow", "loadNudge", "continues",
+                    "seconds", "reps", "targetRepsLow", "targetRepsHigh", "tracking"] {
+            #expect(setKeys.contains(key), "The fixture never writes the set field \(key)")
+        }
+        let sessionKeys = Set(sessions.flatMap(\.keys))
+        for key in ["planDayID", "averageHeartRate", "maxHeartRate", "activeEnergyKcal", "healthWorkoutID",
+                    "wasWatchDriven", "heartRateSource", "energySource", "heartRateReadings", "noteTags",
+                    "exerciseNotes", "notes", "endedAt", "loggedAfterwards", "plannedItems"] {
+            #expect(sessionKeys.contains(key), "The fixture never writes the session field \(key)")
+        }
+        for key in ["bodyMetrics", "bodyMeasurements", "customExercises", "loadScales", "hiddenExercises",
+                    "exerciseCatalog", "effectiveLoadScales", "effortScale", "timeZone", "appVersion", "appBuild"] {
+            #expect(document[key] != nil, "The fixture never writes the top-level field \(key)")
+        }
+
+        // Another phone, at another moment, in another zone, on another build,
+        // so a stamp copied through the restore can't pass for a fresh one.
+        let fresh = try TestStore.context()
+        try BackupService.restore(data: first, context: fresh)
+        let later = PersistenceFixtures.stamp(at: TestClock.at("2027-01-15T08:00:00"), zone: "America/New_York",
+                                              version: "9.9", build: "999")
+        let second = try BackupService.exportData(context: fresh, stamp: later)
+        let again = try PersistenceFixtures.object(second)
+
+        let changed = Self.differences(document.filter { !Self.regenerated.contains($0.key) },
+                                       again.filter { !Self.regenerated.contains($0.key) })
+        #expect(changed.isEmpty, "\(changed.count) field(s) changed: \(changed.prefix(12).joined(separator: "; "))")
+        // The comparison does see a change where there is one: the stamp's four keys.
+        #expect(Self.differences(document, again).count == Self.regenerated.count)
+        for key in Self.regenerated {
+            #expect(document[key] != nil && again[key] != nil && (document[key] as? NSObject)?.isEqual(again[key]) == false,
+                    "\(key) is written by each export, not carried through a restore")
+        }
+
+        // Absence stays absence: a set that carried nothing gains no key, not
+        // a null, a zero or an empty string.
+        let restoredSets = try PersistenceFixtures.sessions(in: again).flatMap { $0["sets"] as? [[String: Any]] ?? [] }
+        let bare = try #require(restoredSets.first { $0["id"] as? String == PersistenceFixtures.uuid(0x103).uuidString })
+        let optional: Set<String> = ["startedAt", "detectedStartedAt", "detectedEndedAt", "rpe", "effort",
+                                     "averageHeartRate", "maxHeartRate", "heartRateWindow", "loadNudge",
+                                     "continues", "isWarmup"]
+        #expect(Set(bare.keys).isDisjoint(with: optional), "Gained \(Set(bare.keys).intersection(optional).sorted())")
+
+        // A session logged afterwards goes out with no end, which would read as
+        // a workout that took no time, and comes back closed rather than open.
+        let afterwardsID = PersistenceFixtures.uuid(3).uuidString
+        let afterwardsOut = try #require(sessions.first { $0["id"] as? String == afterwardsID })
+        #expect(!afterwardsOut.keys.contains("endedAt") && afterwardsOut["loggedAfterwards"] as? Bool == true)
+        #expect(sessions.allSatisfy { $0["id"] as? String == afterwardsID || !$0.keys.contains("loggedAfterwards") })
+        let afterwardsIn = try #require(fresh.fetch(FetchDescriptor<WorkoutSession>()).first {
+            $0.id == PersistenceFixtures.uuid(3)
+        })
+        #expect(afterwardsIn.isLoggedAfterwards && afterwardsIn.endedAt == afterwardsIn.startedAt)
+
+        #expect(try BackupService.exportData(context: fresh, stamp: later) == second)
+    }
+
+    @Test func theUnitOnScreenChangesOnlyTheLabelAndTheDerivedRungs() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        try fillPressDay(context)
+
+        AppSettings.shared.weightUnit = .kg
+        let kilos = try PersistenceFixtures.object(BackupService.exportData(context: context, stamp: stamp))
+        AppSettings.shared.weightUnit = .lb
+        let pounds = try PersistenceFixtures.object(BackupService.exportData(context: context, stamp: stamp))
+
+        #expect((kilos["settings"] as? [String: Any])?["weightUnit"] as? String == "kg")
+        #expect((pounds["settings"] as? [String: Any])?["weightUnit"] as? String == "lb")
+        // Pounds are a label: every measured weight in the file is kilograms.
+        #expect(try Self.setWeights(in: pounds) == [60, 62.5, 65])
+        #expect(try Self.setWeights(in: kilos) == Self.setWeights(in: pounds))
+        #expect((pounds["bodyMetrics"] as? [[String: Any]])?.compactMap { $0["weightKg"] as? Double } == [81.5])
+        #expect(NSDictionary(dictionary: Self.measured(kilos)).isEqual(to: Self.measured(pounds)),
+                "Nothing outside the settings label and the derived rungs may follow the unit")
+
+        // The derived rung is the one section that follows the unit, and it
+        // names the unit it is in, or 5 would read as kilograms.
+        let benchInKilos = try #require(Self.rung(of: PersistenceFixtures.bench.id, in: kilos))
+        #expect(benchInKilos["unit"] as? String == "kg" && benchInKilos["increment"] as? Double == 2.5)
+        let benchInPounds = try #require(Self.rung(of: PersistenceFixtures.bench.id, in: pounds))
+        #expect(benchInPounds["unit"] as? String == "lb" && benchInPounds["increment"] as? Double == 5)
+        #expect(benchInPounds["source"] as? String == "derived")
+    }
+
+    @Test(arguments: [WeightUnit.lb, .kg])
+    func restoreBringsTheUnitBackAndNeverScalesAWeight(_ writtenIn: WeightUnit) throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let restoredOver: WeightUnit = writtenIn == .lb ? .kg : .lb
+        let context = try TestStore.context()
+        try fillPressDay(context)
+        AppSettings.shared.weightUnit = writtenIn
+        let file = try BackupService.exportData(context: context, stamp: stamp)
+        AppSettings.shared.weightUnit = restoredOver
+        let fresh = try TestStore.context()
+
+        try BackupService.restore(data: file, context: fresh)
+
+        #expect(AppSettings.shared.weightUnit == writtenIn)
+        #expect(try fresh.fetch(FetchDescriptor<SetLog>()).map(\.weightKg).sorted() == [60, 62.5, 65])
+        #expect(try fresh.fetch(FetchDescriptor<BodyMetric>()).map(\.weightKg) == [81.5])
+    }
+
     @Test func aSessionKeepsItsInstantWhateverZoneTheFileWasWrittenIn() throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }
@@ -273,6 +395,64 @@ struct BackupRestoreTests {
         let restored = try #require(context.fetch(FetchDescriptor<WorkoutSession>()).first)
         #expect(restored.id == session.id)
         #expect(restored.healthWorkoutID == linked)
+    }
+
+    @Test(arguments: FileLink.allCases)
+    func restoreKeepsThisPhonesHealthLinkWhateverTheFileSays(_ link: FileLink) throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let linked = try linkedStore(context)
+        var file = try BackupService.decodedArchive(from: BackupService.exportData(context: context, stamp: stamp))
+        #expect(file.version == 2)
+        #expect(file.sessions.first?.healthWorkoutID == linked.workout)
+        file.sessions[0].title = "Replacement"
+        file.settings.userName = "After restore"
+        switch link {
+        case .same: break
+        // Every file written before linkage looks like this.
+        case .absent: file.sessions[0].healthWorkoutID = nil
+        // Taken between the phone's fallback save and the watch's own, so it
+        // names a workout this phone has since replaced.
+        case .other: file.sessions[0].healthWorkoutID = UUID()
+        }
+        let data = try BackupService.encoded(file)
+        if link == .absent {
+            // No key at all, not a null.
+            #expect(!String(decoding: data, as: UTF8.self).contains("healthWorkoutID"))
+            #expect(try BackupService.decodedArchive(from: data).sessions[0].healthWorkoutID == nil)
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try BackupService.restore(from: url, context: context)
+
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        #expect(sessions.map(\.title) == ["Replacement"])
+        #expect(sessions.first?.healthWorkoutID == linked.workout)
+        let plans = try context.fetch(FetchDescriptor<Plan>())
+        #expect(plans.count == 1 && plans.first?.orderedDays.first?.orderedItems.count == 1)
+        #expect(AppSettings.shared.userName == "After restore")
+    }
+
+    @Test func aSessionTheFileDoesNotHoldLeavesAndTheOneItHoldsKeepsItsLink() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let linked = try linkedStore(context)
+        var file = try BackupService.decodedArchive(from: BackupService.exportData(context: context, stamp: stamp))
+        file.sessions[0].healthWorkoutID = nil
+        let later = PersistenceFixtures.session("Later", startedAt: linked.start.addingTimeInterval(86_400),
+                                                endedAt: linked.start.addingTimeInterval(86_460), in: context)
+        later.healthWorkoutID = PersistenceFixtures.uuid(0xB2)
+        try context.save()
+
+        try BackupService.restore(data: BackupService.encoded(file), context: context)
+
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        #expect(sessions.map(\.title) == ["Original"])
+        #expect(sessions.first?.healthWorkoutID == linked.workout)
     }
 
     // MARK: - Restore replaces, refuses and rolls back
@@ -333,6 +513,26 @@ struct BackupRestoreTests {
         #expect(AppSettings.shared.userName == "Still me")
     }
 
+    @Test func aRestoreThatFailsBeforeItsSaveLeavesSessionsPlansAndSettingsAsTheyWere() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        try expectRollback(in: context, withSlot: false)
+    }
+
+    @Test(.disabled("""
+        Traps inside ModelContext.rollback() (Unexpected backing data for snapshot creation: \
+        _FullFutureBackingData<PlanItem>) once a restore has wiped and reinserted a plan slot, \
+        which kills the test process before withKnownIssue can catch it. \
+        scripts/test-backup-service.sh still checks this case on macOS.
+        """))
+    func aRestoreThatFailsBeforeItsSaveRollsBackAPlansSlotsToo() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        try expectRollback(in: context, withSlot: true)
+    }
+
     // MARK: - Erase
 
     @Test func eraseRemovesEverythingAndNeverTouchesHealthUnlessAsked() async throws {
@@ -375,6 +575,114 @@ struct BackupRestoreTests {
 
         #expect(try context.fetchCount(FetchDescriptor<Plan>()) == 1)
         #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 1)
+    }
+
+    @Test func eraseHandsHealthEveryLinkedWorkoutOnceInOneSortedBatch() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let workouts = try fillLinkedSessions(context)
+        var calls: [[UUID]] = []
+
+        let result = try await BackupService.wipe(context: context, removingHealthWorkouts: true,
+                                                  deletingHealthWorkouts: { ids in
+            calls.append(ids)
+            return []
+        })
+
+        // One call, not a round trip per session.
+        #expect(calls.count == 1)
+        let received = calls.first ?? []
+        #expect(received.count == workouts.count && Set(received) == workouts)
+        #expect(received == received.sorted { $0.uuidString < $1.uuidString })
+        #expect(result?.isComplete == true)
+        #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<SetLog>()) == 0)
+    }
+
+    @Test func eraseAsksHealthNothingUnlessTheLifterChoseIt() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        _ = try fillLinkedSessions(context)
+
+        let result = try await BackupService.wipe(
+            context: context,
+            deletingHealthWorkout: { _ in
+                Issue.record("Health was asked about one workout without being chosen")
+                return true
+            },
+            deletingHealthWorkouts: { _ in
+                Issue.record("Health was asked about a batch without being chosen")
+                return []
+            })
+
+        // Nil rather than an empty result, so a cleanup that never ran can't
+        // read as one that succeeded.
+        #expect(result == nil)
+        #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
+    }
+
+    @Test func theEraseDialogCountsLinkedWorkoutsAndAPlainEraseReportsNoCleanup() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        _ = try linkedStore(context)
+        #expect(BackupService.linkedHealthWorkoutCount(context: context) == 1)
+
+        let result = try await BackupService.wipe(context: context)
+
+        #expect(result == nil)
+        #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
+        #expect(BackupService.linkedHealthWorkoutCount(context: context) == 0)
+    }
+
+    @Test func aWorkoutHealthKeptIsReportedOverALocalEraseThatStays() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let batched = try TestStore.context()
+        _ = try fillLinkedSessions(batched)
+
+        let partial = try await BackupService.wipe(context: batched, removingHealthWorkouts: true,
+                                                   deletingHealthWorkouts: { ids in [ids[0]] })
+
+        #expect(partial?.failedIDs.count == 1)
+        #expect(partial?.isComplete == false)
+        #expect(try batched.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
+
+        // The same through the per-workout path some callers still use.
+        let single = try TestStore.context()
+        let linked = try linkedStore(single)
+
+        let refused = try await BackupService.wipe(context: single, removingHealthWorkouts: true,
+                                                   deletingHealthWorkout: { _ in false })
+
+        #expect(refused?.failedIDs == [linked.workout])
+        #expect(try single.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
+    }
+
+    @Test(.enabled("Needs a host without Health write access, which the unit-test host is", {
+        await MainActor.run { !HealthKitService.shared.canWriteWorkouts }
+    }))
+    func theDefaultEraseHandsTheHealthServiceEveryLinkedWorkoutOnce() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let linked = try linkedStore(context)
+        let second = PersistenceFixtures.session("Second", startedAt: linked.start.addingTimeInterval(172_800),
+                                                 endedAt: linked.start.addingTimeInterval(172_860), in: context)
+        second.healthWorkoutID = PersistenceFixtures.uuid(0xB2)
+        try context.save()
+        #expect(BackupService.linkedHealthWorkoutCount(context: context) == 2)
+
+        let result = try await BackupService.wipe(context: context, removingHealthWorkouts: true)
+
+        // Without write access the real service removes nothing and hands back
+        // every ID it was given, so what it reports is what it was asked: both
+        // workouts, once each, in the batch's order.
+        let asked = [linked.workout, PersistenceFixtures.uuid(0xB2)].sorted { $0.uuidString < $1.uuidString }
+        #expect(result?.failedIDs == asked)
+        #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
     }
 
     // MARK: - Fixtures
@@ -470,5 +778,267 @@ struct BackupRestoreTests {
         PersistenceFixtures.day("Donor day", order: 0, weekday: 4, exercises: [], in: plan, context: donor)
         PersistenceFixtures.session("Donor session", startedAt: t, endedAt: t.addingTimeInterval(1800), in: donor)
         return (try BackupService.exportData(context: donor, stamp: PersistenceFixtures.stamp()), plan.id)
+    }
+
+    /// A store in which every optional thing a set or session can carry is
+    /// present on at least one row and absent on another, so a restore that
+    /// invents a value for a missing key is caught as well as one that drops one.
+    private func fillEveryField(_ context: ModelContext) throws {
+        let base = TestClock.at("2026-09-21T14:13:20")
+        let uuid = PersistenceFixtures.uuid
+        let bench = PersistenceFixtures.bench, plank = PersistenceFixtures.plank, pullUp = PersistenceFixtures.pullUp
+        let plan = Plan(name: "Push Pull", summary: "Two days", isActive: true)
+        plan.createdAt = base
+        context.insert(plan)
+        let day = PlanDay(name: "Push", order: 0, weekday: 2, notes: "Arrive warm")
+        day.plan = plan
+        context.insert(day)
+        let rest = PlanDay(name: "Rest", order: 1, weekday: 3, isRest: true)
+        rest.plan = plan
+        context.insert(rest)
+        let slots: [(PersistenceFixtures.Exercise, TrackingMode)] = [
+            (bench, .weightReps), (plank, .duration), (pullUp, .bodyweightReps),
+        ]
+        for (position, (exercise, tracking)) in slots.enumerated() {
+            let item = PlanItem(catalogID: exercise.id, name: exercise.name, order: position, targetSets: 3,
+                                targetRepsLow: tracking == .duration ? 0 : 6,
+                                targetRepsHigh: tracking == .duration ? 0 : 10,
+                                targetWeightKg: tracking == .weightReps ? 62.5 : 0,
+                                targetSeconds: 60, restSeconds: position == 0 ? 150 : nil)
+            item.notes = position == 0 ? "Pause on the chest" : ""
+            item.day = day
+            context.insert(item)
+        }
+
+        // A finished session with everything present.
+        let full = WorkoutSession(title: "Push", planDayID: day.id, planName: plan.name,
+                                  startedAt: base.addingTimeInterval(1_000))
+        full.id = uuid(1)
+        full.endedAt = full.startedAt.addingTimeInterval(3_600)
+        full.recordPlan(of: day)
+        full.notes = "Good day"
+        full.noteTagsRaw = NoteTag.allCases.prefix(2).map(\.rawValue)
+        full.averageHeartRate = 121
+        full.maxHeartRate = 168
+        full.activeEnergyKcal = 310
+        full.healthWorkoutID = uuid(0xEE)
+        full.wasWatchDriven = true
+        full.heartRateSourceRaw = VitalsSource.watchWorkout.rawValue
+        full.energySourceRaw = VitalsSource.watchWorkout.rawValue
+        full.heartRateReadings = 412
+        context.insert(full)
+
+        func set(_ n: Int, _ exercise: PersistenceFixtures.Exercise, order: Int, index: Int, kg: Double, reps: Int,
+                 seconds: Int = 0, tracking: TrackingMode, in session: WorkoutSession,
+                 loggedAfter offset: TimeInterval?) -> SetLog {
+            let row = SetLog(catalogID: exercise.id, exerciseName: exercise.name, exerciseOrder: order, setIndex: index,
+                             weightKg: kg, reps: reps, seconds: seconds, targetRepsLow: 6, targetRepsHigh: 10,
+                             tracking: tracking)
+            row.id = uuid(n)
+            if let offset {
+                row.isCompleted = true
+                row.completedAt = session.startedAt.addingTimeInterval(offset)
+            }
+            PersistenceFixtures.add(row, to: session, in: context)
+            return row
+        }
+
+        let top = set(0x101, bench, order: 0, index: 0, kg: 62.5, reps: 8, tracking: .weightReps, in: full,
+                      loggedAfter: 120)
+        top.startedAt = full.startedAt.addingTimeInterval(80)
+        top.rpe = SetFeel.hard.rawValue
+        top.apply(SetHeartRate(average: 131, peak: 149, source: .measured))
+        top.recordLoadNudge(.taken, toKg: 65)
+
+        let drop = set(0x102, bench, order: 0, index: 1, kg: 60, reps: 6, tracking: .weightReps, in: full,
+                       loggedAfter: 300)
+        drop.continuesPreviousSet = true
+        drop.recordDetectedWindow(DetectedSetWindow(start: full.startedAt.addingTimeInterval(265),
+                                                    end: full.startedAt.addingTimeInterval(297)))
+        drop.apply(SetHeartRate(average: 128, peak: 140, source: .detected))
+        drop.rpe = SetFeel.solid.rawValue
+        drop.recordLoadNudge(.declined, toKg: 62.5)
+
+        // Nothing but what was lifted: no other key may appear for it.
+        _ = set(0x103, bench, order: 0, index: 2, kg: 60, reps: 5, tracking: .weightReps, in: full, loggedAfter: 480)
+        _ = set(0x104, plank, order: 1, index: 0, kg: 0, reps: 0, seconds: 75, tracking: .duration, in: full,
+                loggedAfter: 700)
+        _ = set(0x105, pullUp, order: 2, index: 0, kg: 0, reps: 9, tracking: .bodyweightReps, in: full,
+                loggedAfter: 900)
+        // Planned and never done.
+        _ = set(0x106, pullUp, order: 2, index: 1, kg: 0, reps: 9, tracking: .bodyweightReps, in: full,
+                loggedAfter: nil)
+
+        for (exercise, text, tag) in [(bench, "Left shoulder pinched", NoteTag.allCases[0]),
+                                      (plank, "", NoteTag.allCases[1])] {
+            let note = ExerciseNote(catalogID: exercise.id, exerciseName: exercise.name)
+            note.text = text
+            note.tagsRaw = [tag.rawValue]
+            note.session = full
+            context.insert(note)
+        }
+
+        // Nothing recorded beyond its sets.
+        let bare = WorkoutSession(title: "Quick", startedAt: base.addingTimeInterval(9_000))
+        bare.id = uuid(2)
+        bare.endedAt = bare.startedAt.addingTimeInterval(1_800)
+        context.insert(bare)
+        _ = set(0x201, PersistenceFixtures.Exercise(id: "dumbbell-curl", name: "Dumbbell Curl"), order: 0, index: 0,
+                kg: 14, reps: 12, tracking: .weightReps, in: bare, loggedAfter: 60)
+
+        // Written down afterwards: closed at its own start, sets done but never timed.
+        let afterwards = WorkoutSession(title: "Push", planName: plan.name, startedAt: base.addingTimeInterval(20_000))
+        afterwards.id = uuid(3)
+        afterwards.endedAt = afterwards.startedAt
+        afterwards.isLoggedAfterwards = true
+        context.insert(afterwards)
+        let recalled = SetLog(catalogID: bench.id, exerciseName: bench.name, exerciseOrder: 0, setIndex: 0,
+                              weightKg: 62.5, reps: 8, tracking: .weightReps)
+        recalled.id = uuid(0x301)
+        recalled.isCompleted = true
+        PersistenceFixtures.add(recalled, to: afterwards, in: context)
+
+        for (offset, kg) in [(100.0, 80.2), (200, 79.9)] {
+            context.insert(BodyMetric(date: base.addingTimeInterval(offset), weightKg: kg))
+        }
+        for (offset, id, parts) in [(150.0, 0x401, [BodyMeasurement.Part.arm: 36.5, .waist: 84]),
+                                    (250, 0x402, [.chest: 101, .shoulders: 118, .thigh: 58.5])] {
+            let check = BodyMeasurement(date: base.addingTimeInterval(offset))
+            check.id = uuid(id)
+            for (part, cm) in parts { check.set(cm, for: part) }
+            context.insert(check)
+        }
+        let custom = CustomExerciseRecord(name: "Sled Drag", muscles: [], equipment: ["Sled"], tracking: .weightReps)
+        custom.id = "custom-sled-drag"
+        context.insert(custom)
+        context.insert(HiddenExerciseRecord(catalogID: "cable-crossover"))
+        context.insert(ExerciseLoadPreference(catalogID: bench.id, scale: LoadScale(unit: .lb, increment: 5)))
+        context.insert(ExerciseLoadPreference(catalogID: "dumbbell-curl", scale: LoadScale(unit: .kg, increment: 1)))
+        try context.save()
+    }
+
+    /// The keys each export writes from its own stamp, and so the only ones a
+    /// round trip may change.
+    private static let regenerated: Set<String> = ["exportedAt", "timeZone", "appVersion", "appBuild"]
+
+    /// Every path at which two documents differ, so a failure names the field
+    /// rather than saying two files are unequal.
+    private static func differences(_ lhs: Any?, _ rhs: Any?, path: String = "$") -> [String] {
+        switch (lhs, rhs) {
+        case let (l as [String: Any], r as [String: Any]):
+            return Set(l.keys).union(r.keys).sorted().flatMap { differences(l[$0], r[$0], path: "\(path).\($0)") }
+        case let (l as [Any], r as [Any]):
+            guard l.count == r.count else { return ["\(path): \(l.count) elements became \(r.count)"] }
+            return l.indices.flatMap { differences(l[$0], r[$0], path: "\(path)[\($0)]") }
+        case (nil, nil):
+            return []
+        case (nil, let after?):
+            return ["\(path): absent before, \(after) after"]
+        case (let before?, nil):
+            return ["\(path): \(before) before, absent after"]
+        case let (before?, after?):
+            return (before as? NSObject)?.isEqual(after) == true ? [] : ["\(path): \(before) became \(after)"]
+        }
+    }
+
+    /// One finished session of three bench sets and a weigh-in, at loads a
+    /// stray conversion can't land on: 62.5 kg is 137.79 lb.
+    private func fillPressDay(_ context: ModelContext) throws {
+        let t = TestClock.at("2026-09-21T14:13:20")
+        let session = PersistenceFixtures.session(startedAt: t, endedAt: t.addingTimeInterval(3_000), in: context)
+        for (index, load) in [60.0, 62.5, 65.0].enumerated() {
+            let set = SetLog(catalogID: PersistenceFixtures.bench.id, exerciseName: PersistenceFixtures.bench.name,
+                             exerciseOrder: 0, setIndex: index, weightKg: load, reps: 8,
+                             targetRepsLow: 8, targetRepsHigh: 12, tracking: .weightReps)
+            set.isCompleted = true
+            PersistenceFixtures.add(set, to: session, in: context)
+        }
+        context.insert(BodyMetric(date: t.addingTimeInterval(-100_000), weightKg: 81.5))
+        try context.save()
+    }
+
+    private static func setWeights(in document: [String: Any]) throws -> [Double] {
+        try PersistenceFixtures.sessions(in: document)
+            .flatMap { $0["sets"] as? [[String: Any]] ?? [] }
+            .compactMap { $0["weightKg"] as? Double }
+            .sorted()
+    }
+
+    /// Everything but the settings label and the derived rungs, the two places
+    /// the unit is allowed to show.
+    private static func measured(_ document: [String: Any]) -> [String: Any] {
+        document.filter { $0.key != "settings" && $0.key != "effectiveLoadScales" }
+    }
+
+    private static func rung(of catalogID: String, in document: [String: Any]) -> [String: Any]? {
+        (document["effectiveLoadScales"] as? [[String: Any]])?.first { $0["catalogID"] as? String == catalogID }
+    }
+
+    /// What a file can say about a session's Health workout, against the one
+    /// this phone has.
+    enum FileLink: CaseIterable, Sendable {
+        case same, absent, other
+    }
+
+    /// One finished session linked to a Health workout, and a plan whose day
+    /// holds one slot, with the name a restore would overwrite.
+    @discardableResult
+    private func linkedStore(_ context: ModelContext, withSlot: Bool = true) throws -> (start: Date, workout: UUID) {
+        let start = TestClock.at("2023-11-14T22:13:20")
+        let workout = PersistenceFixtures.uuid(0xB1)
+        let original = PersistenceFixtures.session("Original", startedAt: start, endedAt: start.addingTimeInterval(60),
+                                                   in: context)
+        original.healthWorkoutID = workout
+        let plan = PersistenceFixtures.plan("Original plan", createdAt: start, active: true, in: context)
+        PersistenceFixtures.day("Day one", order: 0, exercises: withSlot ? [PersistenceFixtures.squat] : [],
+                                in: plan, context: context)
+        try context.save()
+        AppSettings.shared.userName = "Before restore"
+        return (start, workout)
+    }
+
+    /// Restores a changed copy of `linkedStore` with a `beforeCommit` that
+    /// throws, and expects every part of the store and the settings unchanged.
+    private func expectRollback(in context: ModelContext, withSlot: Bool) throws {
+        try linkedStore(context, withSlot: withSlot)
+        var file = try BackupService.decodedArchive(from: BackupService.exportData(context: context, stamp: stamp))
+        file.sessions[0].title = "Replacement"
+        file.settings.userName = "After restore"
+        struct InjectedFailure: Error {}
+
+        do {
+            try BackupService.restore(data: BackupService.encoded(file), context: context,
+                                      beforeCommit: { throw InjectedFailure() })
+            Issue.record("A restore whose beforeCommit threw went through")
+        } catch is InjectedFailure {
+        }
+
+        #expect(try context.fetch(FetchDescriptor<WorkoutSession>()).map(\.title) == ["Original"])
+        let plans = try context.fetch(FetchDescriptor<Plan>())
+        #expect(plans.count == 1 && plans.first?.orderedDays.count == 1)
+        #expect(plans.first?.orderedDays.first?.orderedItems.count == (withSlot ? 1 : 0))
+        #expect(AppSettings.shared.userName == "Before restore")
+    }
+
+    /// Thirty finished sessions of three sets, each linked to a Health
+    /// workout except that the last two share one. Returns the workouts.
+    private func fillLinkedSessions(_ context: ModelContext) throws -> Set<UUID> {
+        let base = TestClock.at("2026-09-21T14:13:20")
+        let count = 30
+        var workouts: Set<UUID> = []
+        for n in 0..<count {
+            let started = base.addingTimeInterval(Double(n) * 86_400)
+            let session = PersistenceFixtures.session("Session \(n)", startedAt: started,
+                                                      endedAt: started.addingTimeInterval(3_000), in: context)
+            let workout = PersistenceFixtures.uuid(0xB000 + min(n, count - 2))
+            session.healthWorkoutID = workout
+            workouts.insert(workout)
+            for index in 0..<3 {
+                PersistenceFixtures.add(PersistenceFixtures.set(setIndex: index, completedAt: started.addingTimeInterval(Double(60 * (index + 1)))),
+                                        to: session, in: context)
+            }
+        }
+        try context.save()
+        return workouts
     }
 }

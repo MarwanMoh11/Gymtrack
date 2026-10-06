@@ -8,9 +8,9 @@ import Testing
 /// away before anything is wiped, and the rule that a field with no data is
 /// absent from the file rather than null, zero or a sentinel.
 ///
-/// Complements `Tests/BackupArchiveIntegrityTests.swift` and
-/// `Tests/BackupIDsTrackingTests.swift`, which cover the same rules through
-/// stubs. Whole-store round trips are in `BackupRestoreTests`.
+/// Whole-store round trips are in `BackupRestoreTests`, the file's order and
+/// provenance in `BackupExportFidelityTests`, and the sliced export and
+/// restore in `BackupPacingTests`.
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct BackupDecodingTests {
@@ -108,6 +108,115 @@ struct BackupDecodingTests {
         #expect(try context.fetchCount(FetchDescriptor<ExerciseLoadPreference>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<HiddenExerciseRecord>()) == 0)
         #expect(AppSettings.shared.defaultRestSeconds == 75)
+    }
+
+    /// Written the way a build from the warm-up era wrote a file: every key
+    /// present, empty notes, a hold time on a squat and two warm-up rows.
+    private static let warmupEraFile = """
+    {
+      "version": 2,
+      "exportedAt": "2026-09-18T10:00:00Z",
+      "settings": { "weightUnit": "kg", "userName": "Warm-up era", "defaultRestSeconds": 90 },
+      "customExercises": [],
+      "plans": [{
+        "id": "5B1D0C8E-8A0B-4E7C-9C4A-1F6B2D3E4A01", "name": "Old plan", "summary": "",
+        "isActive": true, "createdAt": "2026-09-01T10:00:00Z",
+        "days": [{
+          "id": "5B1D0C8E-8A0B-4E7C-9C4A-1F6B2D3E4A02", "name": "Legs", "order": 0,
+          "weekday": 2, "isRest": false, "notes": "",
+          "items": [{
+            "catalogID": "test-squat", "name": "Squat", "order": 0, "targetSets": 3,
+            "targetRepsLow": 5, "targetRepsHigh": 8, "targetWeightKg": 0,
+            "targetSeconds": 45, "notes": ""
+          }]
+        }]
+      }],
+      "sessions": [{
+        "id": "5B1D0C8E-8A0B-4E7C-9C4A-1F6B2D3E4A03", "title": "Legs",
+        "startedAt": "2026-09-17T17:00:00Z", "endedAt": "2026-09-17T18:00:00Z",
+        "notes": "", "planName": "Old plan",
+        "sets": [
+          { "catalogID": "test-squat", "exerciseName": "Squat", "exerciseOrder": 0, "setIndex": 0,
+            "weightKg": 40, "reps": 10, "seconds": 45, "isCompleted": true, "isWarmup": true,
+            "completedAt": "2026-09-17T17:05:00Z", "targetRepsLow": 5, "targetRepsHigh": 8 },
+          { "catalogID": "test-squat", "exerciseName": "Squat", "exerciseOrder": 0, "setIndex": 1,
+            "weightKg": 60, "reps": 5, "seconds": 45, "isCompleted": true, "isWarmup": true,
+            "completedAt": "2026-09-17T17:08:00Z", "targetRepsLow": 5, "targetRepsHigh": 8 },
+          { "catalogID": "test-squat", "exerciseName": "Squat", "exerciseOrder": 0, "setIndex": 2,
+            "weightKg": 100, "reps": 5, "seconds": 45, "isCompleted": true, "isWarmup": false,
+            "completedAt": "2026-09-17T17:12:00Z", "targetRepsLow": 5, "targetRepsHigh": 8 }
+        ]
+      }]
+    }
+    """
+
+    @Test func aWarmupEraFileRestoresOnlyItsWorkingSetAndTakesItsKeysAtTheirWord() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+
+        try BackupService.restore(data: Data(Self.warmupEraFile.utf8), context: context)
+
+        // The two warm-ups would restore as ordinary working sets, which is false detail.
+        let sets = try context.fetch(FetchDescriptor<SetLog>())
+        #expect(sets.count == 1)
+        let set = try #require(sets.first)
+        #expect(set.weightKg == 100 && set.reps == 5)
+        // An older file's keys are taken at their word, as they always were.
+        #expect(set.seconds == 45 && set.targetRepsLow == 5 && set.targetRepsHigh == 8)
+        let items = try context.fetch(FetchDescriptor<PlanItem>())
+        #expect(items.count == 1)
+        #expect(items.first?.targetSeconds == 45 && items.first?.targetRepsLow == 5 && items.first?.notes == "")
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        #expect(sessions.count == 1 && sessions.first?.notes == "")
+        let days = try context.fetch(FetchDescriptor<PlanDay>())
+        #expect(days.count == 1 && days.first?.weekday == 2 && days.first?.notes == "")
+    }
+
+    @Test func aFileFromBeforeSetIDsAndPlanDaysRestoresWithFreshIDsAndNoDay() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let plan = PersistenceFixtures.plan("Plan", createdAt: start, active: true, in: context)
+        let day = PersistenceFixtures.day("Push", order: 0, exercises: [PersistenceFixtures.bench], in: plan, context: context)
+        for n in 0..<2 {
+            let started = start.addingTimeInterval(Double(n) * 86_400)
+            let session = PersistenceFixtures.session("Push \(n)", startedAt: started, endedAt: started.addingTimeInterval(3600),
+                                                      planDayID: day.id, in: context)
+            for index in 0..<3 {
+                PersistenceFixtures.add(PersistenceFixtures.set(setIndex: index, completedAt: started.addingTimeInterval(Double(60 * (index + 1)))),
+                                        to: session, in: context)
+            }
+        }
+        try context.save()
+        let storedIDs = Set(try context.fetch(FetchDescriptor<SetLog>()).map(\.id))
+        // The same store as a build from before any of these keys would have written it.
+        var root = try PersistenceFixtures.object(BackupService.exportData(context: context, stamp: PersistenceFixtures.stamp()))
+        for key in ["timeZone", "appVersion", "appBuild", "effectiveLoadScales"] { root[key] = nil }
+        root["sessions"] = try PersistenceFixtures.sessions(in: root).map { session in
+            var session = session
+            session["planDayID"] = nil
+            session["sets"] = (session["sets"] as? [[String: Any]] ?? []).map { set in
+                var set = set
+                set["id"] = nil
+                return set
+            }
+            return session
+        }
+        let old = try JSONSerialization.data(withJSONObject: root)
+
+        let decoded = try BackupService.decodedArchive(from: old)
+        #expect(decoded.timeZone == nil && decoded.appVersion == nil && decoded.appBuild == nil)
+        #expect(decoded.effectiveLoadScales == nil)
+        #expect(decoded.sessions.allSatisfy { $0.planDayID == nil && $0.sets.allSatisfy { $0.id == nil } })
+
+        try BackupService.restore(data: old, context: context)
+
+        let fresh = try context.fetch(FetchDescriptor<SetLog>()).map(\.id)
+        #expect(fresh.count == storedIDs.count && Set(fresh).count == fresh.count, "Each set gets its own new ID")
+        // An old file has no IDs to keep, so none of the ones it replaced may come back.
+        #expect(Set(fresh).isDisjoint(with: storedIDs))
+        #expect(try context.fetch(FetchDescriptor<WorkoutSession>()).allSatisfy { $0.planDayID == nil })
     }
 
     @Test func keysThisBuildHasNeverHeardOfAreIgnoredAtEveryLevel() throws {
@@ -212,6 +321,100 @@ struct BackupDecodingTests {
         }
     }
 
+    @Test(arguments: [Double.infinity, -Double.infinity, Double.nan])
+    func aWeightThatIsNotARealNumberIsRefused(_ weight: Double) throws {
+        var broken = archive()
+        broken.sessions[0].sets[0].weightKg = weight
+
+        // JSON has no spelling for these, so the archive is checked directly.
+        do {
+            try BackupService.validate(broken)
+            Issue.record("A weight of \(weight) was accepted")
+        } catch BackupService.RestoreError.invalidValue(let field, _, _, _) {
+            #expect(field == "weight")
+        }
+    }
+
+    @Test func aWeightThatOverflowsADoubleIsRefusedAndTouchesNothing() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let overflowing = String(decoding: try encoder.encode(archive()), as: UTF8.self)
+            .replacingOccurrences(of: "\"weightKg\":100", with: "\"weightKg\":1e999")
+        try #require(overflowing.contains("1e999"))
+        let context = try TestStore.context()
+        try keepSomething(in: context)
+
+        #expect(throws: (any Error).self) {
+            try BackupService.restore(data: Data(overflowing.utf8), context: context)
+        }
+
+        try expectUntouched(context)
+    }
+
+    @Test func aRepeatedCustomExerciseIDIsRefusedByBothRestoresAndNamed() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        var file = archive()
+        file.customExercises = [
+            BackupService.CustomExerciseDTO(id: "custom-sled", name: "Sled Push", category: "strength",
+                                            muscleRaw: [], equipment: ["Sled"], trackingRaw: "weightReps"),
+            BackupService.CustomExerciseDTO(id: "custom-hold", name: "Sled Hold", category: "strength",
+                                            muscleRaw: [], equipment: ["Sled"], trackingRaw: "duration"),
+        ]
+        var repeated = file
+        repeated.customExercises[1].id = repeated.customExercises[0].id
+        let bad = try BackupService.encoded(repeated)
+        let context = try TestStore.context()
+        try keepSomething(in: context)
+        let before = try BackupService.exportData(context: context, stamp: PersistenceFixtures.stamp())
+
+        func expectNamed(_ error: any Error, by path: String) {
+            guard case let BackupService.RestoreError.invalidValue(field, value, _, _) = error else {
+                Issue.record("\(path) refused for the wrong reason: \(error)")
+                return
+            }
+            #expect(field == "custom exercise ID", "\(path) names the field")
+            #expect(value == "custom-sled", "\(path) names the repeated ID")
+        }
+        do {
+            try BackupService.restore(data: bad, context: context)
+            Issue.record("restore accepted a repeated custom exercise ID")
+        } catch {
+            expectNamed(error, by: "restore")
+        }
+        do {
+            try await BackupService.restoreOffMain(data: bad, context: context)
+            Issue.record("restoreOffMain accepted a repeated custom exercise ID")
+        } catch {
+            expectNamed(error, by: "restoreOffMain")
+        }
+
+        try expectUntouched(context)
+        #expect(try BackupService.exportData(context: context, stamp: PersistenceFixtures.stamp()) == before)
+
+        // Distinct IDs are all the check asks for.
+        try await BackupService.restoreOffMain(data: BackupService.encoded(file), context: context)
+        #expect(try context.fetchCount(FetchDescriptor<CustomExerciseRecord>()) == 2)
+    }
+
+    @Test(arguments: AcceptedValue.allCases)
+    func aValueThisAppHasWrittenOrNeverStoresRestores(_ accepted: AcceptedValue) throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        var file = archive()
+        accepted.apply(to: &file)
+        let context = try TestStore.context()
+
+        try BackupService.restore(data: BackupService.encoded(file), context: context)
+
+        #expect(try context.fetchCount(FetchDescriptor<Plan>()) == file.plans.count)
+        #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == file.sessions.count)
+        let working = file.sessions.flatMap(\.sets).filter { $0.isWarmup != true }
+        #expect(try context.fetchCount(FetchDescriptor<SetLog>()) == working.count)
+    }
+
     // MARK: - Dates
 
     @Test(arguments: [
@@ -238,7 +441,62 @@ struct BackupDecodingTests {
         }
     }
 
+    // MARK: - Weekdays
+
+    @Test(arguments: [0, 8, -1, Int.min, Int.max])
+    func aWeekdayOutsideTheWeekReadsAsUnpinnedRatherThanTrapping(_ weekday: Int) {
+        let day = PlanDay(name: "Bad", order: 0, weekday: weekday)
+
+        #expect(day.weekdayName == nil && day.weekdayShortName == nil)
+    }
+
+    @Test func weekdaysOneAndSevenAreSundayAndSaturdayAndNoWeekdayIsUnpinned() {
+        #expect(PlanDay(name: "Sunday", order: 0, weekday: 1).weekdayName == Calendar.current.weekdaySymbols[0])
+        #expect(PlanDay(name: "Saturday", order: 0, weekday: 7).weekdayShortName
+                == Calendar.current.shortWeekdaySymbols[6])
+        #expect(PlanDay(name: "Floating", order: 0).weekdayName == nil)
+    }
+
     // MARK: - What restore keeps and what it will not store
+
+    @Test func aRestoredSlotForTheLiftersOwnExerciseCarriesItsTrackingPastTheExercisesDeletion() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        var file = archive()
+        file.customExercises = [
+            BackupService.CustomExerciseDTO(id: "custom-aaaa0001", name: "Sled hold", category: "Strength",
+                                            muscleRaw: [], equipment: [], trackingRaw: "duration"),
+            BackupService.CustomExerciseDTO(id: "custom-aaaa0002", name: "Odd curl", category: "Strength",
+                                            muscleRaw: [], equipment: [], trackingRaw: "weightReps"),
+        ]
+        func slot(_ catalogID: String, order: Int, tracking: String?) -> BackupService.ItemDTO {
+            BackupService.ItemDTO(catalogID: catalogID, name: catalogID, order: order, targetSets: 3, tracking: tracking)
+        }
+        file.plans[0].days[0].items = [
+            // An older file, which wrote no snapshot.
+            slot("custom-aaaa0001", order: 0, tracking: nil),
+            // A snapshot that contradicts the exercise it was written under.
+            slot("custom-aaaa0002", order: 1, tracking: "duration"),
+            // A bundled exercise, which has nothing to snapshot.
+            slot(PersistenceFixtures.bench.id, order: 2, tracking: nil),
+            // Its exercise was deleted before the export.
+            slot("custom-gone0003", order: 3, tracking: "duration"),
+        ]
+        let context = try TestStore.context()
+
+        try BackupService.restore(data: BackupService.encoded(file), context: context)
+
+        let slots = try context.fetch(FetchDescriptor<PlanItem>()).sorted { $0.order < $1.order }
+        #expect(slots.map(\.trackingRaw) == ["duration", "weightReps", nil, "duration"])
+
+        // The point of the snapshot: the slot still reads as timed once the
+        // exercise, and with it the catalog entry, is gone.
+        for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
+        try context.save()
+        context.refreshCustomExercises()
+        let held = try #require(context.fetch(FetchDescriptor<PlanItem>()).first { $0.catalogID == "custom-aaaa0001" })
+        #expect(held.tracking == .duration)
+    }
 
     @Test func restoreStoresOnlyWhatItUnderstandsAndLeavesWarmupsOut() throws {
         let saved = PersistenceFixtures.pin()
@@ -413,6 +671,90 @@ struct BackupDecodingTests {
         for key in ["chestCm", "shouldersCm", "waistCm", "thighCm"] { #expect(!checks[0].keys.contains(key)) }
     }
 
+    @Test func aPlanAndSetsWriteOnlyWhatSomebodySetAndReadTheGapsBackAsTheZerosTheyWere() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        try BackupService.restore(data: Data(Self.warmupEraFile.utf8), context: context)
+        let mixed = PersistenceFixtures.session("Mixed", startedAt: start, endedAt: start.addingTimeInterval(3600), in: context)
+        // A reps set still carrying the plan's hold time underneath.
+        let squat = SetLog(catalogID: "test-squat", exerciseName: "Squat", exerciseOrder: 0, setIndex: 0,
+                           weightKg: 100, reps: 5, seconds: 45, targetRepsLow: 5, targetRepsHigh: 8, tracking: .weightReps)
+        // A row whose zero targets stand for "no target", as a continuation's do.
+        let drop = SetLog(catalogID: "test-squat", exerciseName: "Squat", exerciseOrder: 0, setIndex: 1,
+                          weightKg: 80, reps: 4, seconds: 45, tracking: .weightReps)
+        // A timed set seeded with a rep count and an off-plan rep range.
+        let plank = SetLog(catalogID: "test-plank", exerciseName: "Plank", exerciseOrder: 1, setIndex: 0,
+                           reps: 10, seconds: 60, targetRepsLow: 8, targetRepsHigh: 12, tracking: .duration)
+        for set in [squat, drop, plank] {
+            set.isCompleted = true
+            set.completedAt = start.addingTimeInterval(600)
+            PersistenceFixtures.add(set, to: mixed, in: context)
+        }
+        let day = try #require(context.fetch(FetchDescriptor<PlanDay>()).first)
+        let timed = PlanItem(catalogID: "test-plank", name: "Plank", order: 1, targetRepsLow: 0, targetRepsHigh: 0,
+                             targetSeconds: 60)
+        timed.trackingRaw = TrackingMode.duration.rawValue
+        timed.day = day
+        context.insert(timed)
+        let weighted = try #require(context.fetch(FetchDescriptor<PlanItem>()).first { $0.catalogID == "test-squat" })
+        weighted.trackingRaw = TrackingMode.weightReps.rawValue
+        weighted.notes = "  "
+        try context.save()
+
+        let url = try BackupService.export(context: context, stamp: PersistenceFixtures.stamp())
+        defer { try? FileManager.default.removeItem(at: url) }
+        let data = try Data(contentsOf: url)
+        let root = try PersistenceFixtures.object(data)
+
+        let session = try #require(PersistenceFixtures.sessions(in: root).first { $0["title"] as? String == "Mixed" })
+        #expect(!session.keys.contains("notes"), "A session nobody wrote about carries no notes key")
+        let rows = try #require(session["sets"] as? [[String: Any]])
+        func row(_ name: String, _ index: Int) throws -> [String: Any] {
+            try #require(rows.first { $0["exerciseName"] as? String == name && $0["setIndex"] as? Int == index })
+        }
+        let squatRow = try row("Squat", 0), dropRow = try row("Squat", 1), plankRow = try row("Plank", 0)
+        #expect(!squatRow.keys.contains("seconds"), "A reps set carries no hold time nobody timed")
+        #expect(squatRow["reps"] as? Int == 5)
+        #expect(squatRow["targetRepsLow"] as? Int == 5 && squatRow["targetRepsHigh"] as? Int == 8)
+        #expect(!dropRow.keys.contains("targetRepsLow") && !dropRow.keys.contains("targetRepsHigh"),
+                "Zero targets are not written as targets")
+        #expect(!plankRow.keys.contains("reps"), "A timed set carries no rep count nobody counted")
+        #expect(plankRow["seconds"] as? Int == 60)
+        #expect(!plankRow.keys.contains("targetRepsLow") && !plankRow.keys.contains("targetRepsHigh"),
+                "A timed set carries no rep range")
+
+        let plans = try #require(root["plans"] as? [[String: Any]])
+        let days = try #require(plans.first?["days"] as? [[String: Any]])
+        #expect(days.first?.keys.contains("notes") == false, "A day without a note carries no notes key")
+        let items = try #require(days.first?["items"] as? [[String: Any]])
+        let squatItem = try #require(items.first { $0["name"] as? String == "Squat" })
+        let plankItem = try #require(items.first { $0["name"] as? String == "Plank" })
+        #expect(!squatItem.keys.contains("targetSeconds"), "A reps slot carries no hold target")
+        #expect(!squatItem.keys.contains("targetWeightKg"), "No starting weight means no key")
+        #expect(!squatItem.keys.contains("notes"), "A note of spaces is no note")
+        #expect(squatItem["targetRepsLow"] as? Int == 5 && squatItem["targetRepsHigh"] as? Int == 8)
+        #expect(!plankItem.keys.contains("targetRepsLow") && !plankItem.keys.contains("targetRepsHigh"),
+                "A timed slot's zero range is not written")
+        #expect(plankItem["targetSeconds"] as? Int == 60)
+
+        // That shape restores: absent reps, seconds and targets come back as
+        // the zeros they stood for, and a reps slot keeps the default hold.
+        try BackupService.restore(data: data, context: context)
+
+        let sets = try context.fetch(FetchDescriptor<SetLog>())
+        let restoredPlank = try #require(sets.first { $0.exerciseName == "Plank" })
+        #expect(restoredPlank.reps == 0 && restoredPlank.seconds == 60 && restoredPlank.targetRepsHigh == 0)
+        let restoredSquat = try #require(sets.first {
+            $0.exerciseName == "Squat" && $0.setIndex == 0 && $0.session?.title == "Mixed"
+        })
+        #expect(restoredSquat.seconds == 0 && restoredSquat.reps == 5 && restoredSquat.targetRepsLow == 5)
+        let slots = try context.fetch(FetchDescriptor<PlanItem>())
+        #expect(slots.first { $0.name == "Squat" }?.targetSeconds == 45)
+        #expect(slots.first { $0.name == "Plank" }?.targetSeconds == 60)
+        #expect(slots.first { $0.name == "Plank" }?.targetRepsLow == 0)
+    }
+
     // MARK: - Fixtures
 
     /// A valid one-plan, one-session archive built from the file's own types,
@@ -493,15 +835,18 @@ enum WrongType: CaseIterable, Sendable {
 
 /// One value no version of the app writes, and the field the refusal names.
 enum InvalidValue: CaseIterable, Sendable {
-    case weekdayNine, weekdayZero, slotRepRangeTooHigh, setRepRangeTooHigh, negativeStartingWeight,
-         negativeSetWeight, negativeHoldTime, negativeSlotRest, negativeDefaultRest, negativeSetSeconds,
-         negativeOfferedWeight, negativeBodyWeight, zeroGirth, duplicatePlanID, duplicateDayID,
-         duplicateSessionID, duplicateSetID, duplicateCustomExerciseID
+    case weekdayNine, weekdayZero, weekdayEight, slotRepRangeTooHigh, slotRepRangeBothEndsTooHigh,
+         slotRepRangeNegative, slotRepRangeTopTooHigh, setRepRangeTooHigh, setRepRangeBottomTooHigh,
+         negativeStartingWeight, negativeSetWeight, negativeHoldTime, negativeSlotRest, negativeDefaultRest,
+         negativeSetSeconds, negativeOfferedWeight, negativeBodyWeight, zeroGirth, zeroArm, duplicatePlanID,
+         duplicateDayID, dayIDRepeatedAcrossPlans, duplicateSessionID, duplicateSetID,
+         setIDRepeatedAcrossSessions, duplicateCustomExerciseID
 
     var field: String {
         switch self {
-        case .weekdayNine, .weekdayZero: "weekday"
-        case .slotRepRangeTooHigh, .setRepRangeTooHigh: "rep range"
+        case .weekdayNine, .weekdayZero, .weekdayEight: "weekday"
+        case .slotRepRangeTooHigh, .slotRepRangeBothEndsTooHigh, .slotRepRangeNegative, .slotRepRangeTopTooHigh,
+             .setRepRangeTooHigh, .setRepRangeBottomTooHigh: "rep range"
         case .negativeStartingWeight: "starting weight"
         case .negativeSetWeight: "weight"
         case .negativeHoldTime: "hold time"
@@ -511,10 +856,11 @@ enum InvalidValue: CaseIterable, Sendable {
         case .negativeOfferedWeight: "offered weight"
         case .negativeBodyWeight: "body weight"
         case .zeroGirth: "waist"
+        case .zeroArm: "arm"
         case .duplicatePlanID: "plan ID"
-        case .duplicateDayID: "day ID"
+        case .duplicateDayID, .dayIDRepeatedAcrossPlans: "day ID"
         case .duplicateSessionID: "session ID"
-        case .duplicateSetID: "set ID"
+        case .duplicateSetID, .setIDRepeatedAcrossSessions: "set ID"
         case .duplicateCustomExerciseID: "custom exercise ID"
         }
     }
@@ -524,8 +870,15 @@ enum InvalidValue: CaseIterable, Sendable {
         switch self {
         case .weekdayNine: archive.plans[0].days[0].weekday = 9
         case .weekdayZero: archive.plans[0].days[0].weekday = 0
+        case .weekdayEight: archive.plans[0].days[0].weekday = 8
         case .slotRepRangeTooHigh: archive.plans[0].days[0].items[0].targetRepsLow = 70
+        case .slotRepRangeBothEndsTooHigh:
+            archive.plans[0].days[0].items[0].targetRepsLow = 70
+            archive.plans[0].days[0].items[0].targetRepsHigh = 70
+        case .slotRepRangeNegative: archive.plans[0].days[0].items[0].targetRepsLow = -1
+        case .slotRepRangeTopTooHigh: archive.plans[0].days[0].items[0].targetRepsHigh = 500
         case .setRepRangeTooHigh: archive.sessions[0].sets[0].targetRepsHigh = 61
+        case .setRepRangeBottomTooHigh: archive.sessions[0].sets[0].targetRepsLow = 61
         case .negativeStartingWeight: archive.plans[0].days[0].items[0].targetWeightKg = -1
         case .negativeSetWeight: archive.sessions[0].sets[0].weightKg = -5
         case .negativeHoldTime: archive.plans[0].days[0].items[0].targetSeconds = -30
@@ -538,14 +891,80 @@ enum InvalidValue: CaseIterable, Sendable {
             archive.bodyMetrics = [BackupService.BodyMetricDTO(id: UUID(), date: moment, weightKg: -1, source: "manual")]
         case .zeroGirth:
             archive.bodyMeasurements = [BackupService.BodyMeasurementDTO(id: UUID(), date: moment, waistCm: 0)]
+        case .zeroArm:
+            archive.bodyMeasurements = [BackupService.BodyMeasurementDTO(id: UUID(), date: moment, armCm: 0, waistCm: 80)]
         case .duplicatePlanID: archive.plans.append(archive.plans[0])
         case .duplicateDayID: archive.plans[0].days.append(archive.plans[0].days[0])
+        case .dayIDRepeatedAcrossPlans:
+            var other = archive.plans[0]
+            other.id = UUID()
+            other.isActive = false
+            archive.plans.append(other)
         case .duplicateSessionID: archive.sessions.append(archive.sessions[0])
         case .duplicateSetID: archive.sessions[0].sets.append(archive.sessions[0].sets[0])
+        case .setIDRepeatedAcrossSessions: archive.sessions.append(archive.sessions[0].nextDay())
         case .duplicateCustomExerciseID:
             let custom = BackupService.CustomExerciseDTO(id: "custom-1", name: "Press", category: "strength",
                                                          muscleRaw: [], equipment: [], trackingRaw: "weightReps")
             archive.customExercises = [custom, custom]
         }
+    }
+}
+
+/// One value this app has written itself, or one restore never stores, so
+/// nothing about it may turn a file away.
+enum AcceptedValue: CaseIterable, Sendable {
+    case warmupWithANegativeWeight, backwardsRepRanges, noWeekday, weekdaySeven, slotRepRangeAtItsEdges,
+         noSetTargets, zeroWeight, warmupRepeatingASetID, distinctIDsAcrossTwoPlansAndSessions
+
+    func apply(to archive: inout BackupService.Archive) {
+        switch self {
+        case .warmupWithANegativeWeight:
+            var warmup = archive.sessions[0].sets[0]
+            warmup.id = UUID()
+            warmup.setIndex = 1
+            warmup.isWarmup = true
+            warmup.weightKg = -40
+            archive.sessions[0].sets.append(warmup)
+        case .backwardsRepRanges:
+            // The day editor did not keep the ends in order once, so this
+            // app's own older files hold ranges like these.
+            archive.plans[0].days[0].items[0].targetRepsLow = 12
+            archive.plans[0].days[0].items[0].targetRepsHigh = 8
+            archive.sessions[0].sets[0].targetRepsLow = 9
+        case .noWeekday: archive.plans[0].days[0].weekday = nil
+        case .weekdaySeven: archive.plans[0].days[0].weekday = 7
+        case .slotRepRangeAtItsEdges:
+            archive.plans[0].days[0].items[0].targetRepsLow = 0
+            archive.plans[0].days[0].items[0].targetRepsHigh = 60
+        case .noSetTargets:
+            archive.sessions[0].sets[0].targetRepsLow = nil
+            archive.sessions[0].sets[0].targetRepsHigh = nil
+        case .zeroWeight: archive.sessions[0].sets[0].weightKg = 0
+        case .warmupRepeatingASetID:
+            var again = archive.sessions[0].nextDay()
+            again.sets[0].isWarmup = true
+            archive.sessions.append(again)
+        case .distinctIDsAcrossTwoPlansAndSessions:
+            var other = archive.plans[0]
+            other.id = UUID()
+            other.isActive = false
+            other.days[0].id = UUID()
+            archive.plans.append(other)
+            var again = archive.sessions[0].nextDay()
+            again.sets[0].id = UUID()
+            archive.sessions.append(again)
+        }
+    }
+}
+
+private extension BackupService.SessionDTO {
+    /// The same session a day later under a new ID, its sets' IDs unchanged.
+    func nextDay() -> Self {
+        var copy = self
+        copy.id = UUID()
+        copy.startedAt = startedAt.addingTimeInterval(86_400)
+        copy.endedAt = endedAt?.addingTimeInterval(86_400)
+        return copy
     }
 }
