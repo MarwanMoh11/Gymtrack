@@ -183,26 +183,19 @@ final class WatchConnector: NSObject {
         payload.merge(WatchCommandDelivery.stamp(command, showing: self.session?.sessionID).payload) { $1 }
         let session = WCSession.default
 
-        if case .metrics(let metrics) = command, !metrics.isHandover {
-            // Live or not at all. See `WatchWorkoutMetrics.isHandover`: queued,
-            // these drained after the Finish and wrote partway numbers over
-            // the session's totals, and woke the phone for each one to do it.
-            guard session.isReachable else { return }
-            session.sendMessage(payload, replyHandler: nil) { [weak self] error in
-                self?.log.debug("Live metrics dropped: \(error.localizedDescription, privacy: .public)")
-            }
-            return
+        let waiting = session.outstandingUserInfoTransfers.compactMap {
+            WatchCommand.fromWatchPayload($0.userInfo, key: WatchLink.commandKey)
         }
-
-        // WatchConnectivity keeps order only inside the queue. A command sent
-        // live while earlier ones still wait there reaches the phone first, so
-        // an undo landed before its own log and the log then put the set back.
-        // Behind a backlog everything queues, and the phone hears the wrist in
-        // the order the lifter tapped.
-        guard session.isReachable, session.outstandingUserInfoTransfers.isEmpty else {
+        switch WatchCommandRouting.route(command, reachable: session.isReachable, waiting: waiting) {
+        case .dropped:
+            return
+        case .queued:
             session.transferUserInfo(payload)
             return
+        case .live:
+            break
         }
+        let requeues = WatchCommandRouting.requeuesAfterFailure(command)
         let replyHandler: (([String: Any]) -> Void)?
         switch command {
         case .startToday, .startFreestyle, .requestMirror:
@@ -213,10 +206,11 @@ final class WatchConnector: NSObject {
             replyHandler = nil
         }
         session.sendMessage(payload, replyHandler: replyHandler) { [weak self] error in
-            // Reachability can lapse between the check and the send, so a
-            // failed message is re-queued rather than dropped. A failure can
-            // also be reported for a message that did arrive, so the phone
-            // treats a second copy of a log as the same log.
+            // See `WatchCommandRouting.requeuesAfterFailure`.
+            guard requeues else {
+                self?.log.debug("Message failed, dropped: \(error.localizedDescription, privacy: .public)")
+                return
+            }
             self?.log.debug("Message failed, queueing: \(error.localizedDescription, privacy: .public)")
             WCSession.default.transferUserInfo(payload)
         }
