@@ -1653,8 +1653,15 @@ enum BackupService {
 
     /// Deletes instances rather than using `context.delete(model:)`: that issues
     /// a batch delete, which can't satisfy `PlanItem`'s mandatory inverse to
-    /// `PlanDay` and fails with a constraint trigger violation. Removing the
-    /// roots lets the cascade rules do the work.
+    /// `PlanDay` and fails with a constraint trigger violation.
+    ///
+    /// Every row is fetched and deleted in its own right, children before
+    /// their parents, so the cascade rules never find a row still to delete.
+    /// A slot or a set left to its parent's cascade came back from a rollback
+    /// as a placeholder SwiftData trapped on ("Unexpected backing data for
+    /// snapshot creation", iOS 26.5), so a restore that failed before its
+    /// save crashed the app instead of putting the phone back. Fetching every
+    /// row of each type also takes the orphans an interrupted write left.
     ///
     /// Returns each deleted session's Health link with the session's `id`,
     /// because a restore has to know which session a link belonged to, not
@@ -1665,17 +1672,15 @@ enum BackupService {
         let healthLinks = sessions.compactMap { session in
             session.healthWorkoutID.map { HealthLink(session: session.id, workout: $0) }
         }
+        for item in try context.fetch(FetchDescriptor<PlanItem>()) { context.delete(item) }
+        for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
         for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
+        for set in try context.fetch(FetchDescriptor<SetLog>()) { context.delete(set) }
+        for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
         for session in sessions { context.delete(session) }
         for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
         for check in try context.fetch(FetchDescriptor<BodyMeasurement>()) { context.delete(check) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
-
-        // Sweep anything the cascade missed (orphans from an interrupted write).
-        for item in try context.fetch(FetchDescriptor<PlanItem>()) { context.delete(item) }
-        for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
-        for set in try context.fetch(FetchDescriptor<SetLog>()) { context.delete(set) }
-        for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
 
@@ -1683,8 +1688,10 @@ enum BackupService {
     }
 
     /// `deleteStoredRecords` in slices, in the same order and over the same
-    /// rows. Only the deletes of sessions and the sweeps, which is where the
-    /// time is, give the main actor back; the deletes are still unsaved.
+    /// rows. Only the deletes of slots, sets, sessions and weigh-ins, which is
+    /// where the time is, give the main actor back; the deletes are still
+    /// unsaved. The old sessions' share of the progress is spread over their
+    /// sets, which go first and take most of it.
     @MainActor
     private static func deleteStoredRecords(context: ModelContext, pacer: inout Pacer,
                                             total: Double) async throws -> [HealthLink] {
@@ -1692,30 +1699,29 @@ enum BackupService {
         let healthLinks = sessions.compactMap { session in
             session.healthWorkoutID.map { HealthLink(session: session.id, workout: $0) }
         }
-        for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
-        for (n, session) in sessions.enumerated() {
-            context.delete(session)
-            await pacer.pauseIfDue(fraction: Double(n + 1) / total)
+        for item in try context.fetch(FetchDescriptor<PlanItem>()) {
+            context.delete(item)
+            await pacer.pauseIfDue(fraction: 0)
         }
+        for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
+        for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
         let deleted = Double(sessions.count) / total
+        let sets = try context.fetch(FetchDescriptor<SetLog>())
+        for (n, set) in sets.enumerated() {
+            context.delete(set)
+            await pacer.pauseIfDue(fraction: deleted * Double(n + 1) / Double(sets.count))
+        }
+        for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
+        for session in sessions {
+            context.delete(session)
+            await pacer.pauseIfDue(fraction: deleted)
+        }
         for metric in try context.fetch(FetchDescriptor<BodyMetric>()) {
             context.delete(metric)
             await pacer.pauseIfDue(fraction: deleted)
         }
         for check in try context.fetch(FetchDescriptor<BodyMeasurement>()) { context.delete(check) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
-
-        // Sweep anything the cascade missed (orphans from an interrupted write).
-        for item in try context.fetch(FetchDescriptor<PlanItem>()) {
-            context.delete(item)
-            await pacer.pauseIfDue(fraction: deleted)
-        }
-        for day in try context.fetch(FetchDescriptor<PlanDay>()) { context.delete(day) }
-        for set in try context.fetch(FetchDescriptor<SetLog>()) {
-            context.delete(set)
-            await pacer.pauseIfDue(fraction: deleted)
-        }
-        for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
 
