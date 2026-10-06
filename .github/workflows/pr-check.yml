@@ -1,0 +1,165 @@
+name: PR Check
+
+# Every pull request gets two things in parallel: build-and-test, the required
+# merge gate, and an advisory Claude review comment.
+# The why behind each line is in docs/claude-pipeline.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    # The ruleset on main requires a check with exactly this name.
+    name: build-and-test
+    if: github.event.pull_request.draft == false
+    # Pinned rather than macos-latest, so the Xcode under the build only moves
+    # when this line does.
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show Xcode
+        run: xcodebuild -version
+
+      - name: Pick simulators
+        # Device names and OS versions change with every runner image, so the
+        # newest available iPhone and watch are looked up rather than named.
+        run: |
+          python3 - >> "$GITHUB_ENV" <<'PY'
+          import json, re, subprocess, sys
+          devices = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "available", "-j"]))["devices"]
+          def pick(platform, preferred, fallback):
+              best = None
+              for runtime, sims in devices.items():
+                  m = re.search(rf"SimRuntime\.{platform}-(\d+)-(\d+)(?:-(\d+))?$", runtime)
+                  if not m:
+                      continue
+                  version = tuple(int(v or 0) for v in m.groups())
+                  for sim in sims:
+                      if re.match(preferred, sim["name"]):
+                          rank = 1
+                      elif sim["name"].startswith(fallback):
+                          rank = 0
+                      else:
+                          continue
+                      key = (version, rank)
+                      if best is None or key > best[0]:
+                          best = (key, sim["udid"], f'{sim["name"]} ({runtime.split(".")[-1]})')
+              if best is None:
+                  sys.exit(f"No {fallback} simulator is available on this runner")
+              print(f"Using {best[2]}", file=sys.stderr)
+              return best[1]
+          print("IPHONE_ID=" + pick("iOS", r"iPhone \d+ Pro$", "iPhone"))
+          print("WATCH_ID=" + pick("watchOS", r"Apple Watch Series \d+ \(46mm\)$", "Apple Watch"))
+          PY
+
+      - name: iPhone unit and UI tests (also builds the watch app and widgets)
+        run: |
+          xcodebuild test -quiet \
+            -project GymTrack.xcodeproj \
+            -scheme GymTrack \
+            -destination "id=$IPHONE_ID" \
+            -derivedDataPath build/dd \
+            -parallel-testing-enabled NO \
+            -resultBundlePath build/results/iphone.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Watch unit tests
+        run: |
+          xcodebuild test -quiet \
+            -project GymTrack.xcodeproj \
+            -scheme GymTrackWatch \
+            -destination "id=$WATCH_ID" \
+            -derivedDataPath build/watch \
+            -parallel-testing-enabled NO \
+            -resultBundlePath build/results/watch.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Script tests (Tests/ via scripts/test-*.sh)
+        run: |
+          mkdir -p build
+          if ! sh scripts/test-all.sh | tee build/script-tests.txt; then
+            awk '/FAIL/ { print $3 }' build/script-tests.txt | while read -r name; do
+              echo "::group::$name"
+              tail -n 40 "build/test-logs/$name.log"
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
+
+      - name: Keep the results of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ github.event.pull_request.number }}
+          path: |
+            build/results
+            build/test-logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+  review:
+    # Fork PRs don't get secrets, so only review PRs from this repo.
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # PRs opened by Claude have claude[bot] as the actor, which is rejected by default.
+          # This job only comments, so it can't start a loop.
+          allowed_bots: "*"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: ${{ github.event.pull_request.number }}
+
+            Review this pull request for GymTrack, a SwiftUI iPhone + Apple Watch workout
+            logger (SwiftData, HealthKit, WatchConnectivity, widgets, a Live Activity).
+            It was probably written by another Claude run that could NOT compile or run tests,
+            so be skeptical and specific. Follow CLAUDE.md, especially its three data rules.
+
+            1. Read the PR with `gh pr view` and `gh pr diff`. If the body says "Closes #N",
+               read that issue with `gh issue view N` and judge whether the change does what was asked.
+            2. Update your previous review comment if one exists, otherwise post a new one:
+               `gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file <file>`.
+               Use exactly this format:
+
+            ## Review: <✅ Merge | ⚠️ Test first | ❌ Reject>
+            **Risk:** Low / Medium / High · **Matches the issue:** x/10
+            **What changed:** one or two sentences.
+            **Tests:** ✓ added/updated and meaningful | ⚠️ thin | ❌ missing for changed behavior
+            **Test on device:**
+            - [ ] concrete steps on iPhone or Watch (or "Quick launch is enough")
+            **Double-check:**
+            - specific file:line concerns (likely compile errors, optionals, main-thread UI updates,
+              phone/watch sync, state bugs), or "Nothing flagged"
+
+            Rules: give ✅ only for small, low-risk changes with adequate tests that you are confident compile.
+            Keep it under 220 words. Never write "@claude" in the comment.
+          claude_args: |
+            --model claude-opus-5-5
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Write"
+            --max-turns 15
