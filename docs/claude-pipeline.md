@@ -48,7 +48,7 @@ Filter by label to see only bugs or only features:
 2. After about 5 to 15 minutes, it pushes a `claude/issue-N-...` branch and opens a PR whose body
    says `Closes #N` and has a "How to test on device" section.
 3. `PR Check` starts. The review comment arrives in about 2 minutes. `build-and-test`, the only
-   check that blocks merging, takes about 15 minutes; `ui-tests` and `script-tests` report later
+   check that blocks merging, takes about 10 minutes; `ui-tests` and `script-tests` report later
    (see [timings](#7-timings-observed)).
 
 **Read the review.** The comment's first line is the verdict:
@@ -163,7 +163,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 - **Squash-only merges.** One commit per PR keeps `main` readable, and Claude's
   work-in-progress commits never land. It also removes the merge-strategy choice from the phone.
 - **"Require branches to be up to date" is off.** With it on, every merge would force each other
-  open PR to update and rebuild (about 15 minutes) before it could merge. The cost is that two PRs
+  open PR to update and rebuild (about 10 minutes) before it could merge. The cost is that two PRs
   that each pass alone could break together. `build-and-test` on the next PR, or on the next push
   to `main`'s PRs, catches that, and here it is a single-user repo with small PRs.
 - **The build is the required gate; the review is advisory.** The build is deterministic: it
@@ -257,8 +257,10 @@ From the runs on the setup PR (`macos-26`, Xcode 26.6, October 2026):
 
 | Step | Time |
 |---|---|
+| `build-and-test` (the gate) | 9 minutes: 3 to build all three targets, 6 for the unit tests |
+| `ui-tests` | 14 minutes, building included |
 | Picking simulators | 7 seconds |
-| iPhone build, then unit and UI tests, in one job | 16 minutes |
+| Before the split: iPhone build, then unit and UI tests, in one job | 16 minutes |
 | Watch build and unit tests | 2.6 minutes |
 | Script suite (`Tests/`) | about 27 seconds per script, 45 minutes for all 73 |
 | Claude review | 1.5 minutes, 17 turns |
