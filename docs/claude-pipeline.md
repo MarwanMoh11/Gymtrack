@@ -88,7 +88,15 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 | PR | `@claude <change request>` | Claude amends the PR. A comment on a line of the diff works too |
 | Issue | `@claude plan this` | Claude splits the issue into ordered sub-issues and comments with the plan, without writing code |
 | Issue | `@claude just do it` | With `CLAUDE_AUTO_SPLIT` on: implement this issue as one PR rather than splitting it |
-| Issue | `@claude redo this on latest main` | For a PR that conflicts: Claude starts again from current `main` |
+
+**Several issues at once.** One comment starts one run, so comment `@claude implement this` on each
+issue you want built; each run gets its own Mac and its own PR. Two or three at a time works best:
+- the free plan runs 5 Macs at once, shared with the PR checks (3 per PR), and the rest queue;
+- parallel runs use your Claude subscription faster;
+- start only parts whose **Depends on** line says "nothing" or names merged parts;
+- when two PRs edit the same code, the one merged second conflicts: comment `@claude fix the
+  conflicts` on it.
+| PR | `@claude fix the conflicts` | Claude merges the latest `main` into the PR, resolves the conflicts, rebuilds, runs the suites and pushes |
 
 ## 2. How it's implemented here
 
@@ -132,6 +140,11 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   environment. Its own create-PR tool (`mcp__github__create_pull_request`) runs in Docker, which
   macOS runners don't have: the first run on a Mac reported "the GitHub MCP server didn't connect"
   and could only leave a "Create PR" link.
+- `fetch-depth: 0`, `Bash(git merge origin/main:*)`, `git merge --abort` and read-only `git status`,
+  `git diff` and `git log` let `@claude fix the conflicts` work. A shallow clone has no common
+  ancestor to merge from, and the whole history is a few MB. Merging rather than rebasing means
+  the branch is never rewritten, so no force-push is needed, and the squash merge flattens the
+  merge commit anyway. The merge is limited to `main`.
 - `runs-on: macos-26`, so the run has Xcode and can build its own change before pushing it. Free
   on a public repo. The limit is 180 minutes, a ceiling for hard bugs that need many build rounds;
   a normal run takes 10 to 30. A run that needs more is usually an issue worth splitting.
