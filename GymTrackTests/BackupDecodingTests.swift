@@ -302,23 +302,26 @@ struct BackupDecodingTests {
         try expectUntouched(context)
     }
 
-    @Test func aNegativeRepCountIsRefusedLikeEveryOtherMeasurement() throws {
+    @Test(arguments: [-5, -1, Int.min])
+    func aNegativeRepCountIsRefusedLikeEveryOtherMeasurement(_ reps: Int) throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }
         var broken = archive()
-        broken.sessions[0].sets[0].reps = -5
+        broken.sessions[0].sets[0].reps = reps
         let data = try BackupService.encoded(broken)
         let context = try TestStore.context()
         try keepSomething(in: context)
 
-        // `validate` turns away a negative weight and a negative time, and a
-        // rep count is the one measurement of the three it lets through. A
-        // negative count restores as negative volume and negative total reps.
-        withKnownIssue("validate does not check SetDTO.reps, so a negative rep count restores (#5)") {
-            #expect(throws: BackupService.RestoreError.self) {
-                try BackupService.restore(data: data, context: context)
-            }
+        // A negative count restored as negative volume and negative total reps.
+        do {
+            try BackupService.restore(data: data, context: context)
+            Issue.record("A rep count of \(reps) was accepted")
+        } catch BackupService.RestoreError.invalidValue(let field, let value, _, _) {
+            #expect(field == "rep count")
+            #expect(value == "\(reps)")
         }
+
+        try expectUntouched(context)
     }
 
     @Test(arguments: [Double.infinity, -Double.infinity, Double.nan])
@@ -914,8 +917,9 @@ enum InvalidValue: CaseIterable, Sendable {
 /// One value this app has written itself, or one restore never stores, so
 /// nothing about it may turn a file away.
 enum AcceptedValue: CaseIterable, Sendable {
-    case warmupWithANegativeWeight, backwardsRepRanges, noWeekday, weekdaySeven, slotRepRangeAtItsEdges,
-         noSetTargets, zeroWeight, warmupRepeatingASetID, distinctIDsAcrossTwoPlansAndSessions
+    case warmupWithANegativeWeight, warmupWithANegativeRepCount, backwardsRepRanges, noWeekday, weekdaySeven,
+         slotRepRangeAtItsEdges, noSetTargets, zeroWeight, zeroReps, noReps, warmupRepeatingASetID,
+         distinctIDsAcrossTwoPlansAndSessions
 
     func apply(to archive: inout BackupService.Archive) {
         switch self {
@@ -925,6 +929,13 @@ enum AcceptedValue: CaseIterable, Sendable {
             warmup.setIndex = 1
             warmup.isWarmup = true
             warmup.weightKg = -40
+            archive.sessions[0].sets.append(warmup)
+        case .warmupWithANegativeRepCount:
+            var warmup = archive.sessions[0].sets[0]
+            warmup.id = UUID()
+            warmup.setIndex = 1
+            warmup.isWarmup = true
+            warmup.reps = -3
             archive.sessions[0].sets.append(warmup)
         case .backwardsRepRanges:
             // The day editor did not keep the ends in order once, so this
@@ -941,6 +952,9 @@ enum AcceptedValue: CaseIterable, Sendable {
             archive.sessions[0].sets[0].targetRepsLow = nil
             archive.sessions[0].sets[0].targetRepsHigh = nil
         case .zeroWeight: archive.sessions[0].sets[0].weightKg = 0
+        case .zeroReps: archive.sessions[0].sets[0].reps = 0
+        // How a set counted in time is written.
+        case .noReps: archive.sessions[0].sets[0].reps = nil
         case .warmupRepeatingASetID:
             var again = archive.sessions[0].nextDay()
             again.sets[0].isWarmup = true
