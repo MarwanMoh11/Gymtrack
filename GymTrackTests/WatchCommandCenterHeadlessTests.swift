@@ -19,9 +19,9 @@ import Testing
 
 /// One in-memory store wired to the real center, with every process-wide
 /// singleton the center reaches pointed at throwaway state and put back by
-/// `tearDown`.
+/// `tearDown`. `WatchLinkWireTests` drives the center through it too.
 @MainActor
-private final class Rig {
+final class Rig {
     /// Containers outlive their test on purpose. A finish starts a task that
     /// goes on reading its session for up to twelve seconds, and a model read
     /// after its container is gone traps.
@@ -122,7 +122,7 @@ private final class Rig {
 }
 
 @MainActor
-private func withRig(_ name: String = #function, _ body: @MainActor (Rig) throws -> Void) throws {
+func withRig(_ name: String = #function, _ body: @MainActor (Rig) throws -> Void) throws {
     let rig = try Rig(name)
     defer { rig.tearDown() }
     try body(rig)

@@ -1,20 +1,21 @@
 import Foundation
+import Observation
 import Testing
 @testable import GymTrackWatch
 
 /// The decisions the wrist makes on its own, held to their boundaries: which
 /// taps count, when a rest buzzes and what its countdown shows, when that
 /// countdown is brought back in front of an idle wrist, and what the recorder
-/// does with a session that went quiet or ended somewhere else.
+/// does with a session that went quiet or ended somewhere else. These sit on
+/// the exact edges (the 0.6 s double tap, the 2 s and 60 s buzz tolerances, the
+/// 90 minute idle line) and on the dates around midnight, where a countdown
+/// that leaned on the calendar would go wrong.
 ///
-/// Complements the script-style `Tests/WatchLoggerRulesTests.swift` and
-/// `Tests/WatchRecordingRulesTests.swift`, which run the same rules without a
-/// test target. These sit on the exact edges (the 0.6 s double tap, the 2 s and
-/// 60 s buzz tolerances, the 90 minute idle line) and on the dates around
-/// midnight, where a countdown that leaned on the calendar would go wrong.
-///
-/// Haptics are not asserted: `WatchHaptics` plays through `WKInterfaceDevice`
-/// and nothing here can see what it played. Every claim is about state.
+/// `WatchHaptics` plays through `WKInterfaceDevice`, and nothing here can see
+/// what it played. The one tap a test has to count, a rest running out, is
+/// handed to `WatchRestTimer` as a closure; every other claim is about state.
+/// The rest's expiry is run through `expireIfDue(now:)` rather than its
+/// `Timer`, so no test waits for one to fire.
 @MainActor @Suite(.serialized)
 struct WatchRulesTests {
 
@@ -55,6 +56,25 @@ struct WatchRulesTests {
         #expect(WatchLoggerRules.allowsFocus(on: "deadlift", in: []))
         // The same lift listed twice, once finished: one focusable copy is enough.
         #expect(WatchLoggerRules.allowsFocus(on: "bench", in: all + [watchExercise("bench", order: 3, sets: [watchSet()])]))
+    }
+
+    /// Which sets of an exercise are done, and what a tap on it then means.
+    @Test(arguments: zip(
+        [[true, true], [true, false], [false, false], []] as [[Bool]],
+        [WatchLoggerRules.ExerciseTap.review, .focus, .focus, .focus]
+    ))
+    func anExerciseIsOnlyReviewedOnceEverySetInItIsDone(done: [Bool], tap: WatchLoggerRules.ExerciseTap) {
+        let sets = done.map { $0 ? watchSet(completedAt: WatchTestClock.reference) : watchSet() }
+        #expect(WatchLoggerRules.tap(on: watchExercise(sets: sets)) == tap)
+    }
+
+    /// A rest beginning brings its countdown into view, except while the effort
+    /// question waits below Log set: scrolling then carries the question off
+    /// the screen before it can be read.
+    @Test(arguments: [(true, false, true), (true, true, false), (false, false, false), (false, true, false)])
+    func theCountdownIsScrolledIntoViewOnlyAsARestBeginsWithNoQuestionWaiting(resting: Bool, questionWaiting: Bool,
+                                                                               scrolls: Bool) {
+        #expect(WatchLoggerRules.scrollsToTop(whenRestBecomes: resting, effortCardWaiting: questionWaiting) == scrolls)
     }
 
     // MARK: - Rest tolerances
@@ -214,6 +234,117 @@ struct WatchRulesTests {
         #expect(!timer.isRunning)
     }
 
+    /// The headless phone has no rest timer, so its mirror says it does not
+    /// know the rest. However late that mirror lands, the wrist keeps the rest
+    /// it is running, its own or the phone's; a phone that does know, and says
+    /// there is none, is still followed.
+    @Test func aRestOutlivesAMirrorThatDoesNotKnowItHoweverLateThatMirrorLands() {
+        let now = WatchTestClock.restReference
+        let local = WatchRestTimer(restOver: {})
+        let followed = WatchRestTimer(restOver: {})
+        defer {
+            local.stop(silently: true)
+            followed.stop(silently: true)
+        }
+
+        local.startLocal(seconds: 90, now: now)
+        #expect(local.isRunning && local.isLocal)
+        local.sync(endsAt: nil, total: 0, unknown: true, now: now.addingTimeInterval(8))
+        #expect(local.isRunning && local.isLocal, "long past the grace period, an unknown rest is still not 'none'")
+        local.sync(endsAt: nil, total: 0, now: now.addingTimeInterval(9))
+        #expect(!local.isRunning)
+
+        followed.sync(endsAt: now.addingTimeInterval(60), total: 90, now: now)
+        #expect(followed.isRunning && !followed.isLocal)
+        followed.sync(endsAt: nil, total: 0, unknown: true, now: now.addingTimeInterval(10))
+        #expect(followed.isRunning, "an unknown blank does not stop a rest the phone started")
+    }
+
+    /// A relaunch from a cached context, or a phone that never stopped sending
+    /// a rest's end, hands the wrist rests that are already over. Only one that
+    /// ended a moment ago is felt, and only once.
+    @Test func aRestThatIsLongOverIsClearedSilentlyAndOneThatJustEndedTapsOnce() {
+        let now = WatchTestClock.restReference
+        var taps = 0
+        let timer = WatchRestTimer(restOver: { taps += 1 })
+        defer { timer.stop(silently: true) }
+
+        timer.sync(endsAt: now.addingTimeInterval(-600), total: 90, now: now)
+        #expect(!timer.isRunning)
+        #expect(taps == 0, "a rest that ended ten minutes ago does not tap the wrist")
+
+        timer.sync(endsAt: now.addingTimeInterval(60), total: 90, now: now)
+        #expect(timer.isRunning && !timer.isLocal)
+        #expect(taps == 0, "a live rest from the phone runs quietly")
+        timer.sync(endsAt: now.addingTimeInterval(-600), total: 90, now: now)
+        #expect(!timer.isRunning && taps == 0, "a stale end after a live one clears the rest, silently")
+
+        // Ended a moment before the mirror arrived: the lifter is still beside it.
+        timer.sync(endsAt: now.addingTimeInterval(-0.5), total: 90, now: now)
+        #expect(!timer.isRunning)
+        #expect(taps == 1)
+        // The phone going on to send that same end is not a second rest.
+        timer.sync(endsAt: now.addingTimeInterval(-0.5), total: 90, now: now.addingTimeInterval(0.4))
+        #expect(!timer.isRunning)
+        #expect(taps == 1)
+    }
+
+    /// The countdown is drawn from the end date, so nothing the logger reads
+    /// may change between the start of a rest and its end. The old ticker
+    /// rewrote the time left four times a second and re-evaluated the whole
+    /// logger with it. The expiry is the one thing that runs in between, and
+    /// before the end it must change nothing; at the end it changes what the
+    /// logger reads, and taps once.
+    @Test func aRestChangesNothingTheLoggerReadsUntilItEndsAndThenTapsOnce() {
+        let now = WatchTestClock.restReference
+        var taps = 0
+        let timer = WatchRestTimer(restOver: { taps += 1 })
+        defer { timer.stop(silently: true) }
+        timer.startLocal(seconds: 1, now: now)
+        #expect(timer.isRunning && timer.isLocal)
+
+        nonisolated(unsafe) var changed = false
+        withObservationTracking {
+            _ = timer.endsAt
+            _ = timer.totalSeconds
+            _ = timer.isRunning
+            _ = timer.isLocal
+        } onChange: { changed = true }
+
+        timer.expireIfDue(now: now.addingTimeInterval(0.6))
+        #expect(!changed, "the rest changed what the logger reads before it ended")
+        #expect(timer.isRunning && taps == 0)
+
+        timer.expireIfDue(now: now.addingTimeInterval(1))
+        #expect(!timer.isRunning)
+        #expect(changed, "ending the rest is a change the logger has to hear")
+        #expect(taps == 1)
+
+        // The same end, reached again by the timer or by a mirror, taps nothing more.
+        timer.expireIfDue(now: now.addingTimeInterval(1.4))
+        timer.sync(endsAt: now.addingTimeInterval(1), total: 1, now: now.addingTimeInterval(1.4))
+        #expect(!timer.isRunning)
+        #expect(taps == 1)
+        #expect(timer.remaining(at: now) == 0 && timer.label(at: now) == "—")
+    }
+
+    /// The timer's own expiry wakes whenever the system lets it, and a wake a
+    /// little late still taps; one minutes late finds the rest over and says
+    /// nothing.
+    @Test(arguments: zip([0.0, 8, 60, 60.5, 600], [1, 1, 1, 0, 0]))
+    func aRestTheWristRanTapsWhenItsExpiryWakesUpToAMinuteLate(lateBy: Double, taps expected: Int) {
+        let now = WatchTestClock.restReference
+        var taps = 0
+        let timer = WatchRestTimer(restOver: { taps += 1 })
+        defer { timer.stop(silently: true) }
+        timer.startLocal(seconds: 90, now: now)
+
+        timer.expireIfDue(now: now.addingTimeInterval(90 + lateBy))
+
+        #expect(!timer.isRunning)
+        #expect(taps == expected)
+    }
+
     // MARK: - Bringing the countdown back
 
     /// Eight seconds untouched, counted from the last touch: the edge itself
@@ -354,6 +485,52 @@ struct WatchRulesTests {
         #expect(!Rules.discardsOnWristFinish(healthEnabled: true, setsLogged: 1))
     }
 
+    /// With saving to Health off the recording still runs, for the heart rate
+    /// and the rest-over tap, and nothing it records is ever kept: whichever
+    /// way the phone ended the session.
+    @Test func withHealthSavingOffEveryWayThePhoneEndsASessionDiscardsTheRecording() {
+        let session = UUID(), other = UUID()
+        let ends: [WatchSessionEnd?] = [
+            nil,
+            WatchSessionEnd(sessionID: session, reason: .finished, phoneHealthWorkoutID: nil),
+            WatchSessionEnd(sessionID: session, reason: .finished, phoneHealthWorkoutID: UUID()),
+            WatchSessionEnd(sessionID: session, reason: .discarded, phoneHealthWorkoutID: nil),
+            WatchSessionEnd(sessionID: other, reason: .finished, phoneHealthWorkoutID: nil),
+        ]
+        for end in ends {
+            #expect(WatchRecordingRules.closeAfterPhoneEnd(end, recording: session, healthEnabled: false).discards,
+                    "\(String(describing: end))")
+        }
+        #expect(WatchRecordingRules.closeAfterPhoneEnd(ends[1], recording: session, healthEnabled: false).reportsMetrics,
+                "a finished session keeps its heart rate with Health saving off")
+    }
+
+    /// The idle line is counted from the last thing anybody did, a set started
+    /// included, and the end it writes is the last set logged, however late
+    /// the rule gets to run.
+    @Test func aQuietSessionIsJudgedFromItsLastTouchAndEndsAtItsLastSetHoweverLateTheRuleRuns() {
+        let start = WatchTestClock.reference
+        func at(minutes: Double) -> Date { start.addingTimeInterval(minutes * 60) }
+
+        let lifted = watchSession(startedAt: start, sets: [
+            watchSet(completedAt: at(minutes: 10)), watchSet(completedAt: at(minutes: 20)), watchSet()
+        ])
+        #expect(WatchRecordingRules.idleVerdict(for: lifted, now: at(minutes: 20 + 89)) == .keepRecording,
+                "eighty-nine minutes after the last set may be a long break")
+        #expect(WatchRecordingRules.idleVerdict(for: lifted, now: at(minutes: 20 + 91)) == .finish(at: at(minutes: 20)))
+        #expect(WatchRecordingRules.idleVerdict(for: lifted, now: at(minutes: 11 * 60)) == .finish(at: at(minutes: 20)))
+
+        // The last log was long ago, but a set was announced since: the lifter
+        // is under the bar, not gone home.
+        let underTheBar = watchSession(startedAt: start, sets: [
+            watchSet(completedAt: at(minutes: 10)), watchSet(startedAt: at(minutes: 60))
+        ])
+        #expect(WatchRecordingRules.lastActivity(in: underTheBar) == at(minutes: 60))
+        #expect(WatchRecordingRules.idleVerdict(for: underTheBar, now: at(minutes: 60 + 89)) == .keepRecording)
+        #expect(WatchRecordingRules.idleVerdict(for: underTheBar, now: at(minutes: 60 + 91)) == .finish(at: at(minutes: 10)),
+                "a set announced and never logged is not part of the workout's end")
+    }
+
     /// A recording left running after the lifter went home. The line is 90
     /// minutes of silence, counted from the latest of the start and every set's
     /// start or completion.
@@ -438,6 +615,9 @@ struct WatchRulesTests {
         #expect(!Rules.handsOver(from: nil, toLive: a, recording: a))
         #expect(Rules.handsOver(from: a, toLive: b, recording: a))
         #expect(Rules.handsOver(from: nil, toLive: b, recording: nil))
+        #expect(Rules.handsOver(from: a, toLive: b, recording: nil), "the session that replaced an abandoned start is next")
+        #expect(!Rules.handsOver(from: a, toLive: a, recording: a), "a start that committed has nothing to hand over")
+        #expect(!Rules.handsOver(from: a, toLive: nil, recording: nil), "with nothing live, nothing starts")
 
         func over(live: UUID?, mirrored: UUID?, heard: Bool, admitted: Bool = true) -> Bool {
             Rules.sessionIsOver(recording: a, liveSessionID: live, mirroredSessionID: mirrored,
@@ -500,5 +680,20 @@ struct WatchRulesTests {
         let blank = watchSession(id: id, title: " \n ", exercises: [watchExercise(sets: [watchSet()])])
         let none = WatchWorkoutMetadata(recording: id, snapshot: blank)
         #expect(none.title == nil && none.sets == nil && none.volumeKg == nil)
+    }
+
+    /// A workout the phone finished gets the same metadata a wrist Finish
+    /// would: it is a value of what was heard, and counts only the sets done.
+    @Test func wristMetadataIsAValueOfWhatWasHeardAndCountsOnlyTheSetsDone() {
+        let id = UUID()
+        func heard() -> WatchSessionSnapshot {
+            let done = WatchTestClock.reference
+            return watchSession(id: id, exercises: [watchExercise(sets: [
+                watchSet(completedAt: done), watchSet(completedAt: done), watchSet()
+            ])], volumeKg: 960)
+        }
+        let full = WatchWorkoutMetadata(recording: id, snapshot: heard())
+        #expect(full == WatchWorkoutMetadata(recording: id, snapshot: heard()))
+        #expect(full.sessionID == id && full.title == "Push" && full.sets == 2 && full.volumeKg == 960)
     }
 }
