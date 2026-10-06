@@ -80,9 +80,9 @@ jobs:
           retention-days: 7
 
   script-tests:
-    # Not required: 73 scripts that each compile a slice of the app take about
-    # 45 minutes on a runner. A change rarely breaks one without breaking a unit
-    # test too, and a merge shouldn't wait the extra half hour to find out.
+    # Not required: 66 scripts that each compile a slice of the app take about
+    # 20 minutes on a runner. A change rarely breaks one without breaking a unit
+    # test too, and a merge shouldn't wait the extra 10 minutes to find out.
     if: github.event.pull_request.draft == false
     runs-on: macos-26
     timeout-minutes: 75
