@@ -116,6 +116,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 - **Install the checker** copies `check.sh` to `$RUNNER_TEMP` before Claude starts. Claude may edit
   any file in the checkout, so a checker it could edit would let it run any command; the copy
   outside the checkout is out of its reach.
+- `CLAUDE_CODE_EFFORT_LEVEL: xhigh` runs Opus at its extra-high effort, in the review too.
 - `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` raise Claude Code's per-command limit (2
   minutes by default, 10 at most) to 40 minutes, which a cold build needs.
 - `Bash(${{ runner.temp }}/check.sh:*)` in `--allowedTools` is the only shell command Claude may
@@ -169,9 +170,10 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   reason teaches you to bypass gates.
 - **Claude opens the PR itself.** Otherwise the run ends with a "Create PR" link, which is one more
   tap and one more page on a phone, and the PR would lack the `Closes #N` and test steps.
-- **Opus for both workflows** (`claude-opus-5-5`). Swift that compiles the first time saves build
-  rounds in the implementing run, and the reviewer judges a diff it can't build. Both are worth
-  the stronger model.
+- **Opus at `xhigh` effort for both workflows** (`claude-opus-5-5`, `CLAUDE_CODE_EFFORT_LEVEL:
+  xhigh` on the action step). Swift that compiles the first time saves build rounds in the
+  implementing run, and the reviewer judges a diff it can't build. Both are worth the stronger
+  model and the extra thinking, which costs more usage per turn but fewer turns spent going wrong.
 - **A public repo**, because GitHub-hosted macOS minutes are free for public repos. The git history
   was scanned for secrets before relying on that (see below).
 - **The implementing run builds and tests its own change.** It first ran on `ubuntu-latest`, where

@@ -40,6 +40,8 @@ jobs:
         run: cp scripts/claude-pipeline/check.sh "$RUNNER_TEMP/check.sh"
       - uses: anthropics/claude-code-action@v1
         env:
+          # Opus 5.5 at its extra-high effort: more thinking per turn, fewer wrong turns.
+          CLAUDE_CODE_EFFORT_LEVEL: xhigh
           # Claude Code stops a command after 2 minutes by default (10 at most);
           # a cold build needs longer.
           BASH_DEFAULT_TIMEOUT_MS: "2400000"

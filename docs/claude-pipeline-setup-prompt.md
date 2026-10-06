@@ -32,7 +32,8 @@ them rather than writing them from scratch.
 5. **Reference documentation in the repo**, so this repo can be a template too.
 
 **Decisions already made. Don't ask about these again:**
-- Both cloud workflows use the current Opus model. Look up its exact ID before using it.
+- Both cloud workflows use the current Opus model at `xhigh` effort (`CLAUDE_CODE_EFFORT_LEVEL: xhigh`
+  on the action step). Look up the model's exact ID before using it.
 - Auth uses my **Claude subscription token**.
 - Merges are **squash only**.
 - If the build needs macOS (Xcode), the repo should be **public** so GitHub's macOS minutes are
