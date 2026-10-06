@@ -385,7 +385,7 @@ struct ActiveWorkoutLoggingTests {
             // Left logged, the drop would be a lift taken without rest off a set
             // that was never done. Its numbers stay, so logging it again is one
             // tap, and it is no longer the latest lift.
-            #expect(isErased(drop))
+            #expect(isErased(rows[1]) && isErased(drop))
             #expect(drop.weightKg == 60 && drop.reps == 8)
             #expect(workout.lastLoggedSetID == nil)
             #expect(rows[0].isCompleted)
