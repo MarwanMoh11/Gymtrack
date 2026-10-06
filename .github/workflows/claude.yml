@@ -20,8 +20,10 @@ jobs:
       (github.event_name == 'issues' &&
         (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
       (github.event_name != 'issues' && contains(github.event.comment.body, '@claude'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A Mac, so the run can build and test its own change before pushing it
+    # (free on a public repo). Longer limit: a cold build alone takes minutes.
+    runs-on: macos-26
+    timeout-minutes: 90
     permissions:
       contents: write
       pull-requests: write
@@ -32,7 +34,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+      # The checker is copied out of the repo before Claude starts. Claude may edit
+      # any file in the checkout, and a copy it can edit would let it run anything.
+      - name: Install the checker
+        run: cp scripts/claude-pipeline/check.sh "$RUNNER_TEMP/check.sh"
       - uses: anthropics/claude-code-action@v1
+        env:
+          # Claude Code stops a command after 2 minutes by default (10 at most);
+          # a cold build needs longer.
+          BASH_DEFAULT_TIMEOUT_MS: "2400000"
+          BASH_MAX_TIMEOUT_MS: "2400000"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Lets Claude read CI results, so "@claude fix the build" can see what failed.
@@ -43,5 +54,5 @@ jobs:
           display_report: "true"
           claude_args: |
             --model claude-opus-5-5
-            --allowedTools "mcp__github__create_pull_request"
-            --append-system-prompt "Follow CLAUDE.md. Keep changes small and scoped to the issue. Add or update tests for every behavior change. You cannot compile or run tests here; CI does. When you finish work on an issue, open a pull request from your branch into main yourself, with 'Closes #<issue number>' and a short 'How to test on device' section in the body."
+            --allowedTools "mcp__github__create_pull_request,Bash(${{ runner.temp }}/check.sh:*)"
+            --append-system-prompt "Follow CLAUDE.md. Keep changes small and scoped to the issue. Add or update tests for every behavior change. You can run one command, the checker: '${{ runner.temp }}/check.sh build' compiles all three targets and prints only the errors; '${{ runner.temp }}/check.sh test GymTrackTests/SomeSuite ...' runs the named suites. Run it exactly as written, with no pipes, redirects or cd. Before every push, the build must pass and the suites you added or changed must pass; leave the full suite to CI. Its full logs are in build/claude-check/. When you finish work on an issue, open a pull request from your branch into main yourself, with 'Closes #<issue number>', the suites you ran, and a short 'How to test on device' section in the body."

@@ -144,7 +144,7 @@ into `docs/DEVELOPMENT.md`. Include:
 - how new files get into the build;
 - **test conventions**: every behavior change adds or updates tests in the matching test file,
   following the Phase 3 patterns;
-- a note that cloud runs can't build or run tests, and that CI does;
+- how a cloud run checks its work: the checker command (see Phase 5), or that CI does;
 - a rule: any change to the pipeline (workflows, scripts, repo settings, ruleset) must update
   `docs/claude-pipeline.md` in the same PR.
 
@@ -160,6 +160,11 @@ workflows' structure and action inputs. Then:
   `build-and-test`. Resolve devices or versions at runtime rather than hard-coding them. If UI or
   end-to-end tests push the job past about 15 minutes, move them to a separate job that isn't
   required.
+- If building needs a particular OS or toolchain (Xcode needs macOS), run `claude.yml` on a runner
+  that has it and give Claude one checker command, like the template's
+  `scripts/claude-pipeline/check.sh`, that builds and runs named suites and prints only errors.
+  Copy it outside the checkout before Claude starts and allow only that path. On a private repo,
+  tell me what the extra runner minutes cost first.
 - Rewrite the review prompt's description of the app.
 - Validate both files with `actionlint` (`brew install actionlint`).
 

@@ -47,11 +47,11 @@ The backup's `version` stays 2; every field added since is optional.
   controls by accessibility identifier and wait with `waitForExistence`.
 
 ## Cloud runs and CI
-A Claude run in GitHub Actions can't compile or run tests; CI does. `build-and-test` in
-`.github/workflows/pr-check.yml` builds all three targets, runs every suite and gates merging. Write
-code you're confident compiles, and say in the PR what you couldn't check. Any change to the pipeline
-(workflows, `scripts/claude-pipeline/`, repo settings, the ruleset) updates `docs/claude-pipeline.md`
-in the same PR.
+`scripts/claude-pipeline/check.sh build` compiles all three targets and `check.sh test <Target/Suite>`
+runs suites; a cloud run may run only that, and runs both on its change before every push.
+`build-and-test` in `.github/workflows/pr-check.yml` runs every suite and gates merging. Any change
+to the pipeline (workflows, `scripts/claude-pipeline/`, repo settings, the ruleset) updates
+`docs/claude-pipeline.md` in the same PR.
 
 ## House style
 - Comments explain *why* in plain prose, usually naming the failure they prevent; they never narrate

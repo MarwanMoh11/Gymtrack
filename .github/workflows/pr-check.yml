@@ -1,7 +1,9 @@
 name: PR Check
 
-# Every pull request gets two things in parallel: build-and-test, the required
-# merge gate, and an advisory Claude review comment.
+# Every pull request gets, in parallel: build-and-test, the required merge gate
+# (all three targets build, and both apps' unit tests pass); the UI tests and the
+# older script suite, which report on the PR but don't block it; and an advisory
+# Claude review comment.
 # The why behind each line is in docs/claude-pipeline.md.
 
 on:
@@ -27,67 +29,65 @@ jobs:
     # Pinned rather than macos-latest, so the Xcode under the build only moves
     # when this line does.
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
       - name: Show Xcode
         run: xcodebuild -version
 
-      - name: Pick simulators
-        # Device names and OS versions change with every runner image, so the
-        # newest available iPhone and watch are looked up rather than named.
-        run: |
-          python3 - >> "$GITHUB_ENV" <<'PY'
-          import json, re, subprocess, sys
-          devices = json.loads(subprocess.check_output(
-              ["xcrun", "simctl", "list", "devices", "available", "-j"]))["devices"]
-          def pick(platform, preferred, fallback):
-              best = None
-              for runtime, sims in devices.items():
-                  m = re.search(rf"SimRuntime\.{platform}-(\d+)-(\d+)(?:-(\d+))?$", runtime)
-                  if not m:
-                      continue
-                  version = tuple(int(v or 0) for v in m.groups())
-                  for sim in sims:
-                      if re.match(preferred, sim["name"]):
-                          rank = 1
-                      elif sim["name"].startswith(fallback):
-                          rank = 0
-                      else:
-                          continue
-                      key = (version, rank)
-                      if best is None or key > best[0]:
-                          best = (key, sim["udid"], f'{sim["name"]} ({runtime.split(".")[-1]})')
-              if best is None:
-                  sys.exit(f"No {fallback} simulator is available on this runner")
-              print(f"Using {best[2]}", file=sys.stderr)
-              return best[1]
-          print("IPHONE_ID=" + pick("iOS", r"iPhone \d+ Pro$", "iPhone"))
-          print("WATCH_ID=" + pick("watchOS", r"Apple Watch Series \d+ \(46mm\)$", "Apple Watch"))
-          PY
+      # The same checker a Claude run uses on its own change, so the two can't
+      # disagree about how the project is built or which simulators it runs on.
+      # It prints only errors and failures; full logs are kept below.
+      - name: Build the iPhone app, watch app, widgets and test bundles
+        run: scripts/claude-pipeline/check.sh build
 
-      - name: iPhone unit and UI tests (also builds the watch app and widgets)
-        run: |
-          xcodebuild test -quiet \
-            -project GymTrack.xcodeproj \
-            -scheme GymTrack \
-            -destination "id=$IPHONE_ID" \
-            -derivedDataPath build/dd \
-            -parallel-testing-enabled NO \
-            -resultBundlePath build/results/iphone.xcresult \
-            CODE_SIGNING_ALLOWED=NO
+      - name: iPhone and watch unit tests
+        run: scripts/claude-pipeline/check.sh test GymTrackTests GymTrackWatchTests
 
-      - name: Watch unit tests
-        run: |
-          xcodebuild test -quiet \
-            -project GymTrack.xcodeproj \
-            -scheme GymTrackWatch \
-            -destination "id=$WATCH_ID" \
-            -derivedDataPath build/watch \
-            -parallel-testing-enabled NO \
-            -resultBundlePath build/results/watch.xcresult \
-            CODE_SIGNING_ALLOWED=NO
+      - name: Keep the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-logs-${{ github.event.pull_request.number }}
+          path: |
+            build/claude-check/*.log
+            build/claude-check/dd*/Logs/Test
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ui-tests:
+    # Not required: the flows add ten minutes of building and tapping, and the
+    # gate should answer in about fifteen. A failure still shows red on the PR.
+    if: github.event.pull_request.draft == false
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: UI tests
+        run: scripts/claude-pipeline/check.sh test GymTrackUITests
+
+      - name: Keep the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-test-logs-${{ github.event.pull_request.number }}
+          path: |
+            build/claude-check/*.log
+            build/claude-check/dd/Logs/Test
+          if-no-files-found: ignore
+          retention-days: 7
+
+  script-tests:
+    # Not required: 73 scripts that each compile a slice of the app take about
+    # 45 minutes on a runner. A change rarely breaks one without breaking a unit
+    # test too, and a merge shouldn't wait the extra half hour to find out.
+    if: github.event.pull_request.draft == false
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
 
       - name: Script tests (Tests/ via scripts/test-*.sh)
         run: |
@@ -101,14 +101,12 @@ jobs:
             exit 1
           fi
 
-      - name: Keep the results of a failed run
+      - name: Keep the logs of a failed run
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ github.event.pull_request.number }}
-          path: |
-            build/results
-            build/test-logs
+          name: script-test-logs-${{ github.event.pull_request.number }}
+          path: build/test-logs
           if-no-files-found: ignore
           retention-days: 7
 
@@ -138,8 +136,8 @@ jobs:
 
             Review this pull request for GymTrack, a SwiftUI iPhone + Apple Watch workout
             logger (SwiftData, HealthKit, WatchConnectivity, widgets, a Live Activity).
-            It was probably written by another Claude run that could NOT compile or run tests,
-            so be skeptical and specific. Follow CLAUDE.md, especially its three data rules.
+            It was probably written by another Claude run that built it and ran only the suites
+            it touched, so be skeptical and specific. Follow CLAUDE.md, especially its three data rules.
 
             1. Read the PR with `gh pr view` and `gh pr diff`. If the body says "Closes #N",
                read that issue with `gh issue view N` and judge whether the change does what was asked.
@@ -159,7 +157,9 @@ jobs:
 
             Rules: give ✅ only for small, low-risk changes with adequate tests that you are confident compile.
             Keep it under 220 words. Never write "@claude" in the comment.
+          # 30 turns: a review that reads the linked issue and a few files took 17, and
+          # past the cap the action marks a review it already posted as failed.
           claude_args: |
             --model claude-opus-5-5
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Write"
-            --max-turns 15
+            --max-turns 30

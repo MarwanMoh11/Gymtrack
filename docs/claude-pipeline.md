@@ -11,7 +11,7 @@ This repo is the template. To set the same flow up elsewhere, read
 
 ```mermaid
 flowchart LR
-    A["Issue mentions @claude"] --> B["claude.yml<br/>Claude implements on a branch"]
+    A["Issue mentions @claude"] --> B["claude.yml, on a Mac<br/>Claude implements, builds and tests"]
     B --> C["Claude opens a PR<br/>'Closes #N'"]
     C --> D["pr-check.yml"]
     D --> E["build-and-test<br/>macOS runner, required"]
@@ -47,8 +47,9 @@ Filter by label to see only bugs or only features:
    finished run's summary page has a report with the model, the turns and the duration.
 2. After about 5 to 15 minutes, it pushes a `claude/issue-N-...` branch and opens a PR whose body
    says `Closes #N` and has a "How to test on device" section.
-3. `PR Check` starts. The review comment arrives in about 2 to 4 minutes. `build-and-test` takes
-   about 25 minutes on a cold runner (see [timings](#timings-observed)).
+3. `PR Check` starts. The review comment arrives in about 2 minutes. `build-and-test`, the only
+   check that blocks merging, takes about 15 minutes; `ui-tests` and `script-tests` report later
+   (see [timings](#7-timings-observed)).
 
 **Read the review.** The comment's first line is the verdict:
 
@@ -77,7 +78,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 
 | Component | Where it lives | What it does | Generic or GymTrack-specific |
 |---|---|---|---|
-| Implement workflow | [`.github/workflows/claude.yml`](../.github/workflows/claude.yml) | Runs Claude (Opus) when `@claude` appears in a new issue, a comment or a PR review comment | Generic |
+| Implement workflow | [`.github/workflows/claude.yml`](../.github/workflows/claude.yml) | Runs Claude (Opus) on `macos-26` when `@claude` appears in a new issue, a comment or a PR review comment | Generic, apart from the runner and the checker |
+| Checker | [`scripts/claude-pipeline/check.sh`](../scripts/claude-pipeline/check.sh) | `check.sh build` compiles all three targets, `check.sh test <Target/Suite>` runs suites; both print only errors and failures. The one command a cloud run may execute; also usable locally | Specific |
 | PR workflow | [`.github/workflows/pr-check.yml`](../.github/workflows/pr-check.yml) | `build-and-test` on `macos-26`, plus the Claude review | `build-and-test` steps and the review's app description are specific; the rest is generic |
 | Issue forms | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | Bug report and Feature request: apply the label, ask for what Claude needs, and add `@claude` only if you choose "Yes" | Generic structure, GymTrack wording |
 | `CLAUDE.md` | [`CLAUDE.md`](../CLAUDE.md) | What every Claude run reads first: layout, data rules, test conventions, CI rules. 60 lines or fewer | Specific |
@@ -109,8 +111,19 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 - `--allowedTools "mcp__github__create_pull_request"` switches on the GitHub MCP server's
   create-PR tool. Without it, Claude's only way to offer a PR is a "Create PR" link that you would
   have to tap.
-- `--append-system-prompt` tells Claude it can't compile, so it leaves verification to CI, and
-  tells it to open the PR itself with `Closes #N` and device-test steps.
+- `runs-on: macos-26`, so the run has Xcode and can build its own change before pushing it. Free
+  on a public repo. The limit is 90 minutes because a cold build plus a few test rounds can pass 45.
+- **Install the checker** copies `check.sh` to `$RUNNER_TEMP` before Claude starts. Claude may edit
+  any file in the checkout, so a checker it could edit would let it run any command; the copy
+  outside the checkout is out of its reach.
+- `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` raise Claude Code's per-command limit (2
+  minutes by default, 10 at most) to 40 minutes, which a cold build needs.
+- `Bash(${{ runner.temp }}/check.sh:*)` in `--allowedTools` is the only shell command Claude may
+  run besides the git commands the action allows. No pipes, so its output reaches Claude unfiltered
+  by anything else; the checker caps it at 40 lines itself.
+- `--append-system-prompt` tells Claude how to call the checker, that the build and the suites it
+  touched must pass before every push, and to open the PR itself with `Closes #N`, the suites it
+  ran and device-test steps.
 
 **`pr-check.yml`**
 - `concurrency` with `cancel-in-progress` means a new push to a PR cancels the run for the old
@@ -119,13 +132,21 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   job without updating the ruleset leaves every PR waiting for a check that never reports.
 - `runs-on: macos-26` is pinned rather than `macos-latest`, so the Xcode under the build only
   changes when this line does. The job prints `xcodebuild -version` first.
-- "Pick simulators" finds the newest available iPhone and Apple Watch at run time. Runner images
-  change their device list often, and a hard-coded name breaks without warning.
-- `CODE_SIGNING_ALLOWED=NO`: simulator builds need no signing, and the runner has no certificates.
-- `-parallel-testing-enabled NO`: the unit tests share process-wide singletons and run serialized
-  anyway, and parallel runs would clone simulators, costing minutes on a 3-core runner.
-- The GymTrack scheme's test step also builds the watch app and the widgets, because both are
-  embedded in the app. The watch tests then run on the watch simulator, and the script tests run last.
+- Every Xcode step calls [`check.sh`](../scripts/claude-pipeline/check.sh), the same command a
+  Claude run uses on its own change, so CI and Claude build the same way on the same simulators.
+  It finds the newest iPhone Pro and 46mm Apple Watch at run time (runner images change their
+  device list often, and a hard-coded name breaks without warning), prints only errors and
+  failures, and keeps full logs in `build/claude-check/`, which a failed job uploads.
+- Inside it: `CODE_SIGNING_ALLOWED=NO`, because simulator builds need no signing and the runner
+  has no certificates; `-parallel-testing-enabled NO`, because the unit tests share process-wide
+  singletons and parallel runs would clone simulators on a 3-core runner; and
+  `-collect-test-diagnostics never`, because by default a failing test makes `xcodebuild` spend
+  minutes gathering a simulator report.
+- Building the GymTrack scheme also builds the watch app and the widgets, because both are
+  embedded in the app.
+- **Only the unit tests gate merging.** `ui-tests` and `script-tests` run in parallel on their
+  own runners and show red on the PR when they fail, but the ruleset doesn't require them. With
+  everything in one job the gate took over 40 minutes: the 73 scripts alone take about 45.
 - On failure, the `.xcresult` bundles and script logs are uploaded as an artifact for 7 days.
 - The review job's `if:` skips PRs from forks. Forks get no secrets, so the job would fail anyway,
   and skipping it keeps a stranger's PR from ever reaching Claude.
@@ -140,7 +161,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 - **Squash-only merges.** One commit per PR keeps `main` readable, and Claude's
   work-in-progress commits never land. It also removes the merge-strategy choice from the phone.
 - **"Require branches to be up to date" is off.** With it on, every merge would force each other
-  open PR to update and rebuild (about 25 minutes) before it could merge. The cost is that two PRs
+  open PR to update and rebuild (about 15 minutes) before it could merge. The cost is that two PRs
   that each pass alone could break together. `build-and-test` on the next PR, or on the next push
   to `main`'s PRs, catches that, and here it is a single-user repo with small PRs.
 - **The build is the required gate; the review is advisory.** The build is deterministic: it
@@ -148,15 +169,20 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   reason teaches you to bypass gates.
 - **Claude opens the PR itself.** Otherwise the run ends with a "Create PR" link, which is one more
   tap and one more page on a phone, and the PR would lack the `Closes #N` and test steps.
-- **Opus for both workflows** (`claude-opus-5-5`). The implementing run can't compile, so it has to
-  get Swift right first time. The reviewer has to spot what won't compile without compiling.
-  Both are worth the stronger model.
+- **Opus for both workflows** (`claude-opus-5-5`). Swift that compiles the first time saves build
+  rounds in the implementing run, and the reviewer judges a diff it can't build. Both are worth
+  the stronger model.
 - **A public repo**, because GitHub-hosted macOS minutes are free for public repos. The git history
   was scanned for secrets before relying on that (see below).
-- **Why the cloud runs can't compile.** `claude.yml` runs on `ubuntu-latest`, and Xcode only runs
-  on macOS. A macOS runner for the implementing job would cost 10 times the minutes on a private
-  repo, and would hold a 45-minute runner while Claude thinks. Building is left to CI, which reports
-  back on the PR, and `@claude fix the build` closes the loop.
+- **The implementing run builds and tests its own change.** It first ran on `ubuntu-latest`, where
+  there is no Xcode, so every compile error surfaced only in CI, a round trip and a fresh Opus run
+  (`@claude fix the build`) later. On a Mac with the checker, Claude fixes its own compile errors
+  and test failures inside the same run, while it still has the context, and the PR arrives having
+  built. CI still runs everything and is still the gate: the run only checks the suites it touched.
+  On a private repo the Mac costs 10 times a Linux minute; here it is free.
+- **One command, not a shell.** Claude gets the checker rather than `xcodebuild` because the
+  checker picks the simulators, keeps the two schemes apart, and turns thousands of log lines into
+  the few that matter. Every line Claude reads is usage, so a raw log would cost more than the fix.
 
 ## 4. Security model
 
@@ -178,17 +204,25 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   - only a write-access user can start a run;
   - the run's token can push branches and open PRs, but `main` is protected by the ruleset;
   - nothing merges without the owner tapping the button after reading the diff;
-  - the subscription token is never handed to Claude's tools.
+  - the subscription token is never handed to Claude's tools: the checker is the only command
+    they may run, it lives outside the checkout so Claude can't change it, and it runs
+    `xcodebuild` with an empty environment, so a build script phase added to the project can't
+    read the token either.
   Still, don't trigger `@claude` on a thread where strangers have posted instructions.
 
 ## 5. Costs and limits
 
 - **GitHub minutes.** Free on public repos. On a private repo they come out of the plan's included
-  minutes, and macOS minutes count about 10 times a Linux minute. One `build-and-test` here is
-  about 25 macOS minutes, which works out to roughly 250 included minutes per PR on a private repo.
+  minutes, and macOS minutes count about 10 times a Linux minute. One PR here uses about 75 macOS
+  minutes across its three jobs (the script suite is most of it), plus the implementing run's own
+  Mac time: on a private repo, many hundreds of included minutes per PR.
+- **Concurrent Macs.** A free account runs at most 5 macOS jobs at once. A PR uses three, and an
+  implementing run one more, so a second PR's jobs may queue for a few minutes.
 - **Claude usage.** Each implementing run is a long Opus session, and each review a short one,
-  both counted against the subscription's usage limits like local Claude Code use. Every push to a
-  PR runs a new review. `claude setup-token` tokens last one year.
+  both counted against the subscription's usage limits like local Claude Code use. Building and
+  testing inside the run adds turns (reading errors and fixing them) but saves the far larger cost
+  of a whole new run per `@claude fix the build`. Waiting on a build costs no usage.
+- **Reviews.** Every push to a PR runs a new review. `claude setup-token` tokens last one year.
 - **For a private repo:**
   - rulesets need GitHub Pro (personal) or Team (organisations); without one, the ruleset call in
     the settings script fails;
@@ -200,17 +234,36 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| Claude says the checker was denied or timed out | The `--allowedTools` path doesn't match the copy, or the `BASH_*_TIMEOUT_MS` values are gone | Compare `claude.yml` with this document. The run's log shows the exact command Claude tried |
 | Nothing happens after opening an issue | `@claude` missing, issue edited rather than opened, author lacks write access, App not installed, secret missing, or `claude.yml` not on `main` | Check the Actions tab. If no run appears, comment `@claude` on the issue. If a run failed, its log names the cause |
 | Claude leaves a "Create PR" link instead of a PR | The create-PR tool wasn't allowed or failed | Tap the link, or comment `@claude open the pull request`. Check `--allowedTools` in `claude.yml` |
 | The review comment is missing | A fork PR (by design), a draft PR, a missing secret, or the PR changes `pr-check.yml` itself | For a PR that edits `pr-check.yml`, the action refuses to run a workflow that differs from `main`'s copy ("Workflow validation failed"). That's expected: merge it, and later PRs get reviews |
-| The build is red | A compile error or failing test | Open the failed step's log, or download the `test-results-N` artifact. Comment `@claude fix the build` |
+| The build is red | A compile error or failing test | The failed step's log lists only the errors and failures; full logs are in the `*-logs-N` artifact. Comment `@claude fix the build` |
+| The review fails after posting its comment | It used more turns than `--max-turns` allows; the action then marks a finished review failed | Raise `--max-turns` in `pr-check.yml` (now 30; 17 was seen), on `main` too |
+| A step hangs for minutes after a test fails | `xcodebuild` collecting simulator diagnostics | `check.sh` passes `-collect-test-diagnostics never`; keep it if you replace the checker |
+| The action fails within seconds and the log says nothing | Hidden output: the action shows Claude's log only when asked | Re-running with debug logging isn't enough. Add `show_full_output: "true"`, or set the repository variable `ACTIONS_STEP_DEBUG` to `true`, then remove it: the log can show file contents |
+| 401 "OAuth access token is invalid" or "Invalid bearer token" | The token was mangled in the copy: line wraps from the terminal, or the clipboard held the sign-in code instead | Copy the token with nothing else, then `pbpaste \| tr -d '[:space:]' \| gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>` and clear the clipboard |
+| CI can't build what builds locally ("compiling for iOS 15.0" or "unable to type-check this expression") | The runner's Xcode differs from yours. New test targets defaulted to `$(RECOMMENDED_*_DEPLOYMENT_TARGET)`, which each Xcode resolves differently, and an older compiler gives up on long view bodies sooner | Pin deployment targets to numbers; split long view bodies into named properties |
 | Merge conflicts | Another PR changed the same lines | Tap **Update branch** if GitHub offers it. Otherwise comment `@claude redo this on latest main` on the issue, and close the old PR |
 | "Workflow initiated by non-human actor" | A bot opened the PR or comment | `allowed_bots: "*"` on the review job covers Claude's PRs. Never add it to `claude.yml` |
 | 401 or "OAuth token has expired" in the action log | The year-long token expired or was revoked | Run `claude setup-token` in Terminal.app, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>` |
 
 ## 7. Timings observed
 
-Filled in from the first runs on the setup PR (see section 9).
+From the runs on the setup PR (`macos-26`, Xcode 26.6, October 2026):
+
+| Step | Time |
+|---|---|
+| Picking simulators | 7 seconds |
+| iPhone build, then unit and UI tests, in one job | 16 minutes |
+| Watch build and unit tests | 2.6 minutes |
+| Script suite (`Tests/`) | about 27 seconds per script, 45 minutes for all 73 |
+| Claude review | 1.5 minutes, 17 turns |
+| `check.sh` on a warm build (a MacBook) | 36 seconds to rebuild all three targets; 22 seconds for one suite |
+
+The one-job layout passed the 40-minute limit in the script suite, which is why the gate now holds
+only the build and the unit tests. The implementing run's time depends on the issue; its summary
+page reports it.
 
 ## 8. Porting to another repo
 
@@ -224,7 +277,8 @@ Filled in from the first runs on the setup PR (see section 9).
 3. Rewrite the app description in the review prompt, and the "Test on device" wording if the
    project has no device.
 4. Write that repo's `CLAUDE.md`, 60 lines or fewer: what the app is, the folder map, test
-   conventions, "cloud runs can't build; CI does", and the rule that pipeline changes update its
+   conventions, how a cloud run checks its work (the checker, or "CI does" when the runner can't
+   build), and the rule that pipeline changes update its
    copy of this document.
 5. Install the Claude GitHub App on the repo. Run `claude setup-token` in Terminal.app, then
    `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>`.
@@ -242,8 +296,14 @@ Filled in from the first runs on the setup PR (see section 9).
 - **`actions/checkout@v7`** rather than `@v6`, because v7 is current.
 - **`macos-26` pinned** rather than `macos-latest`. Its default Xcode, 26.6, builds the project,
   which uses no iOS 26 or 27 APIs.
-- **Watch tests and script tests run in `build-and-test`** alongside the iPhone unit and UI tests.
-  Failed runs upload their results.
+- **Only the unit tests gate merging.** The prompt allowed moving UI tests out once the gate passed
+  about 15 minutes; with everything in one job it passed 40, mostly the script suite. So the gate
+  builds all three targets and runs the iPhone and watch unit tests, while `ui-tests` and
+  `script-tests` run in parallel as checks that aren't required. Failed jobs upload their logs.
+- **The implementing run is on a Mac and builds and tests its own change** with
+  `scripts/claude-pipeline/check.sh`. The prompt had it on Linux with CI as the only compiler. The
+  review's prompt in `pr-check.yml` still says the code was written by a run that could not
+  compile; it changes in a PR of its own, because that file has to reach `main` first.
 - **The review posts with `--edit-last --create-if-none`** and may use `Write` for the comment body.
 - **The workflows were pushed to `main` before the setup PR**, because the review refuses to run
   from a workflow file that doesn't match `main`'s copy.
