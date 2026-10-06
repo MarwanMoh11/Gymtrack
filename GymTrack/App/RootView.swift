@@ -38,7 +38,11 @@ struct RootView: View {
     /// at once instead of to the next copy of the view.
     @State private var pendingInbox = PendingActionHandoff.Inbox()
 
-    var body: some View {
+    /// The screen plus everything that keeps the store, the widgets and the
+    /// watch in step with it. Split from `body` because one modifier chain this
+    /// long is more than the type checker in Xcode 26 solves in reasonable time,
+    /// and the build on CI failed on it.
+    private var stateSyncedContent: some View {
         Group {
             if hasOnboarded {
                 mainInterface
@@ -110,6 +114,10 @@ struct RootView: View {
         .onChange(of: AppSettings.shared.restTimerAutoStart) { _, _ in
             activeWorkout?.pushToWatch()
         }
+    }
+
+    var body: some View {
+        stateSyncedContent
         // Restamp the card on the way out — that's the moment it becomes the
         // thing the user is looking at — and on the way back in, since the rest
         // timer can't tick while the app is suspended.

@@ -1,0 +1,44 @@
+name: Feature request
+description: Something GymTrack should do, or do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One behavior per issue keeps the pull request small enough to review on a phone.
+        Anything optional must cost zero taps when unused, and nothing may block logging.
+  - type: textarea
+    id: change
+    attributes:
+      label: What should change
+      description: What you would see or be able to do afterwards.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      placeholder: e.g. the exercise picker on iPhone, the rest screen on the watch
+  - type: textarea
+    id: keep
+    attributes:
+      label: What must not change
+      description: Behavior to leave exactly as it is.
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: The checks or tests that prove it works, including the edge cases.
+      placeholder: |
+        - Shows "3 days ago" under an exercise last trained three days ago
+        - Shows nothing for an exercise never trained
+  - type: dropdown
+    id: claude
+    attributes:
+      label: Hand it to Claude now?
+      description: The second answer starts a Claude run that implements it and opens a pull request.
+      options:
+        - Not yet, just track it
+        - "Yes: @claude implement this"
+    validations:
+      required: true

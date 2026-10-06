@@ -119,6 +119,7 @@ struct ActiveWorkoutView: View {
                         Text(effortsLoggedLabel)
                             .font(Theme.rounded(11, weight: .semibold))
                             .foregroundStyle(Theme.textTertiary)
+                            .accessibilityIdentifier("session.progress")
 
                         if workout.volumeKg > 0 {
                             Text(AppSettings.shared.weight(workout.volumeKg))
@@ -147,6 +148,7 @@ struct ActiveWorkoutView: View {
                         .shadow(color: finishTint.glow, radius: 8, y: 2)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("session.finish")
             }
 
             headerProgressLine
@@ -1343,6 +1345,7 @@ private struct SetRow: View {
                 Label("Log set", systemImage: "checkmark")
             }
             .buttonStyle(PrimaryButtonStyle())
+            .accessibilityIdentifier("session.logSet")
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.86), value: set.startedAt)
         .padding(14)

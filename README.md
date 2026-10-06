@@ -212,6 +212,20 @@ body weight over the last twelve weeks, and your PR board.
 The app's folder is visible in Files (On My iPhone → GymTrack), so a backup can
 be dropped in and restored without leaving the phone.
 
+## Development workflow
+
+Changes can start from a phone. Open an issue that mentions `@claude`, and a Claude Code run in
+GitHub Actions implements it and opens a pull request. Every pull request is built and tested on a
+macOS runner (`build-and-test`, which gates merging) and gets an advisory Claude review that says
+what to try on the device. Merging is Squash and merge.
+
+- [`docs/claude-pipeline.md`](docs/claude-pipeline.md) explains how the pipeline works, how to
+  use it from a phone, troubleshooting, and how to port it to another repo.
+- [`docs/claude-pipeline-setup-prompt.md`](docs/claude-pipeline-setup-prompt.md) is the prompt that
+  sets the same pipeline up in any repo.
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) covers building, running the tests and installing
+  on the phone from a Mac.
+
 ## Project layout
 
 ```

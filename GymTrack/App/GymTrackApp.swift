@@ -28,13 +28,24 @@ struct GymTrackApp: App {
     }
 
     init() {
+        // A UI test starts from a fresh install every time. Settings left by an
+        // earlier run would otherwise decide which screen it lands on.
+        if LaunchMode.isUITesting, let domain = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: domain)
+        }
+
         // Before the store is opened, because opening it is what drops the
-        // column these rows are identified by.
-        Self.dropWarmupSets()
+        // column these rows are identified by. A test never opens that file.
+        if !LaunchMode.isTesting {
+            Self.dropWarmupSets()
+        }
 
         let initialState = Self.openStore()
         _storeState = State(initialValue: initialState)
-        if case .ready(let container) = initialState {
+        // Not in a unit-test host: the services are singletons, and binding
+        // them here would make every test's suggestion depend on the scales
+        // and catalog the host loaded rather than on what the test set up.
+        if case .ready(let container) = initialState, !LaunchMode.isUnitTestHost {
             Self.configureServices(container: container)
         }
     }
@@ -46,12 +57,13 @@ struct GymTrackApp: App {
             try FileManager.default.createDirectory(
                 at: .applicationSupportDirectory, withIntermediateDirectories: true
             )
+            // A test gets a store that vanishes with the process, so nothing it
+            // writes can reach the lifter's history or the next run.
+            let configuration = LaunchMode.isTesting
+                ? ModelConfiguration(isStoredInMemoryOnly: true)
+                : ModelConfiguration(url: Self.storeURL)
             let container = try ModelContainer(
-                for: Plan.self, PlanDay.self, PlanItem.self,
-                WorkoutSession.self, SetLog.self, ExerciseNote.self,
-                CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
-                ExerciseLoadPreference.self, HiddenExerciseRecord.self,
-                configurations: ModelConfiguration(url: Self.storeURL)
+                for: Schema(AppSchema.models), configurations: configuration
             )
             return .ready(container)
         } catch {
@@ -102,7 +114,7 @@ struct GymTrackApp: App {
 
     private func retryStore() {
         let retriedState = Self.openStore()
-        if case .ready(let container) = retriedState {
+        if case .ready(let container) = retriedState, !LaunchMode.isUnitTestHost {
             Self.configureServices(container: container)
         }
         storeState = retriedState

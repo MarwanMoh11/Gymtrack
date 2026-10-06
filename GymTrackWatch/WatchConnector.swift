@@ -74,7 +74,8 @@ final class WatchConnector: NSObject {
     // MARK: - Lifecycle
 
     func activate() {
-        guard WCSession.isSupported() else { return }
+        // A unit-test host stays unlinked, so no test's state reaches a phone.
+        guard !LaunchMode.isUnitTestHost, WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
         session.activate()

@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in GymTrack is broken or wrong.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, including any wrong number or crash.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a freestyle workout
+        2. Log a set
+        3. Tap Undo this set
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Where
+      options:
+        - iPhone
+        - Apple Watch
+        - Both
+        - Widget or Live Activity
+    validations:
+      required: true
+  - type: dropdown
+    id: claude
+    attributes:
+      label: Hand it to Claude now?
+      description: The second answer starts a Claude run that fixes it and opens a pull request.
+      options:
+        - Not yet, just track it
+        - "Yes: @claude fix this, and add a test that fails without the fix"
+    validations:
+      required: true
