@@ -151,17 +151,17 @@ into `docs/DEVELOPMENT.md`. Include:
 
 ## Phase 5: Workflows
 
-Copy the template's `claude.yml`, `pr-check.yml` and `claude-retry.yml`, its issue forms in `.github/ISSUE_TEMPLATE/`
+Copy the template's `claude.yml`, `pr-check.yml`, `claude-retry.yml` and `claude-check-notice.yml`, its issue forms in `.github/ISSUE_TEMPLATE/`
 (Bug report and Feature request, whose last question adds `@claude` only on "Yes", or asks for a
 plan first) and `.github/claude-planning.md` (how a run splits a big issue into sub-issues, on
 request or, with the repository variable `CLAUDE_AUTO_SPLIT=true`, on its own), and
 `.github/claude-test-checklist.md` (the **Test before you merge** section every PR ends with;
 rewrite its "About the owner" part for me and this app). Keep the workflows' structure and action
 inputs; on a macOS runner, Claude opens its PR with `gh`, since the action's create-PR tool needs
-Docker. Copy `scripts/claude-pipeline/save-work.sh` and `wait-for-reset.sh` unchanged: with the
-workflows they save a run's unfinished work to a `claude/rescue-*` branch for the next run to carry
-on from, give `@claude stop` / `@claude continue`, and wait out a usage limit on Linux before
-re-running. `claude.yml` also lets a run merge `main` into its PR (`@claude fix the conflicts`).
+Docker. Copy `scripts/claude-pipeline/save-work.sh`, `wait-for-reset.sh` and `check-notice.sh` unchanged:
+with the workflows they save a run's unfinished work to a `claude/rescue-*` branch for the next run
+to carry on from, give `@claude stop` / `@claude continue`, wait out a usage limit on Linux before
+re-running, and comment on Claude's PR when a check fails there. `claude.yml` also lets a run merge `main` into its PR (`@claude fix the conflicts`).
 Keep `run-name` quoted: those features find runs by it. Then:
 - Check the current major versions of `actions/checkout`, `actions/upload-artifact` and
   `anthropics/claude-code-action` (`gh api repos/<owner>/<repo>/releases/latest`), and check the
@@ -178,7 +178,7 @@ Keep `run-name` quoted: those features find runs by it. Then:
   model `wait-for-reset.sh` asks the same as `--model`. On a private repo, tell me what the extra
   runner minutes cost first.
 - Rewrite the review prompt's description of the app.
-- Validate the three workflows with `actionlint` (`brew install actionlint`), and the scripts with
+- Validate the four workflows with `actionlint` (`brew install actionlint`), and the scripts with
   `shellcheck`.
 
 ## Phase 6: Repo settings
@@ -212,7 +212,7 @@ Also add a short **Development workflow** section to `README.md` that links to i
 
 ## Phase 8: Verify end to end
 
-1. Push the three workflow files to `main` first. The review job refuses to run from a workflow
+1. Push the four workflow files to `main` first. The review job refuses to run from a workflow
    file that differs from the default branch's copy, so a PR that adds them can never review
    itself, and comment- and `workflow_run`-triggered workflows only run from the default branch.
 2. Put the rest of the work from Phases 3–7 on a branch named `setup/claude-pipeline` and open a PR.

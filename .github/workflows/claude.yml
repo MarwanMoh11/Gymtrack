@@ -133,6 +133,18 @@ jobs:
           name: unsaved-work-${{ github.run_attempt }}
           path: ${{ steps.save.outputs.bundle }}
           retention-days: 30
+      # A run that fails before Claude starts (the checkout, say, on a bad day for
+      # GitHub) posts no progress comment and has no work to save, so without
+      # this the @claude comment would go unanswered.
+      - name: Say the run couldn't start
+        if: failure() && steps.claude.outcome == 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api "repos/$REPO/issues/$NUMBER/comments" -f body="Claude couldn't start: the run failed while setting up, before Claude did anything ($RUN_URL). Nothing changed. Re-run it from that link, or post your \`@claude\` comment again." > /dev/null
 
   # `@claude stop` (or `@claude pause`) cancels Claude's run on this issue or PR and
   # any wait for the usage limit. The stopped run saves its work as it ends, and
