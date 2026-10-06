@@ -22,9 +22,11 @@ from .util import CoachError, same_id
 
 PROMPT_FILE = Path(__file__).resolve().parent.parent / "reviewer_prompt.md"
 SYSTEM_PROMPT = "You review training plans. Reply only with the JSON object the instructions ask for."
-# The reviewer runs twice a review, weekly at most, and its job is catching the
-# slip the coach missed; a cheaper pass that misses it costs more than the tokens.
-DEFAULT_EFFORT = "max"
+# Pinned rather than left to the CLI's defaults, which move with each release:
+# a reviewer that changed model between reviews would make its verdicts
+# incomparable from one review to the next.
+DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_EFFORT = "xhigh"
 DEFAULT_TIMEOUT = 900
 
 # Markers of the coach's own session. Anything else starting CLAUDE_CODE_ is
@@ -95,8 +97,8 @@ def build_command(binary: str, help_text: str, model: str | None = None, effort:
     sources = os.environ.get("COACH_REVIEWER_SETTING_SOURCES", "project")
     if "--setting-sources" in help_text and sources != "all":
         command += ["--setting-sources", sources]
-    model = model or os.environ.get("COACH_REVIEWER_MODEL")
-    if model:
+    model = model or os.environ.get("COACH_REVIEWER_MODEL", DEFAULT_MODEL)
+    if model and model != "default":
         if "--model" not in help_text:
             raise ReviewerError(f"{binary} has no --model flag")
         command += ["--model", model]

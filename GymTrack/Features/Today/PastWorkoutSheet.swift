@@ -176,6 +176,7 @@ struct PastWorkoutSheet: View {
         let session = WorkoutSession(title: day.name, planDayID: day.id, planName: plan.name, startedAt: anchor)
         session.endedAt = anchor
         session.isLoggedAfterwards = true
+        session.recordPlan(of: day)
         context.insert(session)
 
         for exercise in exercises {

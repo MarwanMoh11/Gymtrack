@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 /// What came of the coach's reviews, opened from Settings: the latest
-/// decision, its ratings, and the way back from it.
+/// decision and the way back from it.
 ///
 /// This is the only place a decision can be reverted, and the only place the
 /// coach's file being unreadable is said. Today never mentions either, because
@@ -10,7 +10,6 @@ import SwiftData
 struct CoachHistoryView: View {
     @Query(filter: #Predicate<WorkoutSession> { $0.endedAt == nil }) private var openSessions: [WorkoutSession]
 
-    @State private var handingOver = false
     @State private var confirmingRevert = false
     @State private var revertRefusal: String?
 
@@ -45,21 +44,14 @@ struct CoachHistoryView: View {
     // MARK: - Content
 
     @ViewBuilder private var content: some View {
-        if handingOver {
-            CoachHandOffPanel(subject: .decision) { handingOver = false }
-        } else {
-            if let reason = inbox.unreadableReason { unreadable(reason) }
-            if inbox.showsOnToday { waiting }
-            if let decision = inbox.latestDecision {
-                decisionCard(decision)
-                outcomes(of: decision)
-                if inbox.ratableDecision != nil {
-                    CoachRatingsSection(title: "Ratings", caption: ratingCaption, subject: .decision) { handingOver = true }
-                }
-                if let revertible = inbox.revertibleDecision { revertSection(revertible) }
-            } else if !inbox.showsOnToday {
-                unactionable
-            }
+        if let reason = inbox.unreadableReason { unreadable(reason) }
+        if inbox.showsOnToday { waiting }
+        if let decision = inbox.latestDecision {
+            decisionCard(decision)
+            outcomes(of: decision)
+            if let revertible = inbox.revertibleDecision { revertSection(revertible) }
+        } else if !inbox.showsOnToday {
+            unactionable
         }
     }
 
@@ -180,16 +172,6 @@ struct CoachHistoryView: View {
         let sameProposal = inbox.proposal.map { $0.id.caseInsensitiveCompare(decision.proposalID) == .orderedSame } ?? false
         let found = sameProposal ? inbox.rows.first { $0.id == change.id }?.exerciseName : nil
         return found ?? "Change \(change.id)"
-    }
-
-    // MARK: - Ratings
-
-    /// Ratings belong to the decision on the proposal in the inbox, else the
-    /// latest one, declines included. When that is not the decision shown
-    /// above, the screen says which it is.
-    private var ratingCaption: String? {
-        guard let rated = inbox.ratableDecision, rated.proposalID != inbox.latestDecision?.proposalID else { return nil }
-        return "For the review decided \(CoachWording.moment(rated.decidedAt))."
     }
 
     // MARK: - Reverting

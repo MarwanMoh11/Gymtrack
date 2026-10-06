@@ -56,9 +56,9 @@ trained against plan days due.
 **Size.** GymTrack measures performance, not muscle. Comparable performance in
 the six-to-fifteen-rep range at comparable effort is the working proxy, and only
 a proxy: reps can rise from skill or from bodyweight gained as fat. Read body
-weight beside it. Tape measurements, when the owner gives them, are noisy and
-weighed lightly; the waist tells lean gain from fat gain. A skipped month is
-absent, never carried forward.
+weight beside it. Tape measurements come from the owner's check-ins on the
+phone's Progress tab; they are noisy and weighed lightly, and the waist tells
+lean gain from fat gain. A skipped month is absent, never carried forward.
 
 ## The intervention ladder
 

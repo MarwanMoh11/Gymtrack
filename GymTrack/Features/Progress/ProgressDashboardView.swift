@@ -52,6 +52,7 @@ struct ProgressDashboardView: View {
                                        message: "Finish your first workout and this screen fills up with streaks, volume and records.")
                             .padding(.top, 60)
                         BodyWeightCard()
+                        MeasurementsCard()
                     }
                     .padding(.horizontal, 16)
                 } else {
@@ -74,10 +75,11 @@ struct ProgressDashboardView: View {
                                         weeks: Self.calendarWeeks)
                             .riseIn(6)
                         BodyWeightCard().riseIn(7)
+                        MeasurementsCard().riseIn(8)
                         // Left out, not emptied, so a lifter with nothing to
                         // judge yet does not get a gap where the card would be.
-                        if !lifts.isEmpty { LiftTrendsCard(lifts: lifts).riseIn(8) }
-                        recordsCard(figures).riseIn(9)
+                        if !lifts.isEmpty { LiftTrendsCard(lifts: lifts).riseIn(9) }
+                        recordsCard(figures).riseIn(10)
                     }
                     .padding(16)
                     .padding(.bottom, 8)

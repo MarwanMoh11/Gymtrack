@@ -7,7 +7,7 @@ struct ActiveWorkoutStructureTests {
     @MainActor static func main() throws {
         let container = try ModelContainer(
             for: Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
             ExerciseLoadPreference.self, HiddenExerciseRecord.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -149,7 +149,7 @@ struct ActiveWorkoutStructureTests {
 
         let closedContainer = try ModelContainer(
             for: Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
             ExerciseLoadPreference.self, HiddenExerciseRecord.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -182,7 +182,7 @@ struct ActiveWorkoutStructureTests {
     @MainActor static func repeatedSlotHistoryChecks() throws {
         let container = try ModelContainer(
             for: Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
             ExerciseLoadPreference.self, HiddenExerciseRecord.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )

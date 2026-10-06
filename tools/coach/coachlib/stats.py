@@ -139,7 +139,10 @@ def is_timed(item: dict, catalog: dict) -> bool:
 # --- sessions and exposures -----------------------------------------------
 
 def finished_sessions(snapshot: dict) -> list[dict]:
-    done = [s for s in snapshot.get("sessions", []) if s.get("endedAt")]
+    """A session logged afterwards is exported without `endedAt`, since its
+    times are a placeholder, but it is a finished workout; leaving it out
+    dropped real sets from every series."""
+    done = [s for s in snapshot.get("sessions", []) if s.get("endedAt") or s.get("loggedAfterwards")]
     return sorted(done, key=lambda s: parse_time(s["startedAt"]))
 
 
@@ -434,16 +437,21 @@ def adherence(snapshot: dict, now: datetime, tz) -> dict:
     since = now - timedelta(days=28)
     done = target = 0
     hits = rep_sets = 0
-    from_plan = 0
+    from_plan = as_planned = 0
     for session in finished_sessions(snapshot):
         if parse_time(session["startedAt"]) < since:
             continue
+        # The day as it stood when the session began, where the phone kept
+        # it. Today's version of the day is the fallback for older sessions,
+        # and it is wrong for any slot edited since.
+        planned = session.get("plannedItems")
         day = days.get(str(session.get("planDayID") or "").lower())
-        if not day:
+        if planned is None and not day:
             continue
         from_plan += 1
+        as_planned += planned is not None
         sets = working_sets(session)
-        for slot in day.get("items", []):
+        for slot in planned if planned is not None else day.get("items", []):
             logged = len([s for s in sets if s["catalogID"] == slot["catalogID"]])
             done += min(logged, slot["targetSets"])
             target += slot["targetSets"]
@@ -452,7 +460,7 @@ def adherence(snapshot: dict, now: datetime, tz) -> dict:
             if low and s.get("reps") is not None:
                 rep_sets += 1
                 hits += 1 if s["reps"] >= low else 0
-    out = {"sessionsFromPlan": from_plan}
+    out = {"sessionsFromPlan": from_plan, "sessionsWithPlanRecord": as_planned}
     if target:
         out["slotSetsShare"] = _round(done / target)
     if rep_sets:
@@ -468,13 +476,68 @@ def adherence(snapshot: dict, now: datetime, tz) -> dict:
             if day_id in {str(d["id"]).lower() for d in due_days}:
                 trained[_week_start(parse_time(session["startedAt"]), tz)].add(day_id)
         weeks = [this_week - timedelta(weeks=n) for n in range(1, VOLUME_WEEKS + 1)]
-        first = _week_start(parse_time(finished_sessions(snapshot)[0]["startedAt"]), tz) if finished_sessions(snapshot) else this_week
+        # Weeks before this plan was first trained belong to another plan.
+        # Counting them as missed days made a lifter who trained every day of
+        # a two-week-old plan read as skipping more than half of it.
+        first = min(trained) if trained else this_week
         weeks = [w for w in weeks if w >= first]
         if weeks:
             out["daysDuePerWeek"] = len(due_days)
+            out["weeksMeasured"] = len(weeks)
             out["weekDaysTrainedShare"] = _round(
                 sum(min(len(trained[w]), len(due_days)) for w in weeks) / (len(weeks) * len(due_days)))
     return out
+
+
+def planned_vs_done(snapshot: dict, now: datetime, tz) -> list[dict]:
+    """Sessions in the last four weeks where what was done differed from what
+    the day prescribed at the time: planned slots with no working set, and
+    exercises worked that were not planned. Only sessions that carry their
+    plan record are read; pairing a skipped slot with its stand-in is left to
+    the reader, since the file cannot say which replaced which."""
+    since = now - timedelta(days=28)
+    out = []
+    for session in finished_sessions(snapshot):
+        planned = session.get("plannedItems")
+        if planned is None or parse_time(session["startedAt"]) < since:
+            continue
+        worked = {}
+        for s in working_sets(session):
+            worked.setdefault(s["catalogID"], s.get("exerciseName") or s["catalogID"])
+        planned_ids = {slot["catalogID"] for slot in planned}
+        skipped = [slot["name"] for slot in planned if slot["catalogID"] not in worked]
+        extra = [name for cid, name in worked.items() if cid not in planned_ids]
+        if skipped or extra:
+            out.append({"date": parse_time(session["startedAt"]).astimezone(tz).strftime("%Y-%m-%d"),
+                        "title": session.get("title", ""), "skipped": skipped, "notPlanned": extra})
+    return out
+
+
+def recent_sets(snapshot: dict, catalog_ids: list[str], tz, sessions_each: int = 4) -> dict[str, list[dict]]:
+    """The last few sessions of each exercise, set by set, so a claim about a
+    lift's recent history can be checked against what was logged. A
+    comparable series restarts whenever the load changes on a long set, and
+    on its own hides a lift that is climbing."""
+    out = {cid: [] for cid in catalog_ids}
+    for session in reversed(finished_sessions(snapshot)):
+        by_exercise = defaultdict(list)
+        for s in working_sets(session):
+            if s["catalogID"] in out and len(out[s["catalogID"]]) < sessions_each:
+                by_exercise[s["catalogID"]].append(s)
+        for cid, sets in by_exercise.items():
+            out[cid].append({"date": parse_time(session["startedAt"]).astimezone(tz).strftime("%m-%d"),
+                             "sets": [_logged_set_text(s) for s in sets]})
+    return {cid: list(reversed(rows)) for cid, rows in out.items() if rows}
+
+
+def _logged_set_text(s: dict) -> str:
+    if s.get("seconds") is not None and s.get("reps") is None:
+        text = f"{s['seconds']}s"
+    else:
+        kg = s.get("weightKg") or 0
+        text = f"{round(kg, 1):g}x{s.get('reps')}" if kg else f"bw x{s.get('reps')}"
+    word = s.get("effort")
+    return f"{text} {word}" if word in EFFORT_ORDINAL else text
 
 
 def collect_notes(snapshot: dict, catalog: dict, now: datetime) -> list[dict]:
@@ -504,6 +567,81 @@ def body_weight(snapshot: dict, now: datetime) -> dict:
     older = [r for r in rows if parse_time(r["date"]) <= cutoff]
     if older:
         out["change28dKg"] = round(latest["weightKg"] - older[-1]["weightKg"], 1)
+    return out
+
+
+# --- tape measurements -----------------------------------------------------
+
+TAPE_PARTS = ("arm", "chest", "shoulders", "waist", "thigh")
+
+
+def tape_checkins(snapshot: dict) -> list[dict]:
+    """The owner's check-ins from the phone's Progress tab, oldest first.
+
+    A check-in holds only the parts that were measured, and a part that was not
+    has no key in the export. Anything that is not a real length above zero is
+    treated as not measured rather than as a girth: a zero would read as a
+    waist that collapsed.
+    """
+    rows = []
+    for entry in snapshot.get("bodyMeasurements") or []:
+        try:
+            moment = parse_time(entry["date"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        parts = {}
+        for part in TAPE_PARTS:
+            cm = entry.get(f"{part}Cm")
+            if isinstance(cm, (int, float)) and not isinstance(cm, bool) and math.isfinite(cm) and cm > 0:
+                parts[part] = float(cm)
+        if parts:
+            rows.append({"date": entry["date"], "at": moment, "parts": parts})
+    rows.sort(key=lambda row: row["at"])
+    return rows
+
+
+def tape(snapshot: dict, now: datetime, tz) -> dict:
+    """Per part, the latest girth and how far it moved since the previous
+    check-in that measured that part. A check-in that skipped the part is
+    passed over, so waist taken monthly and arm taken weekly each compare
+    with their own last reading. `changeCm` and `daysSincePrevious` are absent
+    until a part has been measured twice."""
+    rows = tape_checkins(snapshot)
+    out = {"checkIns": len(rows), "parts": {}, "recent": []}
+    if not rows:
+        return out
+    for part in TAPE_PARTS:
+        measured = [row for row in rows if part in row["parts"]]
+        if not measured:
+            continue
+        latest = measured[-1]
+        info = {"latestCm": round(latest["parts"][part], 1), "latestDate": latest["date"]}
+        if len(measured) > 1:
+            previous = measured[-2]
+            info["changeCm"] = round(latest["parts"][part] - previous["parts"][part], 1)
+            info["daysSincePrevious"] = (latest["at"].astimezone(tz).date()
+                                         - previous["at"].astimezone(tz).date()).days
+            info["previousDate"] = previous["date"]
+        out["parts"][part] = info
+    out["recent"] = [{"date": row["date"], "parts": {k: round(v, 1) for k, v in row["parts"].items()}}
+                     for row in rows[-4:]]
+    out["daysSinceLast"] = (now.astimezone(tz).date() - rows[-1]["at"].astimezone(tz).date()).days
+    return out
+
+
+def tape_outcome(rows: list[dict], applied_at: datetime) -> dict:
+    """Each part's change from the last check-in on or before `applied_at` to
+    the latest one after it, for the parts that have both. A part with only one
+    side is left out: half a comparison says nothing about the change."""
+    out = {}
+    for part in TAPE_PARTS:
+        before = [row for row in rows if part in row["parts"] and row["at"] <= applied_at]
+        after = [row for row in rows if part in row["parts"] and row["at"] > applied_at]
+        if before and after:
+            was, latest = before[-1], after[-1]
+            out[part] = {"beforeCm": round(was["parts"][part], 1), "beforeDate": was["date"],
+                         "afterCm": round(latest["parts"][part], 1), "afterDate": latest["date"],
+                         "changeCm": round(latest["parts"][part] - was["parts"][part], 1)}
     return out
 
 
@@ -615,23 +753,25 @@ def last_decision_outcome(decisions: dict | None, exposures: dict[str, list[dict
         if ea:
             item["effortMeanAfter"] = _round(_mean(ea))
         out["items"][cid] = item
+    outcome = tape_outcome(tape_checkins(snapshot), applied_at)
+    if outcome:
+        out["tape"] = outcome
     return out
 
 
 # --- profile ----------------------------------------------------------------
 
 def parse_profile(text: str | None) -> dict:
-    """The two lines the stats read: priority muscles and tape measurements."""
-    out = {"priorityLabels": [], "priorityMuscles": [], "tape": []}
+    """The one line the stats read: priority muscles. Tape measurements are not
+    here; they come from the phone's check-ins."""
+    out = {"priorityLabels": [], "priorityMuscles": []}
     if not text:
         return out
-    match = re.search(r"^\s*Priority muscles:\s*(.+)$", text, re.M | re.I)
+    match = re.search(r"^[ \t]*Priority muscles:[ \t]*(\S.*)$", text, re.M | re.I)
     if match:
         labels = [p.strip() for p in re.split(r"[,;]", match.group(1)) if p.strip()]
         out["priorityLabels"] = labels
         out["priorityMuscles"] = _unique(muscle_from_label(label) for label in labels)
-    for line in re.findall(r"^\s*-\s*(\d{4}-\d{2}-\d{2}):\s*(.+)$", text, re.M):
-        out["tape"].append({"date": line[0], "text": line[1].strip()})
     return out
 
 
@@ -697,11 +837,19 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
                 metrics[f"{muscle}.{key}"] = info[key]
 
     adhere = adherence(snapshot, now, tz)
+    deviations = planned_vs_done(snapshot, now, tz)
+    plan_ids = list(dict.fromkeys(item["catalogID"] for day in (plan or {}).get("days", []) for item in day["items"]))
+    recent = recent_sets(snapshot, plan_ids, tz)
     for key, value in adhere.items():
         metrics[f"adherence.{key}"] = value
     body = body_weight(snapshot, now)
     for key, value in body.items():
         metrics[f"body.{key}"] = value
+    girth = tape(snapshot, now, tz)
+    for part, info in girth["parts"].items():
+        for key in ("latestCm", "changeCm", "daysSincePrevious"):
+            if key in info:
+                metrics[f"tape.{part}.{key}"] = info[key]
     metrics["notes.painEntries90d"] = pain_entries
 
     diff = plan_diff(previous and active_plan(previous), active_plan(snapshot))
@@ -712,6 +860,8 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
             for key, value in item.items():
                 if key != "name":
                     metrics[f"lastDecision.{cid}.{key}"] = value
+        for part, row in decision.get("tape", {}).items():
+            metrics[f"lastDecision.tape.{part}.changeCm"] = row["changeCm"]
 
     since = parse_time(previous_exported_at) if previous_exported_at else None
     sessions_since = [s for s in finished_sessions(snapshot) if since is None or parse_time(s["startedAt"]) > since]
@@ -733,7 +883,8 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
         "metrics": metrics, "review": review, "plan": plan, "planDiff": diff,
         "lastDecision": decision, "exercises": exercises,
         "muscles": muscles, "volumeWeeks": volume["weeks"], "adherence": adhere,
-        "body": body, "notes": notes[:25], "profile": profile,
+        "plannedVsDone": deviations, "recentSets": recent,
+        "body": body, "tape": girth, "notes": notes[:25], "profile": profile,
     }
 
 
@@ -772,9 +923,16 @@ Every number below is computed by `coach stats` and is the only source for
   `noise` and `beyondNoise` are absent until six comparable exposures exist.
 - `adherence.slotSetsShare | repTargetHitShare | weekDaysTrainedShare` (last
   four weeks), `body.latestKg | change28dKg`, `notes.painEntries90d`.
+- `tape.<part>.latestCm | changeCm | daysSincePrevious`, for part arm, chest,
+  shoulders, waist, thigh: the owner's tape check-ins from the phone's Progress
+  tab. `changeCm` and `daysSincePrevious` are against the previous check-in
+  that measured that part and are absent until it has been measured twice; a
+  part never measured has no key at all.
 - `review.sessionsSinceLastReview | exposuresSinceLastReview |
   painNotesSinceLastReview | plateauCount`, and
-  `lastDecision.<catalogID>.delta | beyondNoise | exposuresSince`.
+  `lastDecision.<catalogID>.delta | beyondNoise | exposuresSince`, and
+  `lastDecision.tape.<part>.changeCm` (the last check-in on or before the
+  decision to the latest after it, where both exist).
 
 Performance is the capped Epley estimate in kg up to 12 reps, reps at the
 modal load beyond that, seconds held for a timed set. Effort answers are
@@ -788,6 +946,31 @@ def _f(value, digits=1):
 
 def _recent(info: dict, as_of: str, days: int = 56) -> bool:
     return bool(info.get("lastDate")) and parse_time(as_of) - parse_time(info["lastDate"]) <= timedelta(days=days)
+
+
+def _measurements_section(girth: dict) -> list[str]:
+    out = ["## Measurements", ""]
+    if not girth["checkIns"]:
+        return out + ["No tape check-ins logged on the phone. A check-in is the owner's to make; "
+                      "absence is not a miss.", ""]
+    out += ["Tape girths in cm from the owner's check-ins on the phone's Progress tab (last four, oldest "
+            "first). `-` is a part not measured that day. Noisy: weigh lightly, and read the waist beside "
+            "body weight to tell lean gain from fat.", "",
+            "| date | " + " | ".join(TAPE_PARTS) + " |", "|---" * (len(TAPE_PARTS) + 1) + "|"]
+    for row in girth["recent"]:
+        cells = [f"{row['parts'][part]:g}" if part in row["parts"] else "-" for part in TAPE_PARTS]
+        out.append(f"| {row['date'][:10]} | " + " | ".join(cells) + " |")
+    out.append("")
+    for part, info in girth["parts"].items():
+        if "changeCm" in info:
+            out.append(f"- {part}: {info['latestCm']:g} cm, {info['changeCm']:+.1f} cm over "
+                       f"{info['daysSincePrevious']} days since the previous check-in that measured it")
+        else:
+            out.append(f"- {part}: {info['latestCm']:g} cm, measured once")
+    days = girth["daysSinceLast"]
+    out += ["", f"Last check-in {days} day{'s' if days != 1 else ''} before this export"
+            + (", none in the last four weeks." if days > 28 else "."), ""]
+    return out
 
 
 def render_markdown(stats: dict) -> str:
@@ -851,19 +1034,47 @@ def render_markdown(stats: dict) -> str:
     for info in unplanned:
         out.append(f"- {info['name']}: pain notes with no comparable series.")
 
+    names = {item["catalogID"]: item["name"] for day in (stats["plan"] or {}).get("days", []) for item in day["items"]}
+    out += ["## Recent sets (active plan, last four sessions each)", "",
+            "Load x reps, with the effort answer where one was given; `bw` is no added load.", ""]
+    for cid, rows in stats.get("recentSets", {}).items():
+        trail = "; ".join(f"{row['date']} " + ", ".join(row["sets"]) for row in rows)
+        out.append(f"- {names.get(cid, cid)}: {trail}")
+    out.append("")
+
     adhere = stats["adherence"]
     out += ["## Adherence (last 4 weeks)", ""]
     if adhere.get("sessionsFromPlan"):
-        out.append(f"- Sessions started from a plan day: {adhere['sessionsFromPlan']}")
+        out.append(f"- Sessions started from a plan day: {adhere['sessionsFromPlan']}, "
+                   f"{adhere.get('sessionsWithPlanRecord', 0)} of them measured against the day as it stood "
+                   "then; the rest against today's version of the day, which may have been edited since")
         if "slotSetsShare" in adhere:
             out.append(f"- Working sets logged against the slots' targets: {adhere['slotSetsShare']:.0%}")
         if "repTargetHitShare" in adhere:
             out.append(f"- Sets at or above the lower rep target: {adhere['repTargetHitShare']:.0%}")
         if "weekDaysTrainedShare" in adhere:
+            weeks = adhere["weeksMeasured"]
             out.append(f"- Scheduled days trained per week: {adhere['weekDaysTrainedShare']:.0%} of "
-                       f"{adhere['daysDuePerWeek']}")
+                       f"{adhere['daysDuePerWeek']}, over {weeks} complete week{'s' if weeks != 1 else ''} "
+                       "since this plan was first trained")
     else:
         out.append("No sessions started from a plan day in this window.")
+    out.append("")
+
+    out += ["## Planned against done (last 4 weeks)", ""]
+    deviations = stats.get("plannedVsDone", [])
+    if not adhere.get("sessionsWithPlanRecord"):
+        out.append("No session in this window recorded what its plan day prescribed (older app builds did not), "
+                   "so a skipped or swapped slot cannot be told from a plan edit. Ask.")
+    elif not deviations:
+        out.append("Every recorded session did what its plan day prescribed.")
+    for d in deviations:
+        parts = []
+        if d["skipped"]:
+            parts.append("skipped " + ", ".join(d["skipped"]))
+        if d["notPlanned"]:
+            parts.append("not in the plan that day: " + ", ".join(d["notPlanned"]))
+        out.append(f"- {d['date']} {d['title']}: {'; '.join(parts)}")
     out.append("")
 
     out += ["## Plan changes since the previous review", ""]
@@ -900,6 +1111,10 @@ def render_markdown(stats: dict) -> str:
                 verdict = {True: "beyond noise", False: "within noise", None: "noise unknown"}[item["beyondNoise"]]
                 bits.append(f"delta {item['delta']:+g} ({verdict})")
             out.append(f"- {item['name']} (`{cid}`): " + ", ".join(bits))
+        for part, row in decision.get("tape", {}).items():
+            out.append(f"- Tape, {part}: {row['beforeCm']:g} cm on {row['beforeDate'][:10]} (last check-in on or "
+                       f"before it) to {row['afterCm']:g} cm on {row['afterDate'][:10]} (latest since), "
+                       f"{row['changeCm']:+.1f} cm")
     out.append("")
 
     body = stats["body"]
@@ -907,11 +1122,7 @@ def render_markdown(stats: dict) -> str:
         change = f", {body['change28dKg']:+.1f} kg over 28 days" if "change28dKg" in body else ""
         out += ["## Body weight", "", f"Latest {body['latestKg']} kg{change}. Performance can rise from bodyweight "
                 "gained as fat; read the two together.", ""]
-    tape = stats["profile"]["tape"]
-    if tape:
-        out += ["## Tape measurements (from profile.md; noisy, weigh lightly)", ""]
-        out += [f"- {row['date']}: {row['text']}" for row in tape[-4:]]
-        out.append("")
+    out += _measurements_section(stats["tape"])
 
     out += ["## Notes and tags (last 90 days, newest first)", ""]
     if not stats["notes"]:

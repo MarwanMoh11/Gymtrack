@@ -36,7 +36,7 @@ struct BackupChunkedTests {
 
     static let modelTypes: [any PersistentModel.Type] = [
         Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-        ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+        ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
         ExerciseLoadPreference.self, HiddenExerciseRecord.self,
     ]
 

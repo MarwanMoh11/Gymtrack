@@ -140,23 +140,16 @@ struct CoachModelTests {
         applied.appliedAt = t
         applied.before = [CoachItemState(dayID: CoachFixture.dayA, itemID: CoachFixture.bench, item: item)]
         applied.after = [CoachItemState(dayID: CoachFixture.dayA, itemID: CoachFixture.bench, item: nil)]
-        applied.ratings = [
-            CoachRating(rater: .user, raterName: nil, score: 4, note: nil, ratedAt: t),
-            CoachRating(rater: .other, raterName: "Sam", score: 3, note: nil, ratedAt: t),
-        ]
 
         let bare = text(try CoachJSON.encoded(CoachDecisionFile(decisions: [declined])))
-        for key in ["appliedAt", "before", "after", "revertedAt", "ratings", "note", "null"] {
-            check(!bare.contains(key), "a decision nobody applied or rated has no \(key) key")
+        for key in ["appliedAt", "before", "after", "revertedAt", "note", "null"] {
+            check(!bare.contains(key), "a decision nobody applied has no \(key) key")
         }
         check(bare.contains("\"format\" : \"gymtrack-coach-decisions\"") && bare.contains("\"version\" : 1"),
               "the file names its format and version")
 
         let full = text(try CoachJSON.encoded(CoachDecisionFile(decisions: [applied])))
         check(!full.contains("revertedAt") && !full.contains("null"), "an applied decision has no revertedAt and no null")
-        check(full.contains("\"rater\" : \"self\"") && full.contains("\"rater\" : \"other\"")
-              && full.contains("\"raterName\" : \"Sam\""), "raters are written as self and other, the name only for other")
-        check(full.components(separatedBy: "raterName").count == 2, "a rating by the user carries no name key")
         check(full.contains("\"item\" : {") && full.components(separatedBy: "\"item\"").count == 2,
               "a slot that did not exist has no item key at all")
 
@@ -173,6 +166,28 @@ struct CoachModelTests {
         let names = try FileManager.default.contentsOfDirectory(atPath: store.root.path)
         check(names.contains { $0.hasPrefix("decisions.unreadable-") } && !names.contains("decisions.json"),
               "an unreadable file is moved aside rather than overwritten")
+
+        // A file written before ratings were taken out still carries the key.
+        // It must read as the history it is, and the next write drops the key.
+        let legacy = """
+        {"format":"gymtrack-coach-decisions","version":1,"decisions":[{"proposalID":"P9",
+        "receivedAt":"2026-09-20T10:00:00Z","decidedAt":"2026-09-20T10:05:00Z",
+        "changes":[{"id":"c1","decision":"accepted"}],
+        "ratings":[{"rater":"self","score":4,"ratedAt":"2026-09-21T10:00:00Z"}]}]}
+        """
+        try Data(legacy.utf8).write(to: store.decisionsURL)
+        let old = store.loadDecisions()
+        check(old.decisions.map(\.proposalID) == ["P9"] && old.decisions[0].changes.first?.decision == .accepted,
+              "a decisions file with the old ratings key still decodes")
+        try store.saveDecisions(old)
+        check(!((try? String(contentsOf: store.decisionsURL, encoding: .utf8)) ?? "").contains("ratings"),
+              "and the key is gone once the file is written again")
+
+        // The old pending-ratings file is deleted when the store is prepared.
+        let leftover = store.inboxURL.appendingPathComponent("ratings.json")
+        try Data("{}".utf8).write(to: leftover)
+        store.prepare()
+        check(!FileManager.default.fileExists(atPath: leftover.path), "a leftover ratings.json is deleted, never left to be pulled")
 
         try store.writeSnapshot(Data("one".utf8))
         try store.writeSnapshot(Data("two".utf8))

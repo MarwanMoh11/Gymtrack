@@ -91,6 +91,7 @@ struct UnlogNoTraceTests {
         ("energySourceRaw", .identity, { text($0.energySourceRaw) }),
         ("heartRateReadings", .identity, { text($0.heartRateReadings) }),
         ("isLoggedAfterwards", .identity, { text($0.isLoggedAfterwards) }),
+        ("plannedSlotsData", .identity, { text($0.plannedSlotsData) }),
         ("sets", .identity, { text($0.sets.map(\.id).sorted { $0.uuidString < $1.uuidString }) }),
         ("exerciseNotes", .identity, { text($0.exerciseNotes.map(\.id)) }),
     ]
@@ -102,7 +103,7 @@ struct UnlogNoTraceTests {
     @MainActor static func makeContainer() throws -> ModelContainer {
         try ModelContainer(
             for: Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
             ExerciseLoadPreference.self, HiddenExerciseRecord.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )

@@ -273,6 +273,26 @@ final class WorkoutSession {
     /// file whatever the wrist saw at noon as the workout's.
     var isLoggedAfterwards: Bool = false
 
+    /// The plan day's slots as they stood when this session began, as encoded
+    /// `PlannedSlot`s. Plans are edited in place, so without this copy a
+    /// reader can only compare old sessions with today's plan: a slot added
+    /// last week reads as skipped in every session before it, and the
+    /// exercise it replaced reads as a stray. `nil` on a session started
+    /// without a plan day and on every session stored before this existed,
+    /// never a reconstruction. Read and written through `plannedSlots`.
+    var plannedSlotsData: Data?
+
+    /// See `plannedSlotsData`.
+    var plannedSlots: [PlannedSlot]? {
+        get { plannedSlotsData.flatMap { try? JSONDecoder().decode([PlannedSlot].self, from: $0) } }
+        set { plannedSlotsData = newValue.flatMap { try? JSONEncoder().encode($0) } }
+    }
+
+    /// Freezes what `day` prescribes, at the moment a session is opened from it.
+    func recordPlan(of day: PlanDay) {
+        plannedSlots = day.orderedItems.map(PlannedSlot.init)
+    }
+
     @Relationship(deleteRule: .cascade, inverse: \SetLog.session)
     var sets: [SetLog] = []
 
@@ -1184,6 +1204,97 @@ final class BodyMetric {
     }
 }
 
+// MARK: - Tape measurements
+
+/// One tape-measure check-in: a date and whichever of five girths were taken
+/// that day, in centimetres.
+///
+/// Only the parts that were measured hold a value. A skipped part stays nil
+/// rather than becoming a zero, because the coach reading the export judges a
+/// plan change by how a girth moved between two check-ins, and a zero would
+/// read as a girth that collapsed. Centimetres whatever the display unit, for
+/// the reason weights are kilograms: the one place that converts is the card.
+///
+/// Check-ins are never edited after the fact. A wrong one is deleted, and the
+/// row goes with nothing left behind.
+@Model
+final class BodyMeasurement {
+    var id: UUID = UUID()
+    var date: Date = Date()
+    var armCm: Double?
+    var chestCm: Double?
+    var shouldersCm: Double?
+    var waistCm: Double?
+    var thighCm: Double?
+
+    init(date: Date = .now) {
+        self.id = UUID()
+        self.date = date
+    }
+
+    /// The five girths, in the order the check-in asks for them and the card
+    /// lists them. The raw value is the name the export and the coach use
+    /// (`armCm`, `tape.arm.latestCm`), so it must not be reworded.
+    enum Part: String, CaseIterable, Identifiable, Sendable {
+        case arm, chest, shoulders, waist, thigh
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .arm: "Arm"
+            case .chest: "Chest"
+            case .shoulders: "Shoulders"
+            case .waist: "Waist"
+            case .thigh: "Thigh"
+            }
+        }
+
+        /// Where the tape goes. A girth only means something against the last
+        /// one if it was taken the same way, so the hint says how, in a line.
+        var hint: String {
+            switch self {
+            case .arm: "Upper arm flexed, at the peak of the biceps"
+            case .chest: "Around the nipple line, arms relaxed, after a normal breath out"
+            case .shoulders: "Around the widest point of the shoulders, arms at your sides"
+            case .waist: "Relaxed, level with the navel"
+            case .thigh: "Upper thigh, at the fullest point, standing"
+            }
+        }
+
+        fileprivate var keyPath: ReferenceWritableKeyPath<BodyMeasurement, Double?> {
+            switch self {
+            case .arm: \BodyMeasurement.armCm
+            case .chest: \BodyMeasurement.chestCm
+            case .shoulders: \BodyMeasurement.shouldersCm
+            case .waist: \BodyMeasurement.waistCm
+            case .thigh: \BodyMeasurement.thighCm
+            }
+        }
+    }
+
+    /// The reading for `part`, or nil where that part wasn't measured.
+    func value(for part: Part) -> Double? { self[keyPath: part.keyPath] }
+
+    /// Stores `cm` for `part`. Anything that isn't a real positive length
+    /// stores nothing: a zero or a NaN is not a measurement.
+    func set(_ cm: Double?, for part: Part) {
+        guard let cm, cm.isFinite, cm > 0 else {
+            self[keyPath: part.keyPath] = nil
+            return
+        }
+        self[keyPath: part.keyPath] = cm
+    }
+
+    /// A check-in with no part in it records nothing, so it is never kept.
+    var hasAnyPart: Bool { Part.allCases.contains { value(for: $0) != nil } }
+
+    /// What a tape reading can plausibly be, in centimetres. A typed "380"
+    /// for a 38 cm arm is a slip, and storing it would put a spike in the
+    /// history the coach reads, so the check-in refuses what falls outside.
+    static let plausibleCm: ClosedRange<Double> = 10...300
+}
+
 // MARK: - Per-exercise load scale
 
 /// One exercise's machine, as the user corrected it: what the stack is marked
@@ -1235,5 +1346,38 @@ final class HiddenExerciseRecord {
     init(catalogID: String) {
         self.catalogID = catalogID
         self.hiddenAt = .now
+    }
+}
+
+/// One slot of a plan day, frozen when a session was opened from it: the
+/// exercise, how it is measured, and its targets, so a reader can tell what was
+/// prescribed that day from what was done. No starting weight, which the phone
+/// stops reading after an exercise's first session and would pass for a
+/// prescription.
+struct PlannedSlot: Codable, Equatable {
+    /// The plan item this was copied from. Optional because a backup can
+    /// carry a slot without one, and an invented ID would match nothing.
+    var itemID: UUID?
+    var catalogID: String
+    var name: String
+    var targetSets: Int
+    var targetRepsLow: Int
+    var targetRepsHigh: Int
+    var targetSeconds: Int
+    /// `nil` where the slot followed the app-wide default rest, as on `PlanItem`.
+    var restSeconds: Int?
+    /// Resolved when the copy was taken, so a later change to the catalog
+    /// can't change how this day's slot was measured.
+    var trackingRaw: String
+
+    var tracking: TrackingMode { TrackingMode(rawValue: trackingRaw) ?? .weightReps }
+}
+
+extension PlannedSlot {
+    init(_ item: PlanItem) {
+        self.init(itemID: item.id, catalogID: item.catalogID, name: item.name,
+                  targetSets: item.targetSets, targetRepsLow: item.targetRepsLow,
+                  targetRepsHigh: item.targetRepsHigh, targetSeconds: item.targetSeconds,
+                  restSeconds: item.restSeconds, trackingRaw: item.tracking.rawValue)
     }
 }

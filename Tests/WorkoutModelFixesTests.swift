@@ -46,7 +46,7 @@ struct WorkoutModelFixesTests {
         init(history: (ModelContext) -> [WorkoutSession] = { _ in [] }) throws {
             let container = try ModelContainer(
                 for: Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-                ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+                ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
                 ExerciseLoadPreference.self, HiddenExerciseRecord.self,
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true)
             )

@@ -26,7 +26,7 @@ never rewrites what you wrote. A line you leave blank is simply not used.
 
 ## Priority muscles
 
-Priority muscles: side delts, upper chest
+Priority muscles:
 
 (Comma separated, most important first. This exact line is read by the stats.)
 
@@ -40,12 +40,7 @@ Priority muscles: side delts, upper chest
 
 ## Days available
 
-Days available: 4
-
-## Tape measurements (optional)
-
-Skip any month you do not feel like measuring. A skipped month is simply absent.
-One line per date, under this heading, written as "- YYYY-MM-DD: arm 36 cm, chest 104 cm, waist 82 cm, thigh 58 cm".
+Days available:
 
 """
 
@@ -205,7 +200,7 @@ def submit(arg: str | None = None, home: Path | None = None) -> int:
     folder = resolve_review(arg, home)
     proposal_path = folder / "proposal.json"
     if (folder / "review-2.json").exists():
-        raise CoachError("Both reviewer rounds are done for this review. Show the user any disputed change, then "
+        raise CoachError("Both reviewer rounds are done for this review. Settle any disputed change, show the user, then "
                          "run `coach push`. To start over, delete review-1.json and review-2.json and restore "
                          "proposal.json without reviews or replies.")
     proposal = read_json(proposal_path)
@@ -301,8 +296,9 @@ def _round_two(folder, proposal, snapshot, stats_json, stats_md, profile, metric
     disputed = [c["id"] for c in proposal["changes"] if c["review"]["disputed"]]
     _say("")
     if disputed:
-        _say(f"Still disputed after round 2: {', '.join(disputed)}. Show the user both sides; a change they drop "
-             "is deleted from proposal.json, one they keep stays flagged. Then run `coach push`.")
+        _say(f"Still disputed after round 2: {', '.join(disputed)}. Decide each one yourself and tell the user both "
+             "sides and your call; a change you drop is deleted from proposal.json, one you keep stays flagged. "
+             "Then run `coach push`.")
     else:
         _say("No change is disputed. Run `coach push`.")
     return 0

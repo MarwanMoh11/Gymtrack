@@ -45,7 +45,7 @@ struct BackupRoundTripTests {
     @MainActor static func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
             ExerciseLoadPreference.self, HiddenExerciseRecord.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -84,6 +84,7 @@ struct BackupRoundTripTests {
                                   startedAt: base.addingTimeInterval(1_000))
         full.id = uuid(1)
         full.endedAt = full.startedAt.addingTimeInterval(3_600)
+        full.recordPlan(of: day)
         full.notes = "Good day"
         full.noteTagsRaw = NoteTag.allCases.prefix(2).map(\.rawValue)
         full.averageHeartRate = 121
@@ -173,6 +174,13 @@ struct BackupRoundTripTests {
         for (offset, kg) in [(100.0, 80.2), (200, 79.9)] {
             context.insert(BodyMetric(date: base.addingTimeInterval(offset), weightKg: kg))
         }
+        for (offset, id, parts) in [(150.0, 0x401, [BodyMeasurement.Part.arm: 36.5, .waist: 84]),
+                                    (250, 0x402, [.chest: 101, .shoulders: 118, .thigh: 58.5])] {
+            let check = BodyMeasurement(date: base.addingTimeInterval(offset))
+            check.id = uuid(id)
+            for (part, cm) in parts { check.set(cm, for: part) }
+            context.insert(check)
+        }
         let custom = CustomExerciseRecord(name: "Sled Drag", muscles: [], equipment: ["Sled"], tracking: .weightReps)
         custom.id = "custom-sled-drag"
         context.insert(custom)
@@ -250,10 +258,10 @@ struct BackupRoundTripTests {
         let sessionKeys = keys(in: sessions)
         for key in ["planDayID", "averageHeartRate", "maxHeartRate", "activeEnergyKcal", "healthWorkoutID",
                     "wasWatchDriven", "heartRateSource", "energySource", "heartRateReadings", "noteTags",
-                    "exerciseNotes", "notes", "endedAt", "loggedAfterwards"] {
+                    "exerciseNotes", "notes", "endedAt", "loggedAfterwards", "plannedItems"] {
             check(sessionKeys.contains(key), "Fixture never exercises session field \(key) \(tag)")
         }
-        for key in ["bodyMetrics", "customExercises", "loadScales", "hiddenExercises", "exerciseCatalog",
+        for key in ["bodyMetrics", "bodyMeasurements", "customExercises", "loadScales", "hiddenExercises", "exerciseCatalog",
                     "effectiveLoadScales", "effortScale", "timeZone", "appVersion", "appBuild"] {
             check(document[key] != nil, "Fixture never exercises top-level field \(key) \(tag)")
         }

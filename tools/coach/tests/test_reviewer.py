@@ -113,8 +113,16 @@ class Command(unittest.TestCase):
         with self.assertRaises(ReviewerError):
             reviewer.build_command("claude", "--print --output-format --tools", model="sonnet")
 
-    def test_no_model_flag_by_default(self):
-        with mock.patch.dict(os.environ, {"COACH_REVIEWER_MODEL": ""}):
+    def test_sonnet_at_xhigh_by_default(self):
+        with mock.patch.dict(os.environ):
+            for name in ("COACH_REVIEWER_MODEL", "COACH_REVIEWER_EFFORT"):
+                os.environ.pop(name, None)
+            command = reviewer.build_command("claude", self.HELP)
+        self.assertEqual(command[command.index("--model") + 1], "claude-sonnet-5-5")
+        self.assertEqual(command[command.index("--effort") + 1], "xhigh")
+
+    def test_default_leaves_the_model_to_the_cli(self):
+        with mock.patch.dict(os.environ, {"COACH_REVIEWER_MODEL": "default"}):
             self.assertNotIn("--model", reviewer.build_command("claude", self.HELP))
 
 
@@ -196,7 +204,7 @@ class Run(helpers.CoachTestCase):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index("--output-format") + 1], "json")
         self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
-        self.assertEqual(argv[argv.index("--effort") + 1], "max")
+        self.assertEqual(argv[argv.index("--effort") + 1], "xhigh")
         self.assertEqual(argv[argv.index("--setting-sources") + 1], "project")
         self.assertEqual(meta["total_cost_usd"], 0.01)
 

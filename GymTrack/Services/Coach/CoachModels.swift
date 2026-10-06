@@ -147,7 +147,6 @@ struct CoachDecision: Codable, Equatable, Sendable, Identifiable {
     var after: [CoachItemState]?
     /// Absent unless the apply was backed out later, from Settings.
     var revertedAt: Date?
-    var ratings: [CoachRating]?
 
     var id: String { proposalID }
 
@@ -175,41 +174,6 @@ struct CoachItemState: Codable, Equatable, Sendable {
     /// The same record the backup writes for a slot, so whatever reads one
     /// reads the other. Absent where the slot did not exist at that moment.
     var item: BackupService.ItemDTO?
-}
-
-struct CoachRating: Codable, Equatable, Sendable {
-    enum Rater: String, Codable, Sendable {
-        /// The person whose training this is.
-        case user = "self"
-        /// Someone the phone was handed to. Never filed as the user's: a view
-        /// of the training from outside is not the lifter's own.
-        case other
-    }
-
-    var rater: Rater
-    /// Only ever written for `other`, and only when one was given.
-    var raterName: String?
-    var score: Int
-    var note: String?
-    var ratedAt: Date
-}
-
-/// `Inbox/ratings.json`: ratings given to a proposal before it was decided.
-///
-/// The phone is often handed to a friend or coach to look at a proposal before
-/// the lifter chooses, and "this proposal was useless" is as much a rating as
-/// any other. Those ratings have no decision record to live in yet, so they wait
-/// here, tied to the proposal's id. Deciding moves them into the record and
-/// deletes this file; a proposal that replaces the inbox file orphans them, and
-/// they are dropped, because they never belonged to a decided review.
-struct CoachPendingRatings: Codable, Equatable, Sendable {
-    static let format = "gymtrack-coach-ratings"
-    static let currentVersion = 1
-
-    var format: String = Self.format
-    var version: Int = Self.currentVersion
-    var proposalID: String
-    var ratings: [CoachRating]
 }
 
 // MARK: - Reading and writing

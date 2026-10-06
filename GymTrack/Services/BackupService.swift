@@ -31,6 +31,11 @@ enum BackupService {
         /// Optional for the same reason — weigh-ins arrived later than the
         /// first backup format.
         var bodyMetrics: [BodyMetricDTO]?
+        /// Tape-measure check-ins, oldest first. Absent rather than empty when
+        /// there are none, so a reader can tell a lifter who never measured
+        /// from one whose measurements were all taken back. Optional like the
+        /// rest: a backup written before this existed still restores.
+        var bodyMeasurements: [BodyMeasurementDTO]?
         var customExercises: [CustomExerciseDTO]
         /// How individual machines are marked. Optional for the same reason as
         /// the rest — a backup written before this existed still restores, and
@@ -174,6 +179,14 @@ enum BackupService {
         /// been deleted, which is a fact about the session and stays. Absent on
         /// a session started without a plan day, and on older files.
         var planDayID: UUID?
+        /// What that plan day prescribed when the session began, slot by slot,
+        /// in the same shape and by the same rules as `DayDTO.items`, minus
+        /// starting weights and notes. Plans are edited in place, so this is
+        /// the only record of what a session was measured against: compare it
+        /// with the sets to see what was skipped or done instead. Absent on a
+        /// session started without a plan day and on sessions stored before
+        /// it existed.
+        var plannedItems: [ItemDTO]?
         // Optional so backups written before Health support still restore.
         var averageHeartRate: Double?
         var maxHeartRate: Double?
@@ -362,6 +375,19 @@ enum BackupService {
         var date: Date
         var weightKg: Double
         var source: String
+    }
+
+    /// One check-in. A part that wasn't measured has no key at all, never a
+    /// zero and never a null, so a reader can't mistake a skipped tape for a
+    /// girth that fell to nothing.
+    struct BodyMeasurementDTO: Codable {
+        var id: UUID
+        var date: Date
+        var armCm: Double?
+        var chestCm: Double?
+        var shouldersCm: Double?
+        var waistCm: Double?
+        var thighCm: Double?
     }
 
     struct LoadScaleDTO: Codable {
@@ -564,6 +590,7 @@ enum BackupService {
         var finished: [WorkoutSession]
         var custom: [CustomExerciseRecord]
         var bodyMetrics: [BodyMetric]
+        var bodyMeasurements: [BodyMeasurement]
         var loadScales: [ExerciseLoadPreference]
         var hidden: [HiddenExerciseRecord]
     }
@@ -576,6 +603,8 @@ enum BackupService {
             finished: sessions.filter { !$0.isActive },
             custom: try context.fetch(FetchDescriptor<CustomExerciseRecord>()).sorted { $0.id < $1.id },
             bodyMetrics: try context.fetch(FetchDescriptor<BodyMetric>())
+                .sorted { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) },
+            bodyMeasurements: try context.fetch(FetchDescriptor<BodyMeasurement>())
                 .sorted { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) },
             loadScales: try context.fetch(FetchDescriptor<ExerciseLoadPreference>()),
             hidden: try context.fetch(FetchDescriptor<HiddenExerciseRecord>())
@@ -640,6 +669,7 @@ enum BackupService {
             bodyMetrics: inputs.bodyMetrics.map {
                 BodyMetricDTO(id: $0.id, date: $0.date, weightKg: $0.weightKg, source: $0.source)
             },
+            bodyMeasurements: measurementDTOs(inputs.bodyMeasurements),
             customExercises: inputs.custom.map {
                 CustomExerciseDTO(id: $0.id, name: $0.name, category: $0.category,
                                   muscleRaw: $0.muscleRaw, equipment: $0.equipment, trackingRaw: $0.trackingRaw)
@@ -650,6 +680,17 @@ enum BackupService {
             effectiveLoadScales: effectiveLoadScales(referenced, corrections: corrections),
             effortScale: effortScale
         )
+    }
+
+    /// Nil for no check-ins, so the key is left out of the file. A check-in
+    /// with no part measured can't exist through the app, but one that did
+    /// would only be a date with nothing on it, so it is left out too.
+    private static func measurementDTOs(_ rows: [BodyMeasurement]) -> [BodyMeasurementDTO]? {
+        let dtos = rows.filter(\.hasAnyPart).map {
+            BodyMeasurementDTO(id: $0.id, date: $0.date, armCm: $0.armCm, chestCm: $0.chestCm,
+                               shouldersCm: $0.shouldersCm, waistCm: $0.waistCm, thighCm: $0.thighCm)
+        }
+        return dtos.isEmpty ? nil : dtos
     }
 
     private static func sessionDTO(_ session: WorkoutSession) -> SessionDTO {
@@ -663,6 +704,7 @@ enum BackupService {
                           // shouldn't reach the file as a note made of spaces.
                           notes: written(session.trimmedNotes), planName: session.planName,
                           planDayID: session.planDayID,
+                          plannedItems: session.plannedSlots?.enumerated().map { plannedItemDTO($1, order: $0) },
                           averageHeartRate: session.averageHeartRate,
                           maxHeartRate: session.maxHeartRate,
                           // Under a kilocalorie is a sensor that woke up,
@@ -791,6 +833,20 @@ enum BackupService {
                        tracking: item.trackingRaw,
                        restSeconds: item.restSeconds,
                        notes: written(item.notes))
+    }
+
+    /// A slot a session was opened against, by `itemDTO`'s rules.
+    private static func plannedItemDTO(_ slot: PlannedSlot, order: Int) -> ItemDTO {
+        let timed = slot.tracking == .duration
+        return ItemDTO(id: slot.itemID, catalogID: slot.catalogID, name: slot.name, order: order,
+                       targetSets: slot.targetSets,
+                       targetRepsLow: repTarget(slot.targetRepsLow, tracking: slot.tracking),
+                       targetRepsHigh: repTarget(slot.targetRepsHigh, tracking: slot.tracking),
+                       targetWeightKg: nil,
+                       targetSeconds: timed && slot.targetSeconds > 0 ? slot.targetSeconds : nil,
+                       tracking: slot.trackingRaw,
+                       restSeconds: slot.restSeconds,
+                       notes: nil)
     }
 
     /// A rep target worth writing: one above zero, on something counted in
@@ -1266,6 +1322,14 @@ enum BackupService {
             let date = metric.date.formatted(date: .abbreviated, time: .omitted)
             try requireWeight(metric.weightKg, field: "body weight", record: "the weigh-in on \(date)")
         }
+        for check in archive.bodyMeasurements ?? [] {
+            let date = check.date.formatted(date: .abbreviated, time: .omitted)
+            let parts = [("arm", check.armCm), ("chest", check.chestCm), ("shoulders", check.shouldersCm),
+                         ("waist", check.waistCm), ("thigh", check.thighCm)]
+            for (name, cm) in parts {
+                try requireLength(cm, field: name, record: "the measurements on \(date)")
+            }
+        }
     }
 
     /// An absent target is a zero, the value export leaves out.
@@ -1285,6 +1349,15 @@ enum BackupService {
         guard let kg, !kg.isFinite || kg < 0 else { return }
         throw RestoreError.invalidValue(field: field, value: "\(kg) kg", record: record,
                                        allowed: "a real number of kilograms, zero or more")
+    }
+
+    /// A girth that is there is a real length above zero. Zero is refused, not
+    /// let through like a weight, because a skipped part has no key to begin
+    /// with, so a zero in a file was never written by this app.
+    private static func requireLength(_ cm: Double?, field: String, record: String) throws {
+        guard let cm, !cm.isFinite || cm <= 0 else { return }
+        throw RestoreError.invalidValue(field: field, value: "\(cm) cm", record: record,
+                                       allowed: "a real number of centimetres, above zero")
     }
 
     private static func requireSeconds(_ seconds: Int?, field: String, record: String) throws {
@@ -1383,6 +1456,13 @@ enum BackupService {
         // open, it would come back as a workout in progress.
         session.endedAt = dto.endedAt ?? (session.isLoggedAfterwards ? dto.startedAt : nil)
         session.planDayID = dto.planDayID
+        session.plannedSlots = dto.plannedItems?.map { item in
+            PlannedSlot(itemID: item.id, catalogID: item.catalogID, name: item.name,
+                        targetSets: item.targetSets, targetRepsLow: item.targetRepsLow ?? 0,
+                        targetRepsHigh: item.targetRepsHigh ?? 0, targetSeconds: item.targetSeconds ?? 0,
+                        restSeconds: item.restSeconds,
+                        trackingRaw: item.tracking ?? TrackingMode.weightReps.rawValue)
+        }
         session.notes = dto.notes ?? ""
         session.averageHeartRate = dto.averageHeartRate
         session.maxHeartRate = dto.maxHeartRate
@@ -1469,13 +1549,25 @@ enum BackupService {
         }
     }
 
-    /// Body weights, load corrections and hidden exercises.
+    /// Body weights, tape measurements, load corrections and hidden exercises.
     private static func insertRemainder(_ archive: Archive, context: ModelContext) {
         for dto in archive.bodyMetrics ?? [] {
             let metric = BodyMetric(date: dto.date, weightKg: dto.weightKg)
             metric.id = dto.id
             metric.source = dto.source
             context.insert(metric)
+        }
+
+        for dto in archive.bodyMeasurements ?? [] {
+            let check = BodyMeasurement(date: dto.date)
+            check.id = dto.id
+            check.set(dto.armCm, for: .arm)
+            check.set(dto.chestCm, for: .chest)
+            check.set(dto.shouldersCm, for: .shoulders)
+            check.set(dto.waistCm, for: .waist)
+            check.set(dto.thighCm, for: .thigh)
+            // An empty one is dropped for the reason export drops it.
+            if check.hasAnyPart { context.insert(check) }
         }
 
         for dto in archive.loadScales ?? [] {
@@ -1565,6 +1657,7 @@ enum BackupService {
         for plan in try context.fetch(FetchDescriptor<Plan>()) { context.delete(plan) }
         for session in sessions { context.delete(session) }
         for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
+        for check in try context.fetch(FetchDescriptor<BodyMeasurement>()) { context.delete(check) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
 
         // Sweep anything the cascade missed (orphans from an interrupted write).
@@ -1598,6 +1691,7 @@ enum BackupService {
             context.delete(metric)
             await pacer.pauseIfDue(fraction: deleted)
         }
+        for check in try context.fetch(FetchDescriptor<BodyMeasurement>()) { context.delete(check) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
 
         // Sweep anything the cascade missed (orphans from an interrupted write).

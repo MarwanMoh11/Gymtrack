@@ -7,8 +7,6 @@ import Foundation
 /// Documents/Coach/snapshot.json         written by the app
 /// Documents/Coach/decisions.json        written by the app
 /// Documents/Coach/Inbox/proposal.json   written by the Mac
-/// Documents/Coach/Inbox/ratings.json    written by the app, only while a
-///                                       proposal is waiting undecided
 /// ```
 ///
 /// The Mac reaches these through `devicectl`, which copies a file's bytes at
@@ -32,12 +30,18 @@ struct CoachStore: Sendable {
     var decisionsURL: URL { root.appendingPathComponent("decisions.json") }
     var inboxURL: URL { root.appendingPathComponent("Inbox", isDirectory: true) }
     var proposalURL: URL { inboxURL.appendingPathComponent("proposal.json") }
-    var pendingRatingsURL: URL { inboxURL.appendingPathComponent("ratings.json") }
+    /// Written by an earlier build that let a proposal be rated. Nothing reads
+    /// it any more, so `prepare()` deletes it: a file left on the phone would
+    /// still be pulled to the Mac and read as an opinion nobody can now take
+    /// back.
+    private var leftoverRatingsURL: URL { inboxURL.appendingPathComponent("ratings.json") }
 
     /// Creates the inbox, so the Mac's push has somewhere to land on a phone
-    /// that has never been asked for a snapshot.
+    /// that has never been asked for a snapshot, and clears out the ratings
+    /// file an earlier build may have left in it.
     func prepare() {
         try? FileManager.default.createDirectory(at: inboxURL, withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: leftoverRatingsURL)
     }
 
     // MARK: Proposal
@@ -70,31 +74,6 @@ struct CoachStore: Sendable {
     func saveDecisions(_ file: CoachDecisionFile) throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try CoachJSON.encoded(file).write(to: decisionsURL, options: .atomic)
-    }
-
-    // MARK: Pending ratings
-
-    /// The ratings waiting on an undecided proposal, or nil when there are none
-    /// or the file is not ours. Unreadable is treated as absent rather than
-    /// moved aside like the decisions: it holds opinions about a proposal that
-    /// has not been acted on, and the next rating overwrites it.
-    func loadPendingRatings() -> CoachPendingRatings? {
-        guard let data = try? Data(contentsOf: pendingRatingsURL),
-              let file = try? CoachJSON.decoded(CoachPendingRatings.self, from: data),
-              file.format == CoachPendingRatings.format else { return nil }
-        return file
-    }
-
-    func savePendingRatings(_ file: CoachPendingRatings) throws {
-        try FileManager.default.createDirectory(at: inboxURL, withIntermediateDirectories: true)
-        try CoachJSON.encoded(file).write(to: pendingRatingsURL, options: .atomic)
-    }
-
-    /// Succeeds when there is nothing to delete: the point is that no file is
-    /// left, not that one was removed.
-    func clearPendingRatings() throws {
-        guard FileManager.default.fileExists(atPath: pendingRatingsURL.path) else { return }
-        try FileManager.default.removeItem(at: pendingRatingsURL)
     }
 
     // MARK: Snapshot

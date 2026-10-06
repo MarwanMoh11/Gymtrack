@@ -37,7 +37,7 @@ struct BackupExportFidelityTests {
     @MainActor static func makeContainer() throws -> ModelContainer {
         try ModelContainer(
             for: Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self,
+            ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
             ExerciseLoadPreference.self, HiddenExerciseRecord.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -76,6 +76,7 @@ struct BackupExportFidelityTests {
                                          startedAt: base.addingTimeInterval(offset))
             session.id = uuid(n)
             session.endedAt = session.startedAt.addingTimeInterval(3_000)
+            if n == 3 { session.recordPlan(of: plannedDay) }
             context.insert(session)
             sessionIDs.append(session.id)
 
@@ -108,6 +109,15 @@ struct BackupExportFidelityTests {
         for offset in [500.0, 100, 300] {
             let metric = BodyMetric(date: base.addingTimeInterval(offset), weightKg: 80 + offset / 100)
             context.insert(metric)
+        }
+        // Inserted out of date order, each measuring a different set of parts.
+        for (offset, id, parts) in [(500.0, 0x703, [BodyMeasurement.Part.waist: 82.5]),
+                                    (100, 0x701, [.arm: 36, .waist: 84]),
+                                    (300, 0x702, [.chest: 101, .shoulders: 118, .thigh: 58.5])] {
+            let check = BodyMeasurement(date: base.addingTimeInterval(offset))
+            check.id = uuid(id)
+            for (part, cm) in parts { check.set(cm, for: part) }
+            context.insert(check)
         }
         for id in ["zz-custom", "aa-custom"] {
             let record = CustomExerciseRecord(name: id, muscles: [], equipment: ["Dumbbell"], tracking: .weightReps)
@@ -172,6 +182,22 @@ struct BackupExportFidelityTests {
         }
         check(archive.bodyMetrics?.map(\.date) == archive.bodyMetrics?.map(\.date).sorted(),
               "Body metrics must be ordered by date")
+        let measurements = archive.bodyMeasurements ?? []
+        check(measurements.map(\.id) == [uuid(0x701), uuid(0x702), uuid(0x703)],
+              "Body measurements must be ordered by date, got \(measurements.map(\.id))")
+        let rawChecks = ((try JSONSerialization.jsonObject(with: first) as! [String: Any])["bodyMeasurements"]
+                         as? [[String: Any]]) ?? []
+        check(rawChecks.map { Set($0.keys) } == [["id", "date", "armCm", "waistCm"],
+                                                 ["id", "date", "chestCm", "shouldersCm", "thighCm"],
+                                                 ["id", "date", "waistCm"]],
+              "A part that wasn't measured must have no key, got \(rawChecks.map { $0.keys.sorted() })")
+        check(!text.contains("null"), "No field may be written as null")
+        check(rawChecks.first?["armCm"] as? Double == 36 && rawChecks.last?["waistCm"] as? Double == 82.5,
+              "Measured parts must be written as centimetres")
+        let noMeasurements = try makeContainer()
+        let noneText = String(decoding: try BackupService.exportData(context: ModelContext(noMeasurements), stamp: stamp),
+                              as: UTF8.self)
+        check(!noneText.contains("bodyMeasurements"), "A store with no check-ins must write no bodyMeasurements key")
         check(archive.customExercises.map(\.id) == ["aa-custom", "zz-custom"], "Custom exercises must be ordered by id")
         check(archive.hiddenExercises == ["a-hidden", "b-hidden"], "Hidden exercises must be ordered")
         let catalogIDs = archive.exerciseCatalog?.map(\.catalogID) ?? []
@@ -190,6 +216,16 @@ struct BackupExportFidelityTests {
               "A session with no plan day must have no planDayID key at all")
         check(archive.plans.flatMap(\.days).contains { $0.id == made.plannedDay },
               "The session's planDayID must be a day in the file's plans")
+
+        // The day as it stood at the start travels with the session opened
+        // from it, in the day's order, and nothing is written for the others.
+        let planned = archive.sessions.compactMap(\.plannedItems)
+        let day = archive.plans.flatMap(\.days).first { $0.id == made.plannedDay }
+        check(planned.count == 1 && planned[0].map(\.catalogID) == day?.items.map(\.catalogID)
+                  && planned[0].map(\.id) == day?.items.map(\.id) && planned[0].map(\.order) == [0, 1, 2],
+              "Only the session opened from a plan day carries its planned slots, matching the day")
+        check(planned.first?.allSatisfy { $0.targetWeightKg == nil && $0.notes == nil && $0.tracking != nil } == true,
+              "A planned slot carries its tracking and no starting weight or note")
 
         // Effective load scales: every resolvable exercise in the plans or
         // sessions, with a derived default and the correction marked.
@@ -245,6 +281,15 @@ struct BackupExportFidelityTests {
         }
         check(Set(try context.fetch(FetchDescriptor<SetLog>()).map(\.id)) == storedSetIDs,
               "A rejected restore must leave the store as it was")
+        // A zero girth is never written, so one in a file is turned away.
+        var zeroGirth = archive
+        zeroGirth.bodyMeasurements?[0].armCm = 0
+        do {
+            try BackupService.restore(data: try BackupService.encoded(zeroGirth), context: context)
+            check(false, "A file holding a zero girth must not restore")
+        } catch let BackupService.RestoreError.invalidValue(field, _, _, _) {
+            check(field == "arm", "The rejection must name the part, got \(field)")
+        }
         var sameSession = archive
         sameSession.sessions[0].sets[1].id = sameSession.sessions[0].sets[0].id
         do {

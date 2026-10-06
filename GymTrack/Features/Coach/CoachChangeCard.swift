@@ -20,9 +20,6 @@ struct CoachChangeCard: View {
     var note: Binding<String>?
     var outcome: CoachChangeDecision.Outcome?
     var decidedNote: String?
-    /// Off while the phone is in someone else's hands, so the reviewer's
-    /// verdict does not steer their rating.
-    var showsReviewer = true
 
     @State private var noteOpen = false
 
@@ -130,7 +127,7 @@ struct CoachChangeCard: View {
     }
 
     private func reasonBlock(_ reason: String) -> some View {
-        labelled(isDisputedAndShown ? "The coach's reason" : "Why", reason)
+        labelled(isDisputed ? "The coach's reason" : "Why", reason)
     }
 
     private func problemLine(_ problem: String) -> some View {
@@ -142,10 +139,10 @@ struct CoachChangeCard: View {
 
     // MARK: - Reviewer
 
-    private var isDisputedAndShown: Bool { showsReviewer && row.change.review?.disputed == true }
+    private var isDisputed: Bool { row.change.review?.disputed == true }
 
     @ViewBuilder private var reviewerBlock: some View {
-        if showsReviewer, let review = row.change.review, review.hasSomethingToSay {
+        if let review = row.change.review, review.hasSomethingToSay {
             if review.disputed == true {
                 disputedBlock(review)
             } else {

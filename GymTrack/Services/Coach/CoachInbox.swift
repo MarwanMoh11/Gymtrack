@@ -36,22 +36,6 @@ final class CoachInbox {
     /// screen can say so. Nil when the inbox is empty or readable.
     private(set) var unreadableReason: String?
     private(set) var decisions: [CoachDecision] = []
-    /// Ratings given to the proposal in the inbox before it was decided, kept
-    /// in `Inbox/ratings.json` until the decision has a record to hold them.
-    /// Always the current proposal's: `reload()` drops any that belong to
-    /// another.
-    private(set) var pendingRatings: [CoachRating] = []
-
-    /// What a rating is filed on. Most screens mean the proposal in front of
-    /// the lifter; the history means the record, even while a newer proposal
-    /// waits, since a rating given there is about the change already made.
-    enum RatingSubject {
-        /// The proposal in the inbox: its decision once there is one, the
-        /// pending file until then.
-        case proposal
-        /// `ratableDecision`, whatever is waiting in the inbox.
-        case decision
-    }
 
     init() {}
 
@@ -103,31 +87,12 @@ final class CoachInbox {
         return decisions.contains { $0.proposalID == id && ($0.appliedAt == nil || $0.isInEffect) }
     }
 
-    /// The decision ratings go to: the one on the proposal in the inbox, else
-    /// the latest of any kind. A decline-everything counts: "this proposal was
-    /// useless" is the most useful rating there is, and a reverted change still
-    /// carries what training on it taught.
-    var ratableDecision: CoachDecision? { decisionOnProposal ?? latestDecision }
 
-    /// The ratings on `subject`, or none when there is nothing to rate.
-    func ratings(on subject: RatingSubject = .proposal) -> [CoachRating] {
-        switch filing(for: subject) {
-        case .pending: return pendingRatings
-        case .decision(let id): return decisions.first { $0.proposalID == id }?.ratings ?? []
-        case nil: return []
-        }
-    }
-
-    /// Whether `addRating` would file anything on `subject`.
-    func canRate(on subject: RatingSubject = .proposal) -> Bool {
-        filing(for: subject) != nil
-    }
     // MARK: - Reading
 
     func reload() {
         decisions = store.loadDecisions().decisions
         unreadableReason = nil
-        pendingRatings = []
         guard let context else {
             review = nil
             return
@@ -143,21 +108,6 @@ final class CoachInbox {
         }
         let plans = (try? context.fetch(FetchDescriptor<Plan>())) ?? []
         review = CoachValidator.review(proposal, plans: plans)
-        pendingRatings = settledPendingRatings(for: proposal.id)
-    }
-
-    /// The pending ratings that belong to `proposalID`. A file for another
-    /// proposal is deleted: that review was replaced before anyone decided it,
-    /// so its ratings never belonged to a decided one. So is a file for a
-    /// proposal that has been decided, which holds only what the decision
-    /// already carries, left over from a launch that stopped between writing
-    /// the record and deleting the file.
-    private func settledPendingRatings(for proposalID: String) -> [CoachRating] {
-        guard let file = store.loadPendingRatings() else { return [] }
-        let sameProposal = file.proposalID.caseInsensitiveCompare(proposalID) == .orderedSame
-        if sameProposal, decision(for: proposalID) == nil { return file.ratings }
-        try? store.clearPendingRatings()
-        return []
     }
 
     // MARK: - Deciding
@@ -181,7 +131,7 @@ final class CoachInbox {
         }
 
         let now = clock()
-        var decision = CoachApplier.apply(proposal, accepting: accepted, notes: notes,
+        let decision = CoachApplier.apply(proposal, accepting: accepted, notes: notes,
                                           receivedAt: store.proposalArrivedAt() ?? now, at: now, in: context)
         // Everything the lifter accepted went stale between the screen being
         // drawn and the tap. Recording that as a decision would take the
@@ -198,9 +148,6 @@ final class CoachInbox {
             return .failure(.init(reason: "The plan could not be saved, so nothing was changed."))
         }
 
-        // Ratings given before the decision go into its record, so the record
-        // is complete the moment it exists. No key when there are none.
-        if !pendingRatings.isEmpty { decision.ratings = pendingRatings }
         var file = store.loadDecisions()
         file.decisions.append(decision)
         do {
@@ -212,10 +159,6 @@ final class CoachInbox {
             return .failure(.init(reason: "The decision could not be recorded, so nothing was changed."))
         }
         decisions = file.decisions
-        // The ratings now live in the record. If the file survives this, the
-        // next reload sees a decision for its proposal and deletes it.
-        try? store.clearPendingRatings()
-        pendingRatings = []
         decidedThisLaunch = decision.proposalID
         self.review = CoachValidator.review(proposal, plans: (try? context.fetch(FetchDescriptor<Plan>())) ?? [])
         if decision.appliedAt != nil { CoachSnapshot.shared.request() }
@@ -225,8 +168,7 @@ final class CoachInbox {
     /// Takes back the decision just made, as if it had never happened: the plan
     /// goes back (when anything was applied) and the decision record is erased. A mis-tap is not data, and
     /// a record of it would tell the coach a change was tried and abandoned
-    /// when it never was. Ratings people gave in the meantime are not the
-    /// mis-tap, so they go back to waiting on the proposal.
+    /// when it never was.
     @discardableResult
     func undoLastDecision() -> CoachApplier.Refusal? {
         guard canUndoLastDecision, let id = decidedThisLaunch,
@@ -235,19 +177,7 @@ final class CoachInbox {
         }
         var file = store.loadDecisions()
         file.decisions.removeAll { $0.proposalID == id }
-        // Kept first, so a failure here leaves the decision and its ratings
-        // where they are; cleared again if the undo is then refused.
-        if let ratings = decision.ratings, !ratings.isEmpty {
-            do {
-                try store.savePendingRatings(CoachPendingRatings(proposalID: id, ratings: ratings))
-            } catch {
-                return .init(reason: "The ratings could not be kept, so nothing was undone.")
-            }
-        }
-        if let refusal = takeBack(decision, newRecord: file) {
-            if decision.ratings != nil { try? store.clearPendingRatings() }
-            return refusal
-        }
+        if let refusal = takeBack(decision, newRecord: file) { return refusal }
         decidedThisLaunch = nil
         reload()
         return nil
@@ -312,106 +242,9 @@ final class CoachInbox {
         return nil
     }
 
-    // MARK: - Ratings
-
-    /// Where a rating goes: with the decision once there is one, or in the
-    /// pending file while the proposal is still undecided.
-    private enum Filing: Equatable {
-        case pending(String)
-        case decision(String)
-    }
-
-    private func filing(for subject: RatingSubject) -> Filing? {
-        switch subject {
-        case .decision:
-            return ratableDecision.map { .decision($0.proposalID) }
-        case .proposal:
-            guard let review else { return latestDecision.map { .decision($0.proposalID) } }
-            if let decided = decision(for: review.proposal.id) { return .decision(decided.proposalID) }
-            // A proposal that can never be decided would keep its ratings in
-            // the pending file until something replaced it, and nothing reads
-            // them there, so offering to rate it would only mislead.
-            guard review.problem == nil, review.hasApplicableChange else { return nil }
-            return .pending(review.proposal.id)
-        }
-    }
-
-    /// Files a rating on `subject`: the proposal in the inbox by default,
-    /// whether or not it has been decided.
-    ///
-    /// `rater` has no default: a rating from someone the phone was handed to
-    /// must never land as the lifter's own, so every caller says whose it is.
-    /// `raterName` is kept only for `.other`, and only when given.
-    ///
-    /// - Returns: the stored rating, or nil when there is nothing to rate or
-    ///   the score is outside 1...5.
-    @discardableResult
-    func addRating(score: Int, rater: CoachRating.Rater, raterName: String? = nil,
-                   note: String? = nil, on subject: RatingSubject = .proposal) -> CoachRating? {
-        guard (1...5).contains(score), let target = filing(for: subject) else { return nil }
-        let rating = CoachRating(rater: rater,
-                                 raterName: rater == .other ? raterName.flatMap(Self.trimmed) : nil,
-                                 score: score, note: note.flatMap(Self.trimmed), ratedAt: clock())
-        let stored: Bool
-        switch target {
-        case .pending(let id): stored = writePendingRatings(of: id) { $0.append(rating) }
-        case .decision(let id): stored = writeRatings(of: id) { $0.append(rating) }
-        }
-        return stored ? rating : nil
-    }
-
-    /// Takes a rating back out, so a mis-tapped score leaves no trace.
-    func removeRating(_ rating: CoachRating) {
-        if pendingRatings.contains(rating), let id = review?.proposal.id {
-            _ = writePendingRatings(of: id) { ratings in
-                if let index = ratings.firstIndex(of: rating) { ratings.remove(at: index) }
-            }
-            return
-        }
-        guard let target = decisions.last(where: { $0.ratings?.contains(rating) == true }) else { return }
-        _ = writeRatings(of: target.proposalID) { ratings in
-            if let index = ratings.firstIndex(of: rating) { ratings.remove(at: index) }
-        }
-    }
-
-    private func writeRatings(of proposalID: String, _ change: (inout [CoachRating]) -> Void) -> Bool {
-        var file = store.loadDecisions()
-        guard let index = file.decisions.firstIndex(where: { $0.proposalID == proposalID }) else { return false }
-        var ratings = file.decisions[index].ratings ?? []
-        change(&ratings)
-        // An empty list is left out, not written as one: no ratings is the
-        // absence of the key, the same as a decision nobody rated.
-        file.decisions[index].ratings = ratings.isEmpty ? nil : ratings
-        guard (try? store.saveDecisions(file)) != nil else { return false }
-        decisions = file.decisions
-        return true
-    }
-
-    private func writePendingRatings(of proposalID: String, _ change: (inout [CoachRating]) -> Void) -> Bool {
-        var ratings = pendingRatings
-        change(&ratings)
-        // No ratings means no file, for the same reason as above.
-        do {
-            if ratings.isEmpty {
-                try store.clearPendingRatings()
-            } else {
-                try store.savePendingRatings(CoachPendingRatings(proposalID: proposalID, ratings: ratings))
-            }
-        } catch {
-            return false
-        }
-        pendingRatings = ratings
-        return true
-    }
-
     // MARK: -
 
     private func decision(for proposalID: String) -> CoachDecision? {
         decisions.last { $0.proposalID.caseInsensitiveCompare(proposalID) == .orderedSame }
-    }
-
-    private static func trimmed(_ text: String) -> String? {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return clean.isEmpty ? nil : clean
     }
 }

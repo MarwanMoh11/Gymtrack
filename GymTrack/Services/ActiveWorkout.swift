@@ -13,6 +13,7 @@ enum SessionFactory {
     @discardableResult
     static func build(day: PlanDay, plan: Plan?, context: ModelContext, history: [WorkoutSession]) -> WorkoutSession {
         let session = WorkoutSession(title: day.name, planDayID: day.id, planName: plan?.name ?? "")
+        session.recordPlan(of: day)
         context.insert(session)
 
         for row in openingRows(for: day, history: history) {

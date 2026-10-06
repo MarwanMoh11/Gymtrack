@@ -22,17 +22,16 @@ and the lifter can push back before a change reaches the phone. That exchange is
 the main quality gain over a script that emits a plan, and it costs nothing the
 lifter was not already paying, since a review happens at the Mac anyway.
 
-Three things are automated because each saves effort at every review: the app
+Two things are automated because each saves effort at every review: the app
 writes its export into its own Documents folder, and the Mac pulls it and pushes
-the proposal back with `devicectl`; proposals are reviewed, applied and undone
-on the phone; and ratings are built into the app. Everything else the research
-draft pictured is cut, each with the event that would bring it back (see
-"Later, if needed").
+the proposal back with `devicectl`; and proposals are reviewed, applied and
+undone on the phone. Everything else the research draft pictured is cut, each
+with the event that would bring it back (see "Later, if needed").
 
 The durable work is the contract around the model, which is replaceable: export
 observations without inventing missing data, limit a proposal to six kinds of
 edit the phone can apply and undo, show a before and after the phone computed,
-and record what was proposed, accepted, declined, reverted and rated. GymTrack
+and record what was proposed, accepted, declined and reverted. GymTrack
 has one lifter, and everything here is sized for that.
 
 ## How a review works
@@ -56,12 +55,14 @@ has one lifter, and everything here is sized for that.
    any advice.
 5. `coach submit` validates the draft, then hands it to the reviewer, a separate
    process (next section), for two rounds. A change still disputed after round 2
-   is flagged, and the lifter decides at the Mac whether to keep it.
+   is flagged, and the coach decides whether to keep it and tells the lifter
+   why. Settling it is the coach's job; the lifter still accepts or declines
+   every change on the phone.
 6. `coach push` copies the final proposal into the app's inbox on the phone.
 7. On the phone the lifter reads it, accepts or declines each change, applies
-   them in place, can undo, and can rate it (see "The phone side").
-8. Decisions and ratings travel back in `decisions.json` with the next pull,
-   which is where the next review starts.
+   them in place, and can undo (see "The phone side").
+8. Decisions travel back in `decisions.json` with the next pull, which is where
+   the next review starts.
 
 Nothing nags: neither the app nor the Mac says a review is due. Everything for
 reviews lives in `COACH_HOME` (default `~/Documents/GymTrackCoach`): `profile.md`
@@ -89,20 +90,21 @@ conversation absorbing the lifter's answers and its own reasoning, and a reviewe
 inside that context would inherit both. A fresh context cannot be talked into
 reasoning it never receives.
 
-**What it will not do.** It is the same model, so it is not an independent second
-opinion. When two models are both wrong they pick the same wrong answer about 60%
+**What it will not do.** It runs on Sonnet 5.5 at xhigh effort, a smaller model
+from the same family as the coach, so it is not an independent second opinion. When two models are both wrong they pick the same wrong answer about 60%
 of the time against 33% by chance, and more accurate models are more alike in
 their mistakes (Kim 2025; Goel 2025). Models also favour their own writing
 (Panickssery 2024), which is why the reviewer gets data, not prose. A shared
 misconception about training, such as how much volume a muscle tolerates, would
 pass both. The defences sit elsewhere: a written policy, small reversible
-changes, and the lifter's rating.
+changes, and the results read at the next review.
 
 **What it is for.** Catching slips in reading this lifter's data: a pain note the
 coach missed, noise read as a trend, a cited number that is not in the stats, a
 change that contradicts the profile. A fresh session does that well. Its
-agreeing is not evidence a change is right; the lifter's rating stays the final
-word, because only results show whether a change worked. A reviewer from a
+agreeing is not evidence a change is right; only results show whether a change
+worked, and those are read from the lifts and the tape (see "How we will know it
+helps"). A reviewer from a
 different model family was considered and dropped as micromanaging for one lifter
 (see "Later, if needed").
 
@@ -133,20 +135,6 @@ fills, a snapshot file, and one row in Settings.
   change that was trained on, which is information, so it restores the plan and
   stamps `revertedAt`. Revert refuses, and says why, when the touched slots no
   longer hold the applied values because the lifter edited them since.
-### Ratings
-
-A rating is a score and an optional note on a decision, with the time given. It
-costs zero taps when unused. The lifter mostly rates himself, usually twice: when
-deciding, on whether the change looks reasonable, and again after weeks of
-training under it, on whether it worked. The second carries the evidence.
-
-Sometimes the phone is handed to someone else, a friend who trains or a coach at
-the gym. The app records who rated, `self` or `other` with an optional name, and
-a rating by someone else is never filed as the lifter's, because false detail is
-worse than missing detail. In hand-off mode the reviewer's verdict is hidden from
-the other rater until they have rated. A person who sees "the reviewer agrees"
-tends to go along, and the reason to ask a second person is an independent
-judgement.
 
 ## Data contract
 
@@ -159,9 +147,8 @@ On the phone, in the app's Documents directory:
 | Path | Written by | What |
 |---|---|---|
 | `Documents/Coach/snapshot.json` | app | The full backup archive, the same bytes and format as Settings, "Export a backup" (`BackupService.Archive`, version 2). |
-| `Documents/Coach/decisions.json` | app | Decisions and ratings (below). |
+| `Documents/Coach/decisions.json` | app | Decisions (below). |
 | `Documents/Coach/Inbox/proposal.json` | Mac, `coach push` | The proposal awaiting a decision. The app creates `Inbox/` at launch so the destination always exists. |
-| `Documents/Coach/Inbox/ratings.json` | app | Ratings given before the proposal is decided. They move into the decision record when it is decided, and are dropped if a new proposal replaces this one undecided. |
 
 The app writes `snapshot.json` atomically when a workout finishes, when a plan
 is saved, when a proposal is applied or reverted, and at launch if the file is
@@ -193,7 +180,22 @@ turn into false detail:
 - A session with no `heartRateSource` or `energySource` has unknown origin and
   must not be read as phone-only or as low effort.
 - A `loggedAfterwards: true` session counts as training, but nothing timed
-  (duration, rests, density) may be worked out from it.
+  (duration, rests, density) may be worked out from it. It is exported without
+  `endedAt`, so finished means `endedAt` or `loggedAfterwards`.
+- `plannedItems` on a session is its plan day as it stood when the session
+  began, in `ItemDTO`'s shape without starting weights or notes. Plans are edited
+  in place, so this, not today's plan, is what a session is measured against: a
+  planned slot with no sets was skipped that day, and an exercise worked but not
+  planned was done instead or added. Sessions from before 2026-10-03 have no
+  `plannedItems`, and for them a mismatch with today's plan may only be an edit
+  made since; the first review misread two fresh edits as skipped slots.
+- `bodyMeasurements` is a top-level array of tape readings from the Progress
+  check-in, and is absent when there are none. Each entry has an `id` (UUID), a
+  `date` (ISO 8601) and only the parts that were measured, in centimetres: any
+  of `armCm`, `chestCm`, `shouldersCm`, `waistCm` and `thighCm`. A part that was
+  not measured has no key, so a check-in that took only the waist has no
+  `armCm`, not a zero. Read each part as its own series by date, and never carry
+  a part's last value forward into a check-in that skipped it.
 - Notes carry the tags `pain`, `formBreakdown`, `substitution`, `feltStrong` and
   `feltFlat`. `hiddenExercises` are exercises the lifter trimmed because the gym
   lacks them, and are never proposed. Dates are UTC; `timeZone` gives the local day.
@@ -237,7 +239,7 @@ Both validators (`coach submit`, and the phone against its live plan) enforce:
   `priority`, `exerciseChoice`, `pain`, `repRange`, `rest`.
 - `review` is written by `coach submit` and may be absent, in which case the phone
   shows no reviewer line. `disputed: true` means the reviewer still objects after
-  round 2 and the lifter chose to keep the change.
+  round 2 and the coach chose to keep the change.
 - `advice` is optional. Unknown keys are ignored. A key with no value is omitted,
   never `null`.
 
@@ -267,9 +269,7 @@ Six kinds, and nothing else is accepted:
       "appliedAt": "ISO8601, absent when nothing was applied",
       "before": [ { "dayID": "UUID", "itemID": "UUID", "item": { "...enough to restore it exactly, order included..." } } ],
       "after": [ "same shape as before: what the apply wrote, so a later revert can tell whether the slot was edited since" ],
-      "revertedAt": "ISO8601, absent unless reverted later",
-      "ratings": [ { "rater": "self", "score": 4, "note": "optional", "ratedAt": "ISO8601" },
-                   { "rater": "other", "raterName": "optional", "score": 3, "ratedAt": "ISO8601" } ]
+      "revertedAt": "ISO8601, absent unless reverted later"
     }
   ]
 }
@@ -277,7 +277,8 @@ Six kinds, and nothing else is accepted:
 
 A change's `decision` is `accepted`, `declined` or `stale`. This is a file in
 Documents, not a SwiftData entity: the Mac reads it directly and it never needs
-migrating with the store.
+migrating with the store. A reader ignores any key it does not know, since a file
+written by an older build can carry fields that have since been dropped.
 
 ## Definitions the coach reasons with
 
@@ -430,35 +431,48 @@ the success criterion and review point in the review folder.
 ## How we will know it helps
 
 One lifter and a few changes a quarter cannot show that the coach beats the
-phone's own double progression, and nothing here claims it. The loop yields three
-kinds of evidence, in order of weight.
+phone's own double progression, and nothing here claims it. A change is judged by
+two measurements the app already collects, never by what anyone says about it: a
+polished explanation can feel intelligent and produce nothing, and a score given
+the day a change is accepted only measures how it read.
 
-**The owner's ratings.** He rates each proposal when deciding and again after
-training under it. The second rating is the result: did the change, in his
-judgement and with the numbers in front of him, work. Other raters are a sample,
-not a panel, and are recorded as such.
+**1. The touched lifts, at the next review.** Before drafting, the coach looks at
+every change applied since the last review: still in place, overridden (the slot
+no longer holds the applied values) or reverted. For the lifts a change touched,
+the stats give `lastDecision.<catalogID>.delta | beyondNoise | exposuresSince`:
+whether comparable performance moved by more than this lifter's own noise, at
+comparable effort. A change worked when its lift rose beyond that noise without
+lower adherence. A rise that came with more all-out sets, fewer sessions or a
+pain note is not a success. Noise is not defined until six comparable exposures
+exist, and until then the answer is "too early to say", not a guess. This is a
+record, not an experiment: there is no control, and season, sleep and bodyweight
+move at the same time. It tells the coach whether its last advice led anywhere
+before it gives more, and it tells the lifter whether to keep trusting it.
 
-**Reviewer against owner, over time.** Each review shows whether the reviewer is
-useful: how often it objected in round 1 (a reviewer that never objects does no
-work), how often the lifter accepted a change it endorsed, and how disputed
-changes turned out. One that agrees with the coach nearly always, or whose
-objections the lifter never upholds, is the signal to try a different model.
+**2. Tape measurements, read lightly.** The check-in on the Progress tab records
+arm, chest, shoulders, waist and thigh in centimetres, only when the lifter takes
+them (see `bodyMeasurements` under "What the export carries"). They answer what
+the lift numbers cannot: whether the muscle he trains for is growing. A tape has
+more error than a barbell and these readings are sparse, so a single reading or a
+change of a centimetre or so is not a result; a direction held across several
+check-ins is, and even then it is not credited to one change. Waist is the part
+that separates lean gain from fat gain: arms and chest up with a flat waist is
+what is wanted, and a waist rising as fast as the rest says the weight is going
+on as fat, which is a prompt to look at food and total volume rather than at one
+change. A part with no reading is left out; the coach never fills the gap.
 
-**The outcome check at each review.** Before drafting, the coach looks at every
-change applied since the last review: still in place, overridden (the slot no
-longer holds the applied values) or reverted; whether comparable performance on
-the slot moved by more than noise; whether effort answers, adherence and pain
-tags moved with it. This is a record, not an
-experiment: there is no control, and season, sleep and bodyweight move at the
-same time. It tells the coach whether its last advice led anywhere before it
-gives more, and it tells the lifter whether to keep trusting it.
+Whether the reviewer earns its place is a separate question, answered over time
+from each review: how often it objected in round 1 (a reviewer that never
+objects does no work), how often the lifter accepted a change it endorsed, and
+how disputed changes turned out. One that agrees with the coach nearly always,
+or whose objections the lifter never upholds, is the signal to try a different
+model.
 
 Effectiveness is read from what normal logging produces: planned sessions and
 working sets completed, comparable performance rising by more than noise,
 progress sustained past the first weeks, and the guardrails (pain, excess
 all-out effort). Raw tonnage is not a success metric, since a coach raises it by
-prescribing more work, and app opens are not either. Satisfaction is secondary
-evidence: a polished explanation can feel intelligent and produce nothing.
+prescribing more work, and app opens are not either.
 
 ## Later, if needed
 
@@ -476,8 +490,6 @@ that would bring it back.
 - **A synthetic exam** (generated histories with a planted answer): if a change
   to the skill, policy or reviewer's prompt needs a regression check and the real
   history is too thin to supply one.
-- **Blind rating** with decoys made by simple rules, and agreement statistics: if
-  the owner's ratings start to look like a rubber stamp.
 - **Friends' Strong or Hevy logs as replay cases**: if his own history is too
   short to test a changed coach against.
 - **A formal single-case trial**: if the owner wants to claim a change worked, not
@@ -496,12 +508,13 @@ Decided on 2026-10-03, by the owner:
   Managed Agents or relay. The app stays offline, and the paid developer program
   is not being taken; the install script keeps the app signed.
 - The reviewer is a skeptical hypertrophy-coach persona in a separate `claude -p`
-  session, two rounds, still-disputed changes to the lifter. A different-model
+  session, two rounds, still-disputed changes settled by the coach (the lifter
+  asked for that on the first review: weighing the two sides is the coach's job). A different-model
   reviewer was dropped for now.
 - Six change kinds, staleness by `expect` values, decisions in a JSON file, one
   quiet Today line, and a mis-tap undo that erases while a later revert stamps.
-- The lifter rates, the rater is always recorded, and in hand-off mode the
-  reviewer's verdict is hidden until the other rater has rated.
+- A change is judged by the touched lifts' numbers and the tape measurements,
+  with no score from the owner (see "How we will know it helps").
 - Readiness checks, sleep, HRV, resting heart rate and bodyweight at session time
   were rejected earlier: they assume the watch is always worn and ask for daily
   discipline. Do not propose them again.
@@ -511,8 +524,6 @@ Still open:
 - Sending the export (training history, body weight, notes) to the model provider
   is implied by choosing Claude Code and has not been said outright. The reviewer
   runs through the same provider, so it adds no new recipient.
-- Whether hand-off mode should hide the lifter's own rating from the other rater
-  too, since it anchors the same way the reviewer's verdict does.
 
 ## Where the code lives
 
@@ -523,7 +534,7 @@ Still open:
   by `/coach-review`. It never contains the reviewer's prompt.
 - `GymTrack/Services/Coach/`: the phone side. Snapshot writing, inbox reading,
   validation against the live plan, the review screen, apply, undo, revert,
-  `decisions.json` and ratings. It never talks to a network.
+  and `decisions.json`. It never talks to a network.
 - `GymTrack/Services/BackupService.swift`: the export, with the optional `id` on
   plans, days and slots.
 

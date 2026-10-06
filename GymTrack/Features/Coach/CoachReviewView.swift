@@ -5,14 +5,9 @@ import SwiftData
 /// its own. Opened from Today's quiet line, or from Settings while a review is
 /// still waiting.
 ///
-/// Once applied, the screen stays up and says so, with Undo for a mis-tap and
-/// an optional rating. Undo exists only on this instance of the screen: leave
-/// it and the way back is Revert in Settings, which keeps a record that the
-/// change was tried. The proposal can be rated, by the lifter or by someone the
-/// phone is handed to, before it is decided and after any decision, a decline
-/// included. While it is in someone else's hands, everything that could steer
-/// them is kept off the screen until they have rated: the reviewer's verdicts,
-/// and the lifter's own choices, notes and outcome.
+/// Once applied, the screen stays up and says so, with Undo for a mis-tap. Undo
+/// exists only on this instance of the screen: leave it and the way back is
+/// Revert in Settings, which keeps a record that the change was tried.
 struct CoachReviewView: View {
     /// True where the screen is a sheet of its own and needs a way out.
     var showsClose = false
@@ -31,7 +26,6 @@ struct CoachReviewView: View {
     /// being what it changes to.
     @State private var decidedRows: [CoachValidator.Row] = []
     @State private var undoRefusal: String?
-    @State private var handingOver = false
 
     private var inbox: CoachInbox { .shared }
 
@@ -67,17 +61,10 @@ struct CoachReviewView: View {
     @ViewBuilder private var content: some View {
         if let proposal = inbox.proposal {
             header(proposal)
-            if let decided, !handingOver { decidedStatus(decided) }
+            if let decided { decidedStatus(decided) }
             changes
-            if !handingOver { advice }
-            if handingOver {
-                CoachHandOffPanel(hidesReviewer: true) { handingOver = false }
-            } else {
-                if decided == nil { decideArea }
-                if inbox.canRate() {
-                    CoachRatingsSection(title: ratingTitle) { handingOver = true }
-                }
-            }
+            advice
+            if decided == nil { decideArea }
         } else {
             EmptyStateView(icon: "checklist", title: "Nothing to review",
                            message: "A review from your coach shows up here when there is one.")
@@ -101,10 +88,6 @@ struct CoachReviewView: View {
 
     private var shownRows: [CoachValidator.Row] { decided == nil ? inbox.rows : decidedRows }
 
-    private var ratingTitle: String {
-        decided?.appliedAt == nil ? "Rate this proposal" : "Rate this change"
-    }
-
     private var changes: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader("Changes")
@@ -115,12 +98,7 @@ struct CoachReviewView: View {
     }
 
     @ViewBuilder private func card(for row: CoachValidator.Row) -> some View {
-        if handingOver {
-            // No choice, no outcome, no notes: the card only reads, so what
-            // the lifter or the coach's reviewer decided cannot steer the
-            // person holding the phone.
-            CoachChangeCard(row: row, showsReviewer: false)
-        } else if let decided {
+        if let decided {
             let entry = decided.changes.first { $0.id == row.id }
             CoachChangeCard(row: row, outcome: entry?.decision, decidedNote: entry?.note)
         } else {
@@ -142,7 +120,7 @@ struct CoachReviewView: View {
         let lines = inbox.advice.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if !lines.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader("To do by hand")
+                SectionHeader("Coach's notes")
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -154,7 +132,7 @@ struct CoachReviewView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    Text("Suggestions the app can't make for you.")
+                    Text("These don't change your plan.")
                         .font(Theme.rounded(11, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }

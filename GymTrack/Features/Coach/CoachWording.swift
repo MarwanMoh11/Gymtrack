@@ -1,6 +1,6 @@
 import SwiftUI
 
-// How the coach screens put a decision, a rating and a moment into words. Kept
+// How the coach screens put a decision and a moment into words. Kept
 // apart from the views so the review screen and the Settings history say the
 // same thing the same way.
 
@@ -26,18 +26,6 @@ extension CoachDecision {
             (changes.filter { $0.decision == .stale }.count, "out of date"),
         ]
         return counts.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
-    }
-}
-
-extension CoachRating {
-
-    /// Who gave it. A rating from someone else without a name is still not the
-    /// lifter's, so it is never labelled as theirs.
-    var raterLabel: String {
-        switch rater {
-        case .user: "You"
-        case .other: raterName ?? "Someone else"
-        }
     }
 }
 

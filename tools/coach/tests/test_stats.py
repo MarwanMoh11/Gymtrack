@@ -159,6 +159,54 @@ class FixtureNumbers(unittest.TestCase):
         # three days due, trained 3, 2, 3, 3 of the last four complete weeks
         self.assertAlmostEqual(self.m["adherence.weekDaysTrainedShare"], 11 / 12, places=2)
 
+    def test_weeks_before_the_plan_was_first_trained_are_not_missed_days(self):
+        snap = fixture.export()
+        for session in snap["sessions"]:
+            if session["startedAt"] < "2026-09-14":
+                session.pop("planDayID", None)
+        m = stats.compute(snap)["metrics"]
+        self.assertEqual(m["adherence.weeksMeasured"], 2)
+        self.assertAlmostEqual(m["adherence.weekDaysTrainedShare"], 6 / 6, places=2)
+
+    def test_a_session_logged_afterwards_is_finished_without_an_end_time(self):
+        snap = fixture.export()
+        last = max(snap["sessions"], key=lambda s: s["startedAt"])
+        del last["endedAt"]
+        self.assertEqual(len(stats.finished_sessions(snap)), len(snap["sessions"]) - 1)
+        last["loggedAfterwards"] = True
+        self.assertEqual(len(stats.finished_sessions(snap)), len(snap["sessions"]))
+
+    def test_planned_against_done_reads_the_day_as_it_stood(self):
+        snap = fixture.export()
+        session = max((s for s in snap["sessions"] if s.get("planDayID")), key=lambda s: s["startedAt"])
+        worked = list(dict.fromkeys(s["catalogID"] for s in stats.working_sets(session)))
+        names = {s["catalogID"]: s["exerciseName"] for s in session["sets"]}
+        session["plannedItems"] = [{"catalogID": cid, "name": names[cid], "order": i, "targetSets": 1}
+                                   for i, cid in enumerate(worked[1:])]
+        session["plannedItems"].append({"catalogID": "seated-leg-curl-machine", "name": "Seated Leg Curl",
+                                        "order": 9, "targetSets": 2})
+        result = stats.compute(snap)
+        self.assertEqual(result["metrics"]["adherence.sessionsWithPlanRecord"], 1)
+        [row] = result["plannedVsDone"]
+        self.assertEqual(row["skipped"], ["Seated Leg Curl"])
+        self.assertEqual(row["notPlanned"], [names[worked[0]]])
+        text = stats.render_markdown(result)
+        self.assertIn("skipped Seated Leg Curl; not in the plan that day: " + names[worked[0]], text)
+
+    def test_without_a_plan_record_the_coach_is_told_to_ask(self):
+        result = compute()
+        self.assertEqual(result["metrics"]["adherence.sessionsWithPlanRecord"], 0)
+        self.assertEqual(result["plannedVsDone"], [])
+        self.assertIn("cannot be told from a plan edit. Ask.", stats.render_markdown(result))
+
+    def test_recent_sets_show_each_plan_lift_set_by_set(self):
+        result = compute()
+        bench = result["recentSets"]["barbell-bench-press"]
+        self.assertLessEqual(len(bench), 4)
+        self.assertEqual([r["date"] for r in bench], sorted(r["date"] for r in bench))
+        self.assertRegex(bench[-1]["sets"][0], r"^\d+(\.\d)?x\d+( (easy|solid|hard|allOut))?$")
+        self.assertIn("## Recent sets", stats.render_markdown(result))
+
     def test_notes_and_tags_including_pain(self):
         notes = self.stats["notes"]
         self.assertEqual(notes[0]["tags"], ["pain"])
@@ -170,12 +218,103 @@ class FixtureNumbers(unittest.TestCase):
         self.assertEqual(self.m["body.latestKg"], 81.2)
         self.assertEqual(self.m["body.change28dKg"], 1.2)
 
-    def test_priority_muscles_and_tape_come_from_the_profile(self):
-        text = "Priority muscles: side delts, upper chest\n\n- 2026-09-01: arm 36 cm, waist 82 cm\n"
+    def test_priority_muscles_come_from_the_profile_and_tape_lines_there_are_ignored(self):
+        text = "Priority muscles: side delts, upper chest\n\n- 2026-09-01: arm 99 cm, waist 82 cm\n"
         result = compute(profile_text=text)
         self.assertEqual(result["profile"]["priorityMuscles"], ["shoulders", "chest"])
-        self.assertEqual(result["profile"]["tape"], [{"date": "2026-09-01", "text": "arm 36 cm, waist 82 cm"}])
+        self.assertNotIn("tape", result["profile"])
         self.assertIn("| shoulders | 4.5 | 4.5 | 4.5 | 4.5 | yes |", stats.render_markdown(result))
+        self.assertEqual(result["metrics"]["tape.arm.latestCm"], 37.0)
+        self.assertNotIn("99 cm", stats.render_markdown(result))
+
+    def test_tape_metrics_compare_each_part_with_its_own_previous_check_in(self):
+        m = self.m
+        self.assertEqual(m["tape.arm.latestCm"], 37.0)
+        self.assertEqual(m["tape.arm.changeCm"], 0.5)
+        self.assertEqual(m["tape.arm.daysSincePrevious"], 16)
+        # Waist skipped the 15 Sep check-in, so it compares with 1 Sep.
+        self.assertEqual(m["tape.waist.latestCm"], 83.0)
+        self.assertEqual(m["tape.waist.changeCm"], -1.0)
+        self.assertEqual(m["tape.waist.daysSincePrevious"], 30)
+
+    def test_a_tape_part_measured_once_has_no_change_and_one_never_measured_has_no_key(self):
+        m = self.m
+        self.assertEqual(m["tape.chest.latestCm"], 101.0)
+        self.assertEqual(m["tape.thigh.latestCm"], 58.0)
+        for key in ("tape.chest.changeCm", "tape.chest.daysSincePrevious", "tape.thigh.changeCm"):
+            self.assertNotIn(key, m)
+        self.assertFalse([k for k in m if k.startswith("tape.shoulders")])
+        self.assertNotIn(None, m.values())
+
+    def test_no_check_ins_means_no_tape_keys_and_a_quiet_section(self):
+        snapshot = fixture.export()
+        del snapshot["bodyMeasurements"]
+        result = stats.compute(snapshot, fixture.decisions())
+        self.assertFalse([k for k in result["metrics"] if k.startswith("tape.") or ".tape." in k])
+        text = stats.render_markdown(result)
+        self.assertIn("## Measurements", text)
+        self.assertIn("No tape check-ins logged", text)
+
+    def test_a_zero_or_missing_girth_is_not_a_measurement(self):
+        snapshot = fixture.export()
+        snapshot["bodyMeasurements"].append({"id": "x", "date": "2026-10-02T07:00:00Z", "waistCm": 0,
+                                             "armCm": None, "chestCm": "wide"})
+        result = stats.compute(snapshot, fixture.decisions())
+        self.assertEqual(result["metrics"]["tape.waist.latestCm"], 83.0)
+        self.assertEqual(result["tape"]["checkIns"], 3)
+
+    def test_measurements_section_lists_the_last_four_check_ins_oldest_first(self):
+        snapshot = fixture.export()
+        snapshot["bodyMeasurements"] = [
+            {"id": str(n), "date": f"2026-09-{n:02d}T07:00:00Z", "waistCm": 80.0 + n} for n in (3, 5, 7, 9, 11)
+        ]
+        text = stats.render_markdown(stats.compute(snapshot, fixture.decisions()))
+        section = text.split("## Measurements")[1].split("\n## ")[0]
+        self.assertNotIn("2026-09-03", section)
+        rows = [line for line in section.splitlines() if line.startswith("| 2026-")]
+        self.assertEqual([r.split("|")[1].strip() for r in rows],
+                         ["2026-09-05", "2026-09-07", "2026-09-09", "2026-09-11"])
+        self.assertIn("| 2026-09-05 | - | - | - | 85 | - |", section)
+
+    def test_the_section_says_when_the_last_check_in_is_over_four_weeks_old(self):
+        snapshot = fixture.export()
+        snapshot["bodyMeasurements"] = snapshot["bodyMeasurements"][:1]
+        text = stats.render_markdown(stats.compute(snapshot, fixture.decisions()))
+        self.assertIn("none in the last four weeks", text)
+        self.assertNotIn("none in the last four weeks", stats.render_markdown(compute()))
+
+    def test_the_last_applied_proposal_reports_each_parts_change_across_the_decision(self):
+        decision = compute()["lastDecision"]
+        # Applied 20 Sep: arm 36.5 (15 Sep) to 37 (1 Oct); waist 84 to 83.
+        self.assertEqual(decision["tape"]["arm"]["changeCm"], 0.5)
+        self.assertEqual(decision["tape"]["waist"]["changeCm"], -1.0)
+        self.assertEqual(decision["tape"]["waist"]["beforeDate"], "2026-09-01T07:00:00Z")
+        # Chest has nothing after the decision and thigh nothing before it.
+        self.assertEqual(set(decision["tape"]), {"arm", "waist"})
+        m = compute()["metrics"]
+        self.assertEqual(m["lastDecision.tape.waist.changeCm"], -1.0)
+        self.assertNotIn("lastDecision.tape.chest.changeCm", m)
+        text = stats.render_markdown(compute())
+        self.assertIn("Tape, waist: 84 cm on 2026-09-01", text)
+        self.assertIn("-1.0 cm", text)
+
+    def test_a_decision_with_no_check_in_on_both_sides_has_no_tape(self):
+        snapshot = fixture.export()
+        snapshot["bodyMeasurements"] = snapshot["bodyMeasurements"][:2]
+        self.assertNotIn("tape", stats.compute(snapshot, fixture.decisions())["lastDecision"])
+
+    def test_a_check_in_at_the_moment_of_applying_counts_as_before(self):
+        snapshot = fixture.export()
+        snapshot["bodyMeasurements"] = [
+            {"id": "a", "date": "2026-09-20T09:00:00Z", "waistCm": 84.0},
+            {"id": "b", "date": "2026-10-01T07:00:00Z", "waistCm": 83.0},
+        ]
+        decision = stats.compute(snapshot, fixture.decisions())["lastDecision"]
+        self.assertEqual(decision["tape"]["waist"]["changeCm"], -1.0)
+
+    def test_the_blank_template_names_no_priority_muscles(self):
+        from coachlib import commands
+        self.assertEqual(stats.parse_profile(commands.PROFILE_TEMPLATE)["priorityLabels"], [])
 
     def test_a_priority_muscle_with_no_work_shows_zero_not_nothing(self):
         result = compute(profile_text="Priority muscles: rear delts")

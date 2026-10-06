@@ -6,7 +6,7 @@ import SwiftData
 /// What accepting a proposal does to the plan and to `decisions.json`: edits in
 /// place under the same IDs, a slot added and one removed, undo right after as
 /// a mis-tap that leaves nothing behind, revert later that stays on the record,
-/// and ratings that are never filed under the wrong person.
+/// and the leftover file of the old plan-review ratings being cleared away.
 @main
 struct CoachApplyTests {
     typealias F = CoachFixture
@@ -100,8 +100,7 @@ struct CoachApplyTests {
         check(recorded[0].before?.count == 3 && recorded[0].after?.count == 3, "the before and after of each slot are kept")
         check(recorded[0].before?.first?.item?.targetSets == 4 && recorded[0].after?.first?.item?.targetSets == 5,
               "before holds the old values and after the new")
-        check(!rig.decisionsText.contains("revertedAt") && !rig.decisionsText.contains("ratings")
-              && !rig.decisionsText.contains("null"), "nothing is written for what has not happened")
+        check(!rig.decisionsText.contains("revertedAt") && !rig.decisionsText.contains("null"), "nothing is written for what has not happened")
         check(applied(rig.inbox.apply(accepted: ["c1"])) == nil, "a proposal can be decided only once")
 
         // substitute carries sets, reps and rest, and sets no load.
@@ -297,7 +296,6 @@ struct CoachApplyTests {
         check(!rig.inbox.showsOnToday && rig.inbox.revertibleDecision == nil,
               "a decline takes the proposal off Today and has nothing to revert")
         check(rig.inbox.canUndoLastDecision, "but a mis-tapped decline can be undone on the spot")
-        check(rig.inbox.ratableDecision?.proposalID == proposalID, "and it can be rated")
         rig.relaunch()
         check(!rig.inbox.showsOnToday && !rig.inbox.canUndoLastDecision,
               "it stays off Today after a relaunch, and can no longer be undone")
@@ -350,181 +348,22 @@ struct CoachApplyTests {
         check(!empty.inbox.showsOnToday, "a proposal with nothing applicable is not shown")
     }
 
-    // MARK: Ratings
+    // MARK: Leftover ratings file
 
-    @MainActor static func checkRatings() throws {
+    @MainActor static func checkLeftoverRatingsFile() throws {
+        // An earlier build kept ratings given before a decision in
+        // Inbox/ratings.json. Nothing reads it now, and a file nothing reads
+        // would still be pulled to the Mac as if it were current.
         let rig = try Rig()
+        let leftover = rig.store.inboxURL.appendingPathComponent("ratings.json")
+        try Data("{ \"format\": \"gymtrack-coach-ratings\" }".utf8).write(to: leftover)
         try rig.push([sets("c1", item: F.bench, from: 4, to: 5)])
-        let early = rig.inbox.addRating(score: 4, rater: .user)
-        check(early != nil && rig.store.loadDecisions().decisions.isEmpty,
-              "a proposal can be rated before it is decided, and that decides nothing")
-        rig.inbox.removeRating(early!)
-        _ = rig.inbox.apply(accepted: ["c1"])
-
-        check(rig.inbox.addRating(score: 0, rater: .user) == nil && rig.inbox.addRating(score: 6, rater: .user) == nil,
-              "a score outside 1 to 5 is refused")
-        check(!rig.decisionsText.contains("ratings"), "no rating, no ratings key")
-        let mine = rig.inbox.addRating(score: 4, rater: .user, raterName: "Ignored", note: "  good  ")
-        check(mine?.rater == .user && mine?.raterName == nil && mine?.note == "good",
-              "the user's rating carries no name, whatever was passed")
-        let theirs = rig.inbox.addRating(score: 3, rater: .other, raterName: " Sam ")
-        let nameless = rig.inbox.addRating(score: 2, rater: .other, raterName: "  ")
-        check(theirs?.rater == .other && theirs?.raterName == "Sam" && nameless?.raterName == nil,
-              "someone else's rating keeps their name when given")
-        let ratings = rig.store.loadDecisions().decisions[0].ratings
-        check(ratings?.map(\.rater) == [.user, .other, .other] && ratings?.map(\.score) == [4, 3, 2],
-              "all three are filed, each under its own rater")
-        check(ratings?.filter { $0.rater == .user }.count == 1, "only one is filed as the user's")
-        check(rig.decisionsText.contains("\"rater\" : \"self\"") && rig.decisionsText.contains("\"rater\" : \"other\""),
-              "raters are written as self and other")
-        check(rig.decisionsText.components(separatedBy: "raterName").count == 2, "only the named rating has a raterName key")
-
-        rig.inbox.removeRating(theirs!)
-        rig.inbox.removeRating(nameless!)
-        rig.inbox.removeRating(mine!)
-        check(rig.store.loadDecisions().decisions[0].ratings == nil && !rig.decisionsText.contains("ratings"),
-              "a rating taken back leaves no trace, not even an empty list")
-
-        // Still ratable after a revert: having trained on it is the point.
+        check(!FileManager.default.fileExists(atPath: leftover.path), "a push prepares the store, which deletes the leftover")
+        try Data("{}".utf8).write(to: leftover)
         rig.relaunch()
-        _ = rig.inbox.revert()
-        check(rig.inbox.addRating(score: 2, rater: .user, note: "knees hurt") != nil, "a reverted change can still be rated")
-    }
-
-    // MARK: Ratings before and without a decision
-
-    static let secondProposalID = "6F1C0000-0000-0000-0000-000000000002"
-
-    @MainActor static func pendingFileExists(_ rig: Rig) -> Bool {
-        FileManager.default.fileExists(atPath: rig.store.pendingRatingsURL.path)
-    }
-
-    @MainActor static func pendingText(_ rig: Rig) -> String {
-        (try? String(contentsOf: rig.store.pendingRatingsURL, encoding: .utf8)) ?? ""
-    }
-
-    @MainActor static func checkDeclinedRatings() throws {
-        let rig = try Rig()
-        try rig.push([sets("c1", item: F.bench, from: 4, to: 5)])
-        _ = rig.inbox.apply(accepted: [])
-        let rating = rig.inbox.addRating(score: 1, rater: .user, note: "useless")
-        check(rating != nil && rig.store.loadDecisions().decisions[0].ratings?.map(\.score) == [1],
-              "a review declined entirely can be rated, in its decision record")
-        check(!pendingFileExists(rig), "a decided proposal has no pending file")
-        rig.relaunch()
-        let theirs = rig.inbox.addRating(score: 2, rater: .other, raterName: "Sam")
-        check(theirs?.rater == .other && rig.inbox.ratings().count == 2, "and again after a relaunch, by someone else")
-        rig.inbox.removeRating(rating!)
-        rig.inbox.removeRating(theirs!)
-        check(rig.store.loadDecisions().decisions[0].ratings == nil && !rig.decisionsText.contains("ratings"),
-              "taking them back leaves no ratings key")
-    }
-
-    @MainActor static func checkPendingRatings() throws {
-        let rig = try Rig()
-        try rig.push([sets("c1", item: F.bench, from: 4, to: 5), sets("c2", item: F.fly, from: 3, to: 4)])
-        let mine = rig.inbox.addRating(score: 4, rater: .user, raterName: "Ignored")
-        let theirs = rig.inbox.addRating(score: 2, rater: .other, raterName: " Sam ", note: "too much volume")
-        check(mine != nil && theirs != nil && rig.inbox.showsOnToday && rig.store.loadDecisions().decisions.isEmpty,
-              "rating before deciding leaves the proposal undecided and writes no decision")
-        let file = rig.store.loadPendingRatings()
-        check(file?.proposalID == proposalID && file?.format == "gymtrack-coach-ratings" && file?.version == 1
-              && file?.ratings.map(\.rater) == [.user, .other], "the ratings wait in ratings.json under the proposal id")
-        let text = pendingText(rig)
-        check(text.contains("\"rater\" : \"self\"") && text.contains("\"rater\" : \"other\"")
-              && text.components(separatedBy: "raterName").count == 2 && !text.contains("null"),
-              "raters are written as self and other, and an absent name is an absent key")
-        check(file?.ratings.last?.raterName == "Sam", "someone else's rating keeps rater other and their name")
-        rig.relaunch()
-        check(rig.inbox.ratings().count == 2 && rig.inbox.showsOnToday, "pending ratings survive a relaunch")
-
-        // Taking back the last one leaves no file and no empty list.
-        let solo = try Rig()
-        try solo.push([sets("c1", item: F.bench, from: 4, to: 5)])
-        let lone = solo.inbox.addRating(score: 3, rater: .user)
-        solo.inbox.removeRating(lone!)
-        check(!pendingFileExists(solo), "a pending rating taken back leaves no file")
-
-        // Deciding moves them into the record and removes the file.
-        let decision = applied(rig.inbox.apply(accepted: ["c1"]))
-        check(decision?.ratings?.map(\.score) == [4, 2] && decision?.ratings?.map(\.rater) == [.user, .other],
-              "applying carries the pending ratings into the decision, raters intact")
-        check(rig.store.loadDecisions().decisions[0].ratings?.count == 2 && !pendingFileExists(rig)
-              && rig.inbox.pendingRatings.isEmpty, "they are in decisions.json and the pending file is gone")
-
-        // Undo takes the decision back and leaves the ratings waiting.
-        let late = rig.inbox.addRating(score: 5, rater: .other, raterName: "Dana")
-        check(late != nil && rig.store.loadDecisions().decisions[0].ratings?.count == 3,
-              "a rating after the decision goes to the decision")
-        check(rig.inbox.undoLastDecision() == nil, "undo succeeds")
-        check(rig.store.loadDecisions().decisions.isEmpty && rig.inbox.decisionOnProposal == nil,
-              "undo erases the decision record")
-        let back = rig.store.loadPendingRatings()
-        check(back?.proposalID == proposalID && back?.ratings.map(\.score) == [4, 2, 5]
-              && back?.ratings.map(\.rater) == [.user, .other, .other],
-              "but the ratings people gave go back to the pending file, raters intact")
-        check(rig.inbox.ratings().count == 3 && rig.inbox.showsOnToday, "and the proposal is pending with its ratings")
-
-        // An undo with nothing rated leaves no file behind.
-        let bare = try Rig()
-        try bare.push([sets("c1", item: F.bench, from: 4, to: 5)])
-        _ = bare.inbox.apply(accepted: ["c1"])
-        _ = bare.inbox.undoLastDecision()
-        check(!pendingFileExists(bare), "undo of an unrated apply writes no pending file")
-
-        // Deciding all over again moves them once more, this time as a decline.
-        let again = applied(rig.inbox.apply(accepted: []))
-        check(again?.appliedAt == nil && again?.ratings?.count == 3 && !pendingFileExists(rig),
-              "declining everything also moves the pending ratings into the record")
-        check(rig.store.loadDecisions().decisions[0].ratings?.map(\.rater) == [.user, .other, .other],
-              "with every rater as it was given")
-    }
-
-    @MainActor static func checkReplacedProposal() throws {
-        let rig = try Rig()
-        try rig.push([sets("c1", item: F.bench, from: 4, to: 5)])
-        _ = rig.inbox.addRating(score: 2, rater: .user)
-        try rig.push([sets("c1", item: F.fly, from: 3, to: 4)], id: secondProposalID)
-        check(!pendingFileExists(rig) && rig.inbox.ratings().isEmpty,
-              "a proposal that replaces the inbox file drops the old one's pending ratings")
-        let fresh = rig.inbox.addRating(score: 5, rater: .other, raterName: "Sam")
-        check(fresh != nil && rig.store.loadPendingRatings()?.proposalID == secondProposalID,
-              "and ratings for the new one are filed under its own id")
-
-        // A pending file for a proposal that is already decided is a leftover.
-        let decided = applied(rig.inbox.apply(accepted: ["c1"]))
-        check(decided?.ratings?.count == 1, "the new proposal's rating moves into its decision")
-        try rig.store.savePendingRatings(CoachPendingRatings(proposalID: secondProposalID, ratings: decided?.ratings ?? []))
-        rig.inbox.reload()
-        check(!pendingFileExists(rig) && rig.store.loadDecisions().decisions[0].ratings?.count == 1,
-              "a leftover for a decided proposal is deleted, not applied a second time")
-
-        // A proposal that fits nothing is never decided, so it takes no ratings.
-        let empty = try Rig()
-        try empty.push([sets("c1", item: F.bench, from: 1, to: 2)])
-        check(!empty.inbox.canRate() && empty.inbox.addRating(score: 3, rater: .user) == nil && !pendingFileExists(empty),
-              "a proposal with nothing applicable cannot be rated")
-    }
-
-    @MainActor static func checkRatingSubjects() throws {
-        // The history rates the record even while a newer proposal waits.
-        let rig = try Rig()
-        try rig.push([sets("c1", item: F.bench, from: 4, to: 5)])
-        _ = rig.inbox.apply(accepted: ["c1"])
-        try rig.push([sets("c1", item: F.fly, from: 3, to: 4)], id: secondProposalID)
-        check(rig.inbox.ratableDecision?.proposalID == proposalID, "the latest decision is the ratable one while another waits")
-        let old = rig.inbox.addRating(score: 4, rater: .user, on: .decision)
-        let new = rig.inbox.addRating(score: 2, rater: .other, raterName: "Sam")
-        check(old != nil && new != nil && rig.store.loadDecisions().decisions[0].ratings?.map(\.score) == [4]
-              && rig.store.loadPendingRatings()?.proposalID == secondProposalID
-              && rig.store.loadPendingRatings()?.ratings.map(\.score) == [2],
-              "a rating on the record and one on the waiting proposal each go where they were aimed")
-        check(rig.inbox.ratings(on: .decision).map(\.score) == [4] && rig.inbox.ratings().map(\.score) == [2],
-              "and each is read back from there")
-        rig.inbox.removeRating(old!)
-        rig.inbox.removeRating(new!)
-        check(rig.store.loadDecisions().decisions[0].ratings == nil && !pendingFileExists(rig),
-              "each is taken back from the file it was in")
+        check(!FileManager.default.fileExists(atPath: leftover.path) && rig.inbox.showsOnToday,
+              "a launch deletes it too, and the waiting proposal is untouched")
+        check(FileManager.default.fileExists(atPath: rig.store.proposalURL.path), "only that file goes, never the proposal")
     }
 
     static func main() async {
@@ -532,9 +371,7 @@ struct CoachApplyTests {
         do {
             try await MainActor.run {
                 try checkInPlace(); try checkAddSlot(); try checkRemoveSlot()
-                try checkRevert(); try checkDeciding(); try checkRatings()
-                try checkDeclinedRatings(); try checkPendingRatings()
-                try checkReplacedProposal(); try checkRatingSubjects()
+                try checkRevert(); try checkDeciding(); try checkLeftoverRatingsFile()
             }
         } catch {
             print("FAIL: threw \(error)")

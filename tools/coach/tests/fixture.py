@@ -177,6 +177,14 @@ def export() -> dict:
             {"id": uid("body-1"), "date": "2026-09-01T07:00:00Z", "weightKg": 80.0, "source": "manual"},
             {"id": uid("body-2"), "date": "2026-10-01T07:00:00Z", "weightKg": 81.2, "source": "manual"},
         ],
+        # Waist and arm are measured twice, chest only before the applied
+        # proposal and thigh only after it, shoulders never: each case the
+        # stats must tell apart. Parts that were not measured have no key.
+        "bodyMeasurements": [
+            {"id": uid("tape-1"), "date": "2026-09-01T07:00:00Z", "armCm": 36.0, "chestCm": 101.0, "waistCm": 84.0},
+            {"id": uid("tape-2"), "date": "2026-09-15T07:00:00Z", "armCm": 36.5},
+            {"id": uid("tape-3"), "date": "2026-10-01T07:00:00Z", "armCm": 37.0, "waistCm": 83.0, "thighCm": 58.0},
+        ],
         "customExercises": [],
         "hiddenExercises": [],
         "exerciseCatalog": [

@@ -2706,6 +2706,27 @@
       "source": "manual"
     }
   ],
+  "bodyMeasurements": [
+    {
+      "id": "94C87A39-65A7-5210-A59F-1181271523CB",
+      "date": "2026-09-01T07:00:00Z",
+      "armCm": 36.0,
+      "chestCm": 101.0,
+      "waistCm": 84.0
+    },
+    {
+      "id": "BA5A9211-14F8-5796-9C59-F7F7F0F8CE41",
+      "date": "2026-09-15T07:00:00Z",
+      "armCm": 36.5
+    },
+    {
+      "id": "6BBE4100-AE92-5808-914A-DFD2EEF36601",
+      "date": "2026-10-01T07:00:00Z",
+      "armCm": 37.0,
+      "waistCm": 83.0,
+      "thighCm": 58.0
+    }
+  ],
   "customExercises": [],
   "hiddenExercises": [],
   "exerciseCatalog": [

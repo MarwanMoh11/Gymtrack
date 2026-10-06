@@ -17,8 +17,9 @@ class InitAndPull(CoachTestCase):
         self.assertEqual(code, 0)
         profile = self.home / "profile.md"
         text = profile.read_text()
-        for needle in ("Priority muscles:", "Injuries", "Equipment", "Days available:", "Tape measurements"):
+        for needle in ("Priority muscles:", "Injuries", "Equipment", "Days available:"):
             self.assertIn(needle, text)
+        self.assertNotIn("Tape measurements", text)
         profile.write_text("mine")
         self.coach("init")
         self.assertEqual(profile.read_text(), "mine")

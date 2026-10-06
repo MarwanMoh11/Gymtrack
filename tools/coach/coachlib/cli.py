@@ -17,8 +17,8 @@ GymTrack's coach loop, Mac side. Typical review:
 
 Environment: COACH_HOME (default ~/Documents/GymTrackCoach); GYMTRACK_PHONE or
 COACH_PHONE (device id, default the one scripts/install-phone.sh uses);
-COACH_CLAUDE_BIN, COACH_REVIEWER_MODEL (default none), COACH_REVIEWER_EFFORT
-(default high; "default" omits the flag), COACH_REVIEWER_TIMEOUT (seconds,
+COACH_CLAUDE_BIN, COACH_REVIEWER_MODEL (default claude-sonnet-5-5),
+COACH_REVIEWER_EFFORT (default xhigh; "default" omits either flag), COACH_REVIEWER_TIMEOUT (seconds,
 default 900), COACH_REVIEWER_SETTING_SOURCES (default project; "all" loads the
 user's settings too).
 """
