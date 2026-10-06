@@ -35,7 +35,10 @@ review on a phone.
 > midnight, and never trained.
 
 **What happens.**
-1. Within a minute, Claude replies on the issue with a progress comment that it keeps updating.
+1. Within a minute, Claude replies on the issue with a progress comment and a checklist it ticks
+   off as it works. When it finishes, the comment says how long it took and links the job and the
+   branch. The **Actions** tab (on a phone: the repo → Actions) shows every run live, and each
+   finished run's summary page has a report with the model, the turns and the duration.
 2. After about 5 to 15 minutes, it pushes a `claude/issue-N-...` branch and opens a PR whose body
    says `Closes #N` and has a "How to test on device" section.
 3. `PR Check` starts. The review comment arrives in about 2 to 4 minutes. `build-and-test` takes
@@ -93,6 +96,9 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   default `GITHUB_TOKEN` would not trigger other workflows.
 - `additional_permissions: actions: read` lets Claude read CI results, which `@claude fix the build`
   depends on.
+- `display_report: "true"` puts a report on the run's summary page: the model, the turns and the
+  duration, so a phone can see what ran without reading the raw log. The repo is public, so that
+  report is too, the same as the log.
 - `--allowedTools "mcp__github__create_pull_request"` switches on the GitHub MCP server's
   create-PR tool. Without it, Claude's only way to offer a PR is a "Create PR" link that you would
   have to tap.
