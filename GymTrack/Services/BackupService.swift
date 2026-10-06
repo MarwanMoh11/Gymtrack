@@ -1314,6 +1314,7 @@ enum BackupService {
                 }
                 try requireRepTargets(low: set.targetRepsLow, high: set.targetRepsHigh, record: record)
                 try requireWeight(set.weightKg, field: "weight", record: record)
+                try requireReps(set.reps, record: record)
                 try requireSeconds(set.seconds, field: "time", record: record)
                 try requireWeight(set.loadNudge?.toKg, field: "offered weight", record: record)
             }
@@ -1358,6 +1359,16 @@ enum BackupService {
         guard let cm, !cm.isFinite || cm <= 0 else { return }
         throw RestoreError.invalidValue(field: field, value: "\(cm) cm", record: record,
                                        allowed: "a real number of centimetres, above zero")
+    }
+
+    /// A negative count restored cleanly and History then showed negative
+    /// reps and negative volume for the set. Zero is let through: a set
+    /// counted in time has no reps key, which restores as zero, and an older
+    /// file wrote that zero out.
+    private static func requireReps(_ reps: Int?, record: String) throws {
+        guard let reps, reps < 0 else { return }
+        throw RestoreError.invalidValue(field: "rep count", value: "\(reps)", record: record,
+                                       allowed: "zero or more")
     }
 
     private static func requireSeconds(_ seconds: Int?, field: String, record: String) throws {
