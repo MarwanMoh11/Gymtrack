@@ -1138,6 +1138,96 @@ struct WatchCommandCenterHeadlessTests {
         }
     }
 
+    /// The wrist's Finish still holds a log the phone applied and the lifter
+    /// then took back on the phone, and must not return it. A log the phone
+    /// never heard, in the same batch, still lands.
+    @Test func aSetThePhoneTookBackStaysTakenBackThroughTheWristsFinish() throws {
+        try withRig { rig in
+            let session = rig.session("Undo then finish")
+            let undone = rig.addRow(index: 0, to: session)
+            let unheard = rig.addRow(index: 1, to: session)
+            try rig.context.save()
+            let ids = (undone: undone.id, unheard: unheard.id, session: session.id)
+            let heardAt = rig.ago(300)
+
+            rig.send(wristLog(ids.undone, at: heardAt))
+            try #require(undone.isCompleted)
+            undone.unlog()
+            try rig.context.save()
+            rig.send(.finishSession(finishBatch(ids.session, logs: [pendingLog(ids.undone, at: heardAt),
+                                                                    pendingLog(ids.unheard, at: rig.ago(200))]),
+                                    metrics: nil))
+
+            #expect(rig.stored(ids.undone) == nil)
+            #expect(rig.stored(ids.unheard)?.isCompleted == true)
+        }
+    }
+
+    /// The same after the phone's own Finish: the row it dropped as unlogged is
+    /// not owed to a copy of a log it already had, as a batch or a queued log.
+    @Test func aRowThePhoneDroppedAfterItsOwnUndoIsNotOwedToACopyOfThatLog() throws {
+        try withRig { rig in
+            let session = rig.session("Undo, phone finish")
+            let undone = rig.addRow(index: 0, to: session)
+            let unheard = rig.addRow(index: 1, to: session)
+            try rig.context.save()
+            let ids = (undone: undone.id, unheard: unheard.id, session: session.id)
+            let heardAt = rig.ago(300)
+
+            rig.send(wristLog(ids.undone, at: heardAt))
+            undone.unlog()
+            session.close(at: rig.ago(10), in: rig.context)
+            try rig.context.save()
+            // The undone row was dropped at the close.
+            try #require(DroppedSetMemory.shared.row(for: ids.undone) != nil)
+
+            rig.send(wristLog(ids.undone, at: heardAt))
+            #expect(rig.stored(ids.undone) == nil)
+            rig.send(.finishSession(finishBatch(ids.session, logs: [pendingLog(ids.undone, at: heardAt),
+                                                                    pendingLog(ids.unheard, at: rig.ago(200))]),
+                                    metrics: nil))
+            #expect(rig.stored(ids.undone) == nil)
+            // A lift the phone never heard is still put back.
+            #expect(rig.stored(ids.unheard)?.isCompleted == true)
+        }
+    }
+
+    @Test func aLateLogItsUndoAndARelogLandWhicheverOrderTheFirstTwoArriveIn() throws {
+        try withRig { rig in
+            let session = rig.session("Late trio")
+            let rows = (0..<3).map { rig.addRow(index: $0, to: session).id }
+            try rig.context.save()
+            session.close(at: rig.ago(10), in: rig.context)
+            try rig.context.save()
+            let (inOrder, overtaken, legacy) = (rows[0], rows[1], rows[2])
+            let first = rig.ago(300), second = rig.ago(200)
+
+            rig.send(wristLog(inOrder, weightKg: 60, at: first))
+            #expect(rig.stored(inOrder)?.isCompleted == true)
+            rig.send(.undoSet(id: inOrder, completedAt: first))
+            #expect(rig.stored(inOrder) == nil)
+            // The log that was taken back stays taken back,
+            rig.send(wristLog(inOrder, weightKg: 60, at: first))
+            #expect(rig.stored(inOrder) == nil)
+            // and the re-log is not lost behind its undo.
+            rig.send(wristLog(inOrder, weightKg: 65, at: second))
+            #expect(rig.stored(inOrder)?.weightKg == 65)
+            #expect(rig.stored(inOrder)?.completedAt == second)
+
+            // An undo that overtook its log still wins, and the re-log after it lands.
+            rig.send(.undoSet(id: overtaken, completedAt: first))
+            rig.send(wristLog(overtaken, weightKg: 60, at: first))
+            #expect(rig.stored(overtaken) == nil)
+            rig.send(wristLog(overtaken, weightKg: 65, at: second))
+            #expect(rig.stored(overtaken)?.completedAt == second)
+
+            // An undo with no stamp still takes the row with it.
+            rig.send(.undoSet(id: legacy, completedAt: nil))
+            rig.send(wristLog(legacy, at: first))
+            #expect(rig.stored(legacy) == nil)
+        }
+    }
+
     // MARK: - Starts, held to the live rules
 
     @Test func aFocusOnAnotherExerciseDropsTheStartAnnouncedOnThisOne() throws {
