@@ -20,10 +20,6 @@ final class WorkoutLoggingFlowUITests: GymTrackUITestCase {
 
     /// Log two sets, undo one, finish: the counter must follow each step, and a
     /// finished session with a set in it is what Today then offers to view.
-    ///
-    /// The undo takes the second set rather than the only one: undoing the only
-    /// logged set crashes the app today (issue #2), and a crash cannot be
-    /// wrapped as a known issue because XCTest raises it outside the wrapper.
     func testFreestyleSetsCanBeLoggedUndoneAndTheWorkoutFinished() throws {
         app = launchApp(onboarded: true)
 
@@ -53,6 +49,31 @@ final class WorkoutLoggingFlowUITests: GymTrackUITestCase {
         tap(app.buttons["Done"], "Done on the summary")
 
         require(app.buttons["View workout"], "View workout on Today")
+    }
+
+    /// Undo the only logged set: the counter goes back to none and the logger
+    /// takes the next set. This crashed the app (#2): the progress bar under
+    /// the counter springs from one set to none and dipped below zero on the
+    /// way.
+    ///
+    /// The second Log set is what catches the crash. The crash came
+    /// mid-animation, a beat after the counter had already changed, so
+    /// "0/3 sets" alone could be read before the app went down.
+    func testUndoingTheOnlySetReturnsTheCounterToZero() throws {
+        app = launchApp(onboarded: true)
+
+        tap(app.buttons["Start a freestyle session"], "Start a freestyle session")
+        addExercise(named: benchPress)
+
+        let progress = require(app.staticTexts[AccessibilityID.progress], "the set counter")
+        tap(app.buttons[AccessibilityID.logSet], "Log set")
+        expectLabel(progress, "1/3 sets")
+
+        tap(app.buttons["Undo this set"].firstMatch, "Undo this set")
+        expectLabel(progress, "0/3 sets")
+
+        tap(app.buttons[AccessibilityID.logSet], "Log set after the undo")
+        expectLabel(progress, "1/3 sets")
     }
 
     /// The unit picked on the second onboarding screen has to reach the weight

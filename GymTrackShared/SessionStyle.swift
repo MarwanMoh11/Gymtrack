@@ -136,7 +136,10 @@ struct PhaseProgressBar: View, Animatable {
         set { progress = newValue }
     }
 
-    private var completed: Int { Int(progress.rounded(.down)) }
+    /// Never below zero. Undoing the only logged set springs the count from one
+    /// to none, the spring dips just under zero on the way, and a count of -1
+    /// made the tick loop's range trap and took the app down with it.
+    private var completed: Int { max(0, Int(progress.rounded(.down))) }
 
     var body: some View {
         Group {
