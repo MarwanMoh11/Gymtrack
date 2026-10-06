@@ -75,6 +75,14 @@ that for one issue.
 
 The review is advisory. Only `build-and-test` can block a merge.
 
+**When a check fails.** GitHub tells only whoever pushed, and on Claude's branches that is Claude,
+so [`claude-check-notice.yml`](../.github/workflows/claude-check-notice.yml) comments on the PR
+instead. The comment lists each failed check, says whether it blocks merging, and quotes the failing
+tests. If they're in something the PR doesn't touch, re-run the failed jobs first: a UI test can fail
+by chance on a slow simulator. Otherwise comment `@claude fix the build`. The notice never starts a
+fix by itself. A Claude run that fails before Claude starts says so on its issue too, so a `@claude`
+comment never goes unanswered.
+
 **Merge.** Tap **Squash and merge**. To merge without waiting, tap **Enable auto-merge**, and
 GitHub merges as soon as `build-and-test` passes. You can merge several PRs one after another:
 "require branches to be up to date" is off, so merging one PR doesn't force the next to update.
@@ -135,6 +143,7 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | Repo settings | [`scripts/claude-pipeline/apply-repo-settings.sh`](../scripts/claude-pipeline/apply-repo-settings.sh) | Squash only, delete merged branches, auto-merge, update suggestions, read-only default token, approval for outside contributors' runs | Generic |
 | Saver | [`scripts/claude-pipeline/save-work.sh`](../scripts/claude-pipeline/save-work.sh) | Runs last in every Claude run: saves unfinished or unpushed work to a `claude/rescue-*` branch, notes a usage limit, comments on the issue | Generic |
 | Retry workflow | [`.github/workflows/claude-retry.yml`](../.github/workflows/claude-retry.yml) and [`wait-for-reset.sh`](../scripts/claude-pipeline/wait-for-reset.sh) | Waits on Linux for a usage limit to reset, then re-runs the stopped Claude run | Generic |
+| Check notice | [`.github/workflows/claude-check-notice.yml`](../.github/workflows/claude-check-notice.yml) and [`check-notice.sh`](../scripts/claude-pipeline/check-notice.sh) | When `PR Check` fails on a `claude/` branch, comments on the PR: the failed checks, whether each blocks merging, the failing tests | Generic (the review job's name, `review`, is in the script) |
 | Ruleset | [`scripts/claude-pipeline/ruleset-main.json`](../scripts/claude-pipeline/ruleset-main.json) | On the default branch: require `build-and-test`, block force-pushes and deletion, admins may bypass | Generic (check name is a parameter) |
 
 ### Line by line: the parts that aren't obvious
@@ -203,6 +212,9 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   so it runs after a failure, a cancel or a timeout too. Two artifacts may follow it:
   `claude-usage-limit-<attempt>`, the note the retry workflow looks for, and `unsaved-work-<attempt>`,
   a git bundle kept only if GitHub refused even the rescue branch.
+- **Say the run couldn't start** comments on the issue when the job fails before the Claude step
+  runs (`steps.claude.outcome == 'skipped'`), for example when the checkout fails. With no
+  progress comment and nothing to save, the `@claude` comment would otherwise get no answer.
 - The `stop` job runs on Linux when a comment starts with `@claude stop` or `@claude pause` and its
   author is the owner, a member or a collaborator. It cancels every unfinished run named for that
   issue, except itself, and says so if there was nothing to stop. The `claude` job's `if:`
@@ -223,6 +235,22 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   days, after an attempt has stopped on the limit 6 times, or after three answers in a row that
   are errors other than the limit (an expired token, say), and comments on the issue each time.
 - `concurrency` keeps one wait per stopped run.
+
+**`claude-check-notice.yml`**
+- Triggered by `workflow_run` when any `PR Check` completes. The job runs only for a failed
+  `pull_request` run on a `claude/` branch of this repo. A fork's branch can carry that name
+  too, so the head repository is checked as well.
+- It checks out only `scripts/claude-pipeline/` from `main`, never the PR's code, because it
+  holds a token that can comment.
+- `check-notice.sh` skips a run that isn't on the PR's newest commit, since a newer push has its
+  own run. It reads the failed jobs, and asks the ruleset which checks are required, so "blocks
+  merging" stays true if the ruleset changes.
+- The quoted lines come from `gh run view --log-failed`, filtered the way `check.sh` filters
+  (errors, `✘`, failing test cases). Without such lines it quotes the last lines of the failed
+  step. Backticks are stripped so a line can't close the code block, and an @-mention inside a
+  code block notifies nobody.
+- A failed `review` job gets its own line and no `@claude fix the build`, because it says nothing
+  about the change.
 
 **`pr-check.yml`**
 - `concurrency` with `cancel-in-progress` means a new push to a PR cancels the run for the old
@@ -311,6 +339,9 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   a free account may run for hours, and costs ten times as much on a private repo. A re-run, not
   a new comment, restarts the work: a `GITHUB_TOKEN` can re-run a workflow, but a comment it
   posts never starts one.
+- **A failed check gets a comment, not a fix.** Starting Claude on every red check would cost a
+  run each time a test fails by chance: two UI tests did on one day, on PRs that didn't touch the
+  screen they tested. The comment gives the evidence and makes a fix one reply away.
 
 ## 4. Security model
 
@@ -361,6 +392,10 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   it takes from the stopped run is the issue number in the note, cut down to digits.
 - **Only people with write access can stop a run.** The `stop` job checks the comment author's
   association with the repo, so a stranger on this public repo can't cancel your runs.
+- **The check notice quotes a log the PR's code wrote.** It runs `main`'s script, never the PR's,
+  and only on this repo's `claude/` branches. The quoted lines sit in a code block with backticks
+  stripped, so they can't add links or mentions. Its comment is posted with the workflow's
+  token, which starts no workflow.
 
 ## 5. Costs and limits
 
@@ -379,6 +414,9 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   limit runs on Linux, free on a public repo and billed at the Linux rate on a private one, for
   up to 6 hours a leg. Once the limit has reset, the question that notices costs one short Opus
   reply.
+- **Check notices.** Every `PR Check` run starts a check-notice run. It ends at once as skipped
+  unless a check failed on a `claude/` branch, and then takes a few seconds on Linux. It uses no
+  Claude usage.
 - **For a private repo:**
   - rulesets need GitHub Pro (personal) or Team (organisations); without one, the ruleset call in
     the settings script fails;
@@ -397,7 +435,9 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | Claude leaves a "Create PR" link instead of a PR | `gh pr create` was denied or failed | Tap the link, or comment `@claude open the pull request`. Check `--allowedTools` in `claude.yml`, and the run's log for the command it tried |
 | A PR has no **Test before you merge** section, or an old one | The run skipped `.github/claude-test-checklist.md`, or a follow-up didn't update it | Comment `@claude write the test checklist` |
 | The review comment is missing | A fork PR (by design), a draft PR, a missing secret, or the PR changes `pr-check.yml` itself | For a PR that edits `pr-check.yml`, the action refuses to run a workflow that differs from `main`'s copy ("Workflow validation failed"). That's expected: merge it, and later PRs get reviews |
-| The build is red | A compile error or failing test | The failed step's log lists only the errors and failures; full logs are in the `*-logs-N` artifact. Comment `@claude fix the build` |
+| The build is red | A compile error or failing test, or a UI test that failed by chance on a slow simulator | The check-notice comment quotes the failures. If they're in something the PR doesn't touch, re-run the failed jobs. Otherwise comment `@claude fix the build`. Full logs are in the `*-logs-N` artifact |
+| A check is red on Claude's PR and no comment says so | The run was on an older commit, the branch isn't `claude/...`, or `claude-check-notice.yml` isn't on `main` | Open the check's log. The notice's own run (named "Check notice for ...") says why it skipped |
+| A comment says Claude couldn't start | The job failed before Claude ran, for example a failed checkout | Re-run the job from the linked run, or post the `@claude` comment again |
 | The review fails after posting its comment, or never posts | It ran out of turns. Past `--max-turns` the action marks even a posted review failed, and on a large PR the turns can run out before it posts | The prompt asks for the comment within 25 of the 40 turns, and the diff is saved to `pr.diff` so it can be read in parts. If it still happens, raise `--max-turns` in `pr-check.yml`, on `main` too |
 | A step hangs for minutes after a test fails | `xcodebuild` collecting simulator diagnostics | `check.sh` passes `-collect-test-diagnostics never`; keep it if you replace the checker |
 | The action fails within seconds and the log says nothing | Hidden output: the action shows Claude's log only when asked | Re-running with debug logging isn't enough. Add `show_full_output: "true"`, or set the repository variable `ACTIONS_STEP_DEBUG` to `true`, then remove it: the log can show file contents |
@@ -434,7 +474,8 @@ page reports it.
 ## 8. Porting to another repo
 
 1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml`,
-   `.github/workflows/claude-retry.yml`, `.github/ISSUE_TEMPLATE/`, `.github/claude-planning.md`,
+   `.github/workflows/claude-retry.yml`, `.github/workflows/claude-check-notice.yml`,
+   `.github/ISSUE_TEMPLATE/`, `.github/claude-planning.md`,
    `.github/claude-test-checklist.md` and `scripts/claude-pipeline/` into the new repo. Reword the issue forms' examples for that app, and rewrite the checklist's
    "About the owner" part and its tab names.
 2. Replace the `build-and-test` steps for the new stack, keeping the job name. For example:
@@ -449,7 +490,8 @@ page reports it.
    ("compiles all three targets", the `GymTrackTests/SomeSuite` example), and set `runs-on` to
    `ubuntu-latest` if the stack doesn't need a Mac. If the runner can't build the project at all,
    take the checker out of `--allowedTools` and the prompt, and say in `CLAUDE.md` that CI checks.
-   `save-work.sh` and `wait-for-reset.sh` work in any repo. `wait-for-reset.sh` names the model
+   `save-work.sh`, `wait-for-reset.sh` and `check-notice.sh` work in any repo, provided the
+   review job keeps its name, `review`. `wait-for-reset.sh` names the model
    it asks, so keep that the same as `--model` in `claude.yml`.
 4. Rewrite the app description in the review prompt, and the "Test on device" wording if the
    project has no device.
@@ -460,7 +502,7 @@ page reports it.
 6. Install the Claude GitHub App on the repo. Run `claude setup-token` in Terminal.app, then
    `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>`.
 7. Run `sh scripts/claude-pipeline/apply-repo-settings.sh <owner/repo> build-and-test`.
-8. Push the three workflows to the default branch first. The review refuses to run from a
+8. Push the four workflows to the default branch first. The review refuses to run from a
    workflow file that differs from the default branch's copy, and comment- and `workflow_run`-
    triggered workflows only ever run from the default branch.
 9. Verify with a small test PR (check and review both appear), then with a test issue from the phone,
@@ -470,7 +512,7 @@ page reports it.
 
 - **Existing tests kept.** The repo already had a `swiftc`-based suite (`Tests/`, 73 scripts).
   It runs as the `script-tests` check and gets no new tests; #6 retires it into Swift Testing in
-  parts (66 scripts are left after part 1, #15). New tests go to the Xcode targets.
+  parts (55 scripts are left after part 2, #22). New tests go to the Xcode targets.
 - **`CLAUDE.md` split.** The old 180-line file became a 60-line `CLAUDE.md` plus
   `docs/DEVELOPMENT.md`, which holds everything only a local session can use.
 - **`actions/checkout@v7`** rather than `@v6`, because v7 is current.
@@ -485,8 +527,9 @@ page reports it.
 - **Claude opens its PR with `gh pr create`.** The action's create-PR tool runs in Docker, which
   macOS runners don't have.
 - **Added after the setup:** the test checklist on every PR, planning into sub-issues, `@claude fix
-  the conflicts`, saving unfinished work, `@claude stop` / `@claude continue`, and the wait for a
-  usage limit (`claude-retry.yml`).
+  the conflicts`, saving unfinished work, `@claude stop` / `@claude continue`, the wait for a
+  usage limit (`claude-retry.yml`), and the comments when a check fails on Claude's PR
+  (`claude-check-notice.yml`) or a run can't start.
 - **The review posts with `--edit-last --create-if-none`** and may use `Write` for the comment body.
 - **The workflows were pushed to `main` before the setup PR**, because the review refuses to run
   from a workflow file that doesn't match `main`'s copy.

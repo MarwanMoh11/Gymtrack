@@ -1,0 +1,50 @@
+name: Claude check notice
+
+# When a check fails on one of Claude's pull requests, says so on the pull
+# request: which check, whether it blocks merging, the failing tests, and how to
+# get a fix. GitHub tells only whoever pushed, and on Claude's branches that is
+# Claude. The why behind each line is in docs/claude-pipeline.md.
+
+# Every PR Check run starts one of these. All but the failures on Claude's
+# branches end at once as skipped.
+run-name: "Check notice for ${{ github.event.workflow_run.display_title }}"
+
+on:
+  workflow_run:
+    workflows: [PR Check]
+    types: [completed]
+
+jobs:
+  notice:
+    # Claude's branches in this repo only. A fork's branch can be called claude/
+    # too, and nothing on a fork's PR is Claude's to fix.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      startsWith(github.event.workflow_run.head_branch, 'claude/') &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # Read, for the failed jobs and their logs.
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      # main's copy of the script, never the pull request's: this job holds a
+      # token that can write.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/claude-pipeline
+      - name: Say which checks failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.repository.default_branch }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: sh scripts/claude-pipeline/check-notice.sh

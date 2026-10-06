@@ -10,7 +10,8 @@ import XCTest
 ///
 /// Every wait here has a timeout and no test sleeps: a flow that is slow on a
 /// loaded CI runner gets ten seconds per step, and a flow that is broken fails
-/// at the step that broke rather than at the end.
+/// at the step that broke rather than at the end. A step known to need longer,
+/// like the Library's first open, passes its own timeout and says why.
 
 /// Identifiers the app sets for the few controls that have no stable visible
 /// text. Everything else the tests reach through its on-screen words.

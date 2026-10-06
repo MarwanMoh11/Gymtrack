@@ -5,11 +5,12 @@ import Testing
 
 /// The decisions the wrist makes on its own, held to their boundaries: which
 /// taps count, when a rest buzzes and what its countdown shows, when that
-/// countdown is brought back in front of an idle wrist, and what the recorder
-/// does with a session that went quiet or ended somewhere else. These sit on
-/// the exact edges (the 0.6 s double tap, the 2 s and 60 s buzz tolerances, the
-/// 90 minute idle line) and on the dates around midnight, where a countdown
-/// that leaned on the calendar would go wrong.
+/// countdown is brought back in front of an idle wrist, what the recorder does
+/// with a session that went quiet or ended somewhere else, and how a command
+/// travels to the phone. These sit on the exact edges (the 0.6 s double tap,
+/// the 2 s and 60 s buzz tolerances, the 90 minute idle line) and on the dates
+/// around midnight, where a countdown that leaned on the calendar would go
+/// wrong.
 ///
 /// `WatchHaptics` plays through `WKInterfaceDevice`, and nothing here can see
 /// what it played. The one tap a test has to count, a rest running out, is
@@ -695,5 +696,73 @@ struct WatchRulesTests {
         let full = WatchWorkoutMetadata(recording: id, snapshot: heard())
         #expect(full == WatchWorkoutMetadata(recording: id, snapshot: heard()))
         #expect(full.sessionID == id && full.title == "Push" && full.sets == 2 && full.volumeKg == 960)
+    }
+
+    // MARK: - Sending to the phone
+
+    nonisolated static let lastSession = UUID()
+    nonisolated static let queuedLog = WatchCommand.logSet(id: UUID(), weightKg: 60, reps: 5, seconds: 0,
+                                                           at: WatchTestClock.reference)
+    nonisolated static let queuedFinish = WatchCommand.finishSession(
+        WatchFinishBatch(sessionID: lastSession, logs: [], undos: [], starts: [:], cancels: [], ratings: []),
+        metrics: nil)
+    /// The Health workout handed over after a session the phone ended.
+    nonisolated static let queuedHandover = WatchCommand.metrics(
+        WatchWorkoutMetrics(sessionID: lastSession, healthWorkoutID: UUID()))
+
+    /// A Start tapped while anything at all waited in the delivery queue went
+    /// in behind it, and the system delivers that queue when it chooses. The
+    /// wrist sat on "Starting" and gave up, and the phone began the workout
+    /// whenever the queue arrived. The end of the last workout is the one
+    /// thing a Start must wait for: ahead of it, the phone answers with the
+    /// session the wrist has just closed, which the wrist will not draw.
+    @Test(arguments: [
+        ([], .live),
+        ([.requestMirror], .live),
+        ([WatchRulesTests.queuedLog, WatchRulesTests.queuedHandover, .startToday], .live),
+        ([WatchRulesTests.queuedLog, WatchRulesTests.queuedFinish], .queued),
+        ([.discardSession(id: WatchRulesTests.lastSession)], .queued),
+        ([.finish(metrics: nil)], .queued),
+        ([.discard], .queued),
+    ] as [([WatchCommand], WatchCommandRouting.Route)])
+    func aStartWaitsInTheQueueOnlyBehindTheEndOfTheLastWorkout(waiting: [WatchCommand],
+                                                               expected: WatchCommandRouting.Route) {
+        for start: WatchCommand in [.startToday, .startFreestyle] {
+            #expect(WatchCommandRouting.route(start, reachable: true, waiting: waiting) == expected)
+            #expect(WatchCommandRouting.route(start, reachable: false, waiting: waiting) == .queued,
+                    "out of reach, the queue is the only way to the phone")
+            #expect(WatchCommandRouting.requeuesAfterFailure(start))
+        }
+    }
+
+    /// A request for the mirror wants the phone's answer now. Queued, it
+    /// landed long after anyone was waiting, and held every later command
+    /// behind it until then, the Start and the request the idle screen sends
+    /// three seconds later to recover a lost reply among them.
+    @Test(arguments: [false, true])
+    func aRequestForTheMirrorGoesLiveOrNotAtAllAndWaitsForNothing(backlogged: Bool) {
+        let waiting: [WatchCommand] = backlogged ? [Self.queuedLog, Self.queuedFinish] : []
+        #expect(WatchCommandRouting.route(.requestMirror, reachable: true, waiting: waiting) == .live)
+        #expect(WatchCommandRouting.route(.requestMirror, reachable: false, waiting: waiting) == .dropped)
+        #expect(!WatchCommandRouting.requeuesAfterFailure(.requestMirror))
+    }
+
+    @Test func aCommandThatChangesTheSessionKeepsTheOrderItWasTappedIn() {
+        let undo = WatchCommand.undoSet(id: UUID(), completedAt: WatchTestClock.reference)
+        for command: WatchCommand in [undo, Self.queuedFinish, Self.queuedHandover, .addSet(catalogID: "squat")] {
+            #expect(WatchCommandRouting.route(command, reachable: true, waiting: []) == .live)
+            #expect(WatchCommandRouting.route(command, reachable: true, waiting: [Self.queuedLog]) == .queued,
+                    "sent live, it would reach the phone ahead of the log still queued")
+            #expect(WatchCommandRouting.route(command, reachable: true, waiting: [.requestMirror]) == .live,
+                    "a queued request changes nothing on the phone, so nothing has to land after it")
+            #expect(WatchCommandRouting.route(command, reachable: false, waiting: []) == .queued)
+            #expect(WatchCommandRouting.requeuesAfterFailure(command))
+        }
+
+        // A live heart-rate reading is out of date by the next one.
+        let reading = WatchCommand.metrics(WatchWorkoutMetrics(sessionID: Self.lastSession, currentHeartRate: 128))
+        #expect(WatchCommandRouting.route(reading, reachable: true, waiting: [Self.queuedLog]) == .live)
+        #expect(WatchCommandRouting.route(reading, reachable: false, waiting: []) == .dropped)
+        #expect(!WatchCommandRouting.requeuesAfterFailure(reading))
     }
 }

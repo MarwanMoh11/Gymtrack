@@ -11,10 +11,10 @@ import Testing
 /// The two channels the wrist sends on keep no order between them, and either
 /// side can be the older build. So past the wire itself, these hold the phone
 /// to one record whatever order its commands land in, with the logger on
-/// screen and with the phone asleep (through `Rig`): a repeated log changes
-/// nothing, an undo answers only the log it names, a Finish ends the session
-/// when it was tapped, and a live reading never writes over a finished
-/// session's totals. The tombstone the wrist keeps for a session it ended, and
+/// screen and with the phone asleep (through `WatchCommandRig`): a repeated
+/// log changes nothing, an undo answers only the log it names, a Finish ends
+/// the session when it was tapped, and a live reading never writes over a
+/// finished session's totals. The tombstone the wrist keeps for a session it ended, and
 /// the rule that decides which Health workout a session links, are here too.
 @MainActor @Suite(.serialized)
 struct WatchLinkWireTests {
@@ -821,7 +821,7 @@ struct WatchLinkWireTests {
     private func same(_ a: Date?, _ b: Date?) -> Bool { WatchCommand.isSameCompletion(a, as: b) }
 
     @Test func aSecondCopyOfALogTheWristTookBackStaysTakenBack() throws {
-        try withRig { rig in
+        try WatchCommandRig.run { rig in
             let (_, sets) = try rig.seed()
             let log = rig.log(sets[2], at: 600)
             rig.send(log)
@@ -835,7 +835,7 @@ struct WatchLinkWireTests {
     }
 
     @Test func aWristFinishWhoseBatchLogsASetAfterTheTapEndsAtThatSet() throws {
-        try withRig { rig in
+        try WatchCommandRig.run { rig in
             let (session, sets) = try rig.seed()
             let logged = rig.at(3000)
             let batch = WatchFinishBatch(
@@ -853,7 +853,7 @@ struct WatchLinkWireTests {
     /// LINK-04. A reading taken partway through the workout and delivered
     /// after its Finish must not stand in for the whole workout's numbers.
     @Test func aLiveReadingThatLandsAfterTheFinishNeverWritesOverItsTotals() throws {
-        try withRig { rig in
+        try WatchCommandRig.run { rig in
             let (session, sets) = try rig.seed()
             rig.complete(sets[0], at: rig.at(3000))
             try rig.context.save()
@@ -892,7 +892,7 @@ struct WatchLinkWireTests {
     }
 
     @Test func bringingTheLinkUpRetiresAStaleEmptySessionBeforeAnythingIsMirrored() throws {
-        try withRig { rig in
+        try WatchCommandRig.run { rig in
             let longAgo = rig.started.addingTimeInterval(-(WorkoutSession.staleAfter + 3600))
             let abandonedID = try rig.seed(startedAt: longAgo).session.id
             #expect(rig.sessions().map(\.id) == [abandonedID])
@@ -905,7 +905,7 @@ struct WatchLinkWireTests {
     }
 
     @Test func aStartFromTheWristClosesYesterdaysSessionAtItsLastSetAndOpensItsOwn() throws {
-        try withRig { rig in
+        try WatchCommandRig.run { rig in
             let longAgo = rig.started.addingTimeInterval(-(WorkoutSession.staleAfter + 3600))
             let (yesterday, sets) = try rig.seed(startedAt: longAgo)
             let lastSet = longAgo.addingTimeInterval(40 * 60)
