@@ -5,8 +5,9 @@ name: Claude Code
 # The why behind each line is in docs/claude-pipeline.md.
 
 # Named after the issue or PR, so `@claude stop` and claude-retry.yml can find a
-# run by the number it works on.
-run-name: Claude on #${{ github.event.issue.number || github.event.pull_request.number }}
+# run by the number it works on. Quoted: unquoted, YAML reads " #" as the start
+# of a comment, and every run was named just "Claude on".
+run-name: "Claude on #${{ github.event.issue.number || github.event.pull_request.number }}"
 
 on:
   issues:

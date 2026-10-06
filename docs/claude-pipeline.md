@@ -133,6 +133,8 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | Secret `CLAUDE_CODE_OAUTH_TOKEN` | Repo → Settings → Secrets → Actions | Claude subscription token from `claude setup-token` (valid one year) | Generic |
 | Claude GitHub App | github.com/apps/claude, installed on all of the owner's repos | Gives the action a token to push branches, comment and open PRs | Generic |
 | Repo settings | [`scripts/claude-pipeline/apply-repo-settings.sh`](../scripts/claude-pipeline/apply-repo-settings.sh) | Squash only, delete merged branches, auto-merge, update suggestions, read-only default token, approval for outside contributors' runs | Generic |
+| Saver | [`scripts/claude-pipeline/save-work.sh`](../scripts/claude-pipeline/save-work.sh) | Runs last in every Claude run: saves unfinished or unpushed work to a `claude/rescue-*` branch, notes a usage limit, comments on the issue | Generic |
+| Retry workflow | [`.github/workflows/claude-retry.yml`](../.github/workflows/claude-retry.yml) and [`wait-for-reset.sh`](../scripts/claude-pipeline/wait-for-reset.sh) | Waits on Linux for a usage limit to reset, then re-runs the stopped Claude run | Generic |
 | Ruleset | [`scripts/claude-pipeline/ruleset-main.json`](../scripts/claude-pipeline/ruleset-main.json) | On the default branch: require `build-and-test`, block force-pushes and deletion, admins may bypass | Generic (check name is a parameter) |
 
 ### Line by line: the parts that aren't obvious
@@ -187,6 +189,41 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   touched must pass before every push, and to open the PR itself with `Closes #N`, the suites it
   ran and device-test steps.
 
+- `run-name` names each run "Claude on #N", which is how `@claude stop`, the pick-up step and
+  the retry workflow find the runs for an issue. It is quoted: YAML reads an unquoted ` #` as the
+  start of a comment, which named every run "Claude on" until it was caught.
+- **Pick up saved work** looks for the newest `origin/claude/rescue-<N>-*` branch (the checkout has
+  every branch, thanks to `fetch-depth: 0`) and passes it to Claude's prompt, which says to merge it
+  and carry on rather than redo it. `Bash(git merge origin/claude/rescue-:*)` lets it. The step also
+  cancels any wait for the usage limit on the same issue, which would otherwise re-run the old
+  run later and race this one; that is why the job has `actions: write`.
+- The Claude step has `timeout-minutes: 170`, ten short of the job's 180, so the save step still
+  gets time to run when Claude runs long.
+- **Save the work** runs `save-work.sh` from the copy taken before Claude started, `if: always()`,
+  so it runs after a failure, a cancel or a timeout too. Two artifacts may follow it:
+  `claude-usage-limit-<attempt>`, the note the retry workflow looks for, and `unsaved-work-<attempt>`,
+  a git bundle kept only if GitHub refused even the rescue branch.
+- The `stop` job runs on Linux when a comment starts with `@claude stop` or `@claude pause` and its
+  author is the owner, a member or a collaborator. It cancels every unfinished run named for that
+  issue, except itself, and says so if there was nothing to stop. The `claude` job's `if:`
+  excludes those comments, so they never start a Mac.
+
+**`claude-retry.yml`**
+- Triggered by `workflow_run` when any Claude run completes; the job runs only for a failed one,
+  and `wait-for-reset.sh` exits at once unless that attempt left the usage-limit note. The
+  attempt number matters: re-runs share a run's artifacts, and an old note mustn't start a wait
+  for a newer failure.
+- Every 20 minutes it asks Opus, from an empty directory, for one word (`claude -p ... --max-turns
+  1`). The limit refuses that at no cost; the first answer means it has reset, and the script
+  runs `gh run rerun <id> --failed`. A re-run replays the original comment, so the job behaves as
+  if you had commented again, and its pick-up step finds the saved work.
+- It asks Opus rather than a cheaper model because limits can apply per model.
+- A job may run 6 hours, so after about 5.5 it hands the wait to a fresh run through
+  `workflow_dispatch` (a `GITHUB_TOKEN` may start that, unlike other events). It gives up after 8
+  days, after an attempt has stopped on the limit 6 times, or after three answers in a row that
+  are errors other than the limit (an expired token, say), and comments on the issue each time.
+- `concurrency` keeps one wait per stopped run.
+
 **`pr-check.yml`**
 - `concurrency` with `cancel-in-progress` means a new push to a PR cancels the run for the old
   commit, so a stale red check can't be the one you see.
@@ -208,7 +245,7 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   embedded in the app.
 - **Only the unit tests gate merging.** `ui-tests` and `script-tests` run in parallel on their
   own runners and show red on the PR when they fail, but the ruleset doesn't require them. With
-  everything in one job the gate took over 40 minutes: the 73 scripts alone take 20 to 30.
+  everything in one job the gate took over 40 minutes: the script suite alone takes about 20.
 - The review job saves the PR's diff to `pr.diff` (and a summary to `pr-stat.txt`) before Claude
   starts, from the merge commit and its base (`fetch-depth: 2`), so no API limit applies and Claude
   reads it in parts with Read and Grep. It must post within 25 of its 40 turns, then refine.
@@ -258,6 +295,22 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 - **One command, not a shell.** Claude gets the checker rather than `xcodebuild` because the
   checker picks the simulators, keeps the two schemes apart, and turns thousands of log lines into
   the few that matter. Every line Claude reads is usage, so a raw log would cost more than the fix.
+- **Unfinished work goes to a branch first.** A branch is something the next run can use with
+  one allowed command (`git merge origin/claude/rescue-...`) and you can open on a phone. A run
+  can't read an artifact without extra steps, so the git bundle is only the last resort, for when
+  GitHub refuses the branch too.
+- **Stop is a cancel plus a save.** A job on a runner can't be suspended. Cancelling it saves its
+  code, and `@claude continue` starts a run from that code and from the earlier run's progress
+  comments. The new run doesn't have the old one's conversation, so it re-reads some files, which
+  costs far less than redoing the work.
+- **A usage-limit wait asks rather than reads the reset time.** The limit's message changes
+  wording ("5-hour limit reached - resets 3pm", "You've hit your weekly limit - resets Jul 25,
+  9pm (America/New_York)"), and a parser that stopped matching would wait forever or not at all.
+  A one-word question every 20 minutes costs nothing while the limit holds.
+- **The wait happens on Linux, the work on a Mac.** A Mac kept waiting would hold one of the five
+  a free account may run for hours, and costs ten times as much on a private repo. A re-run, not
+  a new comment, restarts the work: a `GITHUB_TOKEN` can re-run a workflow, but a comment it
+  posts never starts one.
 
 ## 4. Security model
 
@@ -297,6 +350,17 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   read them. `persist-credentials: false` wouldn't help: the action deletes the checkout's
   credential and writes its own token into the remote URL. Those tokens can do no more than the run already can (push a branch, open a PR, never
   touch `main`) and expire with the job, so the risk is accepted rather than sandboxed away.
+- **The saver holds the workflow's token after Claude has had the checkout.** It runs the copy
+  taken before Claude started, and git runs with hooks, `fsmonitor` and credential helpers off, so
+  none Claude planted can run with the token. What remains is the same class of risk as above:
+  configuration planted in `.git/config` (a clean filter, say) would run during `git add`. That
+  token can push branches, comment, and cancel or re-run workflows, about what the run's own
+  token can already do.
+- **The retry workflow holds the Claude token.** It checks out only `scripts/claude-pipeline/`
+  from `main`, never the stopped run's code, and asks its question from an empty directory. All
+  it takes from the stopped run is the issue number in the note, cut down to digits.
+- **Only people with write access can stop a run.** The `stop` job checks the comment author's
+  association with the repo, so a stranger on this public repo can't cancel your runs.
 
 ## 5. Costs and limits
 
@@ -311,6 +375,10 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   testing inside the run adds turns (reading errors and fixing them) but saves the far larger cost
   of a whole new run per `@claude fix the build`. Waiting on a build costs no usage.
 - **Reviews.** Every push to a PR runs a new review. `claude setup-token` tokens last one year.
+- **Saving and waiting.** Saving takes seconds at the end of the Mac job. A wait for the usage
+  limit runs on Linux, free on a public repo and billed at the Linux rate on a private one, for
+  up to 6 hours a leg. Once the limit has reset, the question that notices costs one short Opus
+  reply.
 - **For a private repo:**
   - rulesets need GitHub Pro (personal) or Team (organisations); without one, the ruleset call in
     the settings script fails;
@@ -338,6 +406,10 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | Merge conflicts | Another PR changed the same lines | Tap **Update branch** if GitHub offers it. Otherwise comment `@claude fix the conflicts` on the PR |
 | Claude's push is refused: "refusing to allow a GitHub App to create or update workflow ... without `workflows` permission" | `main` gained a change to a workflow file after the run's branch started, so the branch looks like it changes that workflow, and Claude's app may never touch workflows. The first run on #7 lost its work this way when two pipeline PRs merged mid-run | Claude merges the new `main` and retries once by itself. If that is refused too: for a run with no PR yet, comment `@claude implement this` again; for a PR, tap **Update branch** yourself, then comment `@claude` again. Avoid merging workflow changes while a run is going |
 | "Workflow initiated by non-human actor" | A bot opened the PR or comment | `allowed_bots: "*"` on the review job covers Claude's PRs. Never add it to `claude.yml` |
+| A comment says Claude stopped and its work is on `claude/rescue-...` | The run failed, was stopped, timed out, or its push was refused. The comment says which | Comment `@claude continue`. To start over instead, say so in the comment. Delete old rescue branches from the branches page whenever you like; a run that finishes deletes the ones it carried on from |
+| `@claude stop` says there's nothing to stop while a run is going | The run isn't named "Claude on #N" (runs before the run-name fix were all named "Claude on") | Open the run in the Actions tab and tap **Cancel workflow** |
+| Claude hit the usage limit and nothing restarted it | The run predates the retry workflow, the usage-limit note is missing, or the wait gave up (it comments why) | While a wait is going, the Actions tab shows "Waiting to retry Claude on #N". Otherwise comment `@claude continue` once your limit has reset |
+| A comment says the work is in the run's artifacts as `unsaved-work` | GitHub refused even the rescue branch | Download the artifact from the run page. On a Mac, `git fetch unsaved-work.bundle HEAD:recovered` and push `recovered`, or ask a local Claude session to do it |
 | 401 or "OAuth token has expired" in the action log | The year-long token expired or was revoked | Run `claude setup-token` in Terminal.app, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>` |
 
 ## 7. Timings observed
@@ -361,32 +433,44 @@ page reports it.
 
 ## 8. Porting to another repo
 
-1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml`, `.github/ISSUE_TEMPLATE/`,
-   `.github/claude-planning.md`, `.github/claude-test-checklist.md` and `scripts/claude-pipeline/`
-   into the new repo. Reword the issue forms' examples for that app, and rewrite the checklist's
+1. Copy `.github/workflows/claude.yml`, `.github/workflows/pr-check.yml`,
+   `.github/workflows/claude-retry.yml`, `.github/ISSUE_TEMPLATE/`, `.github/claude-planning.md`,
+   `.github/claude-test-checklist.md` and `scripts/claude-pipeline/` into the new repo. Reword the issue forms' examples for that app, and rewrite the checklist's
    "About the owner" part and its tab names.
 2. Replace the `build-and-test` steps for the new stack, keeping the job name. For example:
    - Xcode: `xcodebuild test -scheme App -destination "id=$SIM_ID" CODE_SIGNING_ALLOWED=NO` on `macos-26`
    - Node: `npm ci && npm test` on `ubuntu-latest`
    - Python: `pip install -e '.[test]' && pytest` on `ubuntu-latest`
    - Unity: `game-ci/unity-test-runner@v4` with a `UNITY_LICENSE` secret, on `ubuntu-latest`
-3. Rewrite the app description in the review prompt, and the "Test on device" wording if the
+3. Rewrite the checker for the new stack. `check.sh` is Xcode-specific: it picks simulators and
+   runs `xcodebuild`. Keep its shape (`check.sh build`, `check.sh test <names>`, only errors
+   printed, full logs under `build/claude-check/`, the restart under `env -i`) and replace the
+   commands inside. Then reword the checker sentence in `claude.yml`'s `--append-system-prompt`
+   ("compiles all three targets", the `GymTrackTests/SomeSuite` example), and set `runs-on` to
+   `ubuntu-latest` if the stack doesn't need a Mac. If the runner can't build the project at all,
+   take the checker out of `--allowedTools` and the prompt, and say in `CLAUDE.md` that CI checks.
+   `save-work.sh` and `wait-for-reset.sh` work in any repo. `wait-for-reset.sh` names the model
+   it asks, so keep that the same as `--model` in `claude.yml`.
+4. Rewrite the app description in the review prompt, and the "Test on device" wording if the
    project has no device.
-4. Write that repo's `CLAUDE.md`, 60 lines or fewer: what the app is, the folder map, test
+5. Write that repo's `CLAUDE.md`, 60 lines or fewer: what the app is, the folder map, test
    conventions, how a cloud run checks its work (the checker, or "CI does" when the runner can't
    build), and the rule that pipeline changes update its
    copy of this document.
-5. Install the Claude GitHub App on the repo. Run `claude setup-token` in Terminal.app, then
+6. Install the Claude GitHub App on the repo. Run `claude setup-token` in Terminal.app, then
    `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>`.
-6. Run `sh scripts/claude-pipeline/apply-repo-settings.sh <owner/repo> build-and-test`.
-7. Push the two workflows to the default branch first: the review refuses to run from a workflow
-   file that differs from the default branch's copy.
-8. Verify with a small test PR (check and review both appear), then with a test issue from the phone.
+7. Run `sh scripts/claude-pipeline/apply-repo-settings.sh <owner/repo> build-and-test`.
+8. Push the three workflows to the default branch first. The review refuses to run from a
+   workflow file that differs from the default branch's copy, and comment- and `workflow_run`-
+   triggered workflows only ever run from the default branch.
+9. Verify with a small test PR (check and review both appear), then with a test issue from the phone,
+   and on that issue `@claude stop` while it works and `@claude continue` after.
 
 ## 9. What was built here, and how it differs from the setup prompt
 
 - **Existing tests kept.** The repo already had a `swiftc`-based suite (`Tests/`, 73 scripts).
-  It stays, runs inside `build-and-test`, and gets no new tests. New tests go to the Xcode targets.
+  It runs as the `script-tests` check and gets no new tests; #6 retires it into Swift Testing in
+  parts (66 scripts are left after part 1, #15). New tests go to the Xcode targets.
 - **`CLAUDE.md` split.** The old 180-line file became a 60-line `CLAUDE.md` plus
   `docs/DEVELOPMENT.md`, which holds everything only a local session can use.
 - **`actions/checkout@v7`** rather than `@v6`, because v7 is current.
@@ -397,9 +481,12 @@ page reports it.
   builds all three targets and runs the iPhone and watch unit tests, while `ui-tests` and
   `script-tests` run in parallel as checks that aren't required. Failed jobs upload their logs.
 - **The implementing run is on a Mac and builds and tests its own change** with
-  `scripts/claude-pipeline/check.sh`. The prompt had it on Linux with CI as the only compiler. The
-  review's prompt in `pr-check.yml` still says the code was written by a run that could not
-  compile; it changes in a PR of its own, because that file has to reach `main` first.
+  `scripts/claude-pipeline/check.sh`. The prompt had it on Linux with CI as the only compiler.
+- **Claude opens its PR with `gh pr create`.** The action's create-PR tool runs in Docker, which
+  macOS runners don't have.
+- **Added after the setup:** the test checklist on every PR, planning into sub-issues, `@claude fix
+  the conflicts`, saving unfinished work, `@claude stop` / `@claude continue`, and the wait for a
+  usage limit (`claude-retry.yml`).
 - **The review posts with `--edit-last --create-if-none`** and may use `Write` for the comment body.
 - **The workflows were pushed to `main` before the setup PR**, because the review refuses to run
   from a workflow file that doesn't match `main`'s copy.
