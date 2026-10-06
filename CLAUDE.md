@@ -1,180 +1,60 @@
 # GymTrack
 
-Native iOS + watchOS workout tracker. SwiftUI, SwiftData, no account, no server,
-no network — everything lives on the device. Minimum target iOS 17.
+Native iOS 17 + watchOS 10 workout tracker: SwiftUI, SwiftData, all data on the device, no network.
+A local session reads `docs/DEVELOPMENT.md` (builds, phone installs, test runs, simulator quirks)
+before building or touching a simulator, and confirms all three schemes build before calling it done.
 
-Read this before scanning the repo. It exists so you don't have to re-derive the
-architecture, the conventions or the simulator's quirks on every task.
-
-## Targets and layout
-
+## Layout
 | Path | What |
 |---|---|
-| `GymTrack/` | The iPhone app. `App/`, `Models/`, `Services/`, `Features/`, `DesignSystem/` |
-| `GymTrackWatch/` | The watchOS app |
-| `GymTrackWidgets/` | Home Screen widgets and the Live Activity |
-| `GymTrackShared/` | Code compiled into more than one target — `Theme`, `WatchLink`, `LoadScale`, `SharedStore` |
+| `GymTrack/` | iPhone app: `App/`, `Models/`, `Services/`, `Features/`, `DesignSystem/` |
+| `GymTrackWatch/` / `GymTrackWidgets/` | watchOS app / Home Screen widgets and the Live Activity |
+| `GymTrackShared/` | Compiled into each target that needs it (not a module): `Theme`, `WatchLink`, `LoadScale`, `SetFeel`, `LaunchMode` |
+| `GymTrackTests/`, `GymTrackWatchTests/`, `GymTrackUITests/` | Swift Testing unit tests (helpers in `Support/`) and XCUITest flows |
+| `Tests/` + `scripts/test-*.sh` | Older suite: app slices compiled with `swiftc` against stubs |
 
-Schemes match the target names. The project uses file-system synchronised groups
-(`objectVersion = 77`), so **new files are picked up automatically — never edit
-`project.pbxproj` to add one.**
+Synchronised folders: a new file joins its folder's target. Never edit `project.pbxproj` to add one.
 
-Bundle id `com.marwanmohamed.gymtrack`. The App Group
-`group.com.marwanmohamed.gymtrack` is declared in **Release only**, deliberately:
-Debug omits it so the app installs with a free Apple ID. The widgets read through
-it; the app, watch and Live Activity never do.
+## The three data rules (not negotiable)
+The JSON export (`Services/BackupService.swift`) is read later by an AI coach, so:
+1. **False detail is worse than missing detail.** An inferred value is never shown as measured. A
+   value with no data stores *no key*: not null, zero or a sentinel.
+2. **Anything undone leaves no trace.** `SetLog.unlog()` is the single erase path;
+   `ActiveWorkout.clearRating`, `undoTakenNudge` and `cancelStart` follow the same rule.
+3. **Friction kills features.** Nothing may block logging, nag or need dismissing. Every optional
+   feature costs zero taps when unused.
+The backup's `version` stays 2; every field added since is optional.
 
-## Why the data model looks like this
+## Architecture and test seams
+- `Models/Entities.swift` holds the SwiftData models (`AppSchema.models` lists them).
+  `Services/ActiveWorkout.swift` drives a live session, saving as it goes. `Services/TrainingStats.swift`
+  is pure functions over finished sessions. Every suggested weight is a rung `LoadScaleBook` allows.
+- The watch link (`WatchCommandCenter`, `WatchBridge`, `WatchLink`) applies commands headlessly:
+  iOS can wake a terminated app to deliver one.
+- `LaunchMode`: a unit-test host opens an in-memory store and leaves singletons unconfigured;
+  `-GTUITesting` gives UI tests a fresh install, an in-memory store, no prompts, no Live Activity.
+- Seams: `TestStore`, `TestClock`, `ActiveWorkout.init(memory:)`, `RestTimer.init(notifier:)`, the
+  `at:`/`now:` parameters on `TrainingStats`, and `defaults:` parameters. Prefer passing a value to a
+  new protocol. UI code uses `DesignSystem/` (`Theme`, `gtCard`, ...); never invent colours or spacing.
 
-The logged data is being collected so that **an AI gym coach can read the
-exported JSON later** (Settings → "Export a backup", `Services/BackupService.swift`).
-That purpose decides arguments. Three rules follow from it, and they are not
-negotiable:
+## Tests
+- Every behavior change adds or updates tests in the matching `*Tests.swift` in `GymTrackTests/`,
+  `GymTrackWatchTests/` or `GymTrackUITests/`. Never add tests to `Tests/`; fix one there only when
+  your change breaks it.
+- `@MainActor @Suite(.serialized)`, `@Test`, `#expect`, `@Test(arguments:)` for edge cases. Dates from
+  `TestClock`, never `Date()`; no sleeps; restore any singleton you touch in `defer`.
+- A test exposing a real bug stays, in `withKnownIssue`; never weaken an assertion. UI tests find
+  controls by accessibility identifier and wait with `waitForExistence`.
 
-1. **False detail is worse than missing detail.** A value that was inferred must
-   never be presented as measured. A set with no data stores *no key* — not a
-   null, not a zero, not a `"none"` sentinel. `WorkoutSession.hasHealthMetrics`
-   treating a zero energy reading as "nothing recorded, not a workout that cost
-   nothing" is the house standard.
-2. **Anything undone leaves no trace.** A mis-tap is not data; recording it would
-   mislead the reader. `SetLog.unlog()` is the single place a set is erased, and
-   every undo path routes through it. `ActiveWorkout.clearRating`,
-   `undoTakenNudge` and `cancelStart` follow the same rule for narrower gestures.
-3. **Friction kills features here.** The logger is used mid-set with a bar in
-   your hands. Nothing may block logging, nag, or need dismissing. Everything
-   optional must cost zero taps when unused — a user who ignores a feature
-   should not be able to tell it shipped.
-
-## Where things live
-
-- `Models/Entities.swift` — the SwiftData models: `Plan`, `PlanDay`, `PlanItem`,
-  `WorkoutSession`, `SetLog`, `ExerciseNote`, and the derived `SessionExerciseGroup`.
-- `Models/CatalogExercise.swift` — `ExerciseCatalog.shared`, ~414 bundled
-  exercises from a JSON resource, plus the user's custom ones.
-- `GymTrackShared/SetFeel.swift` — the four effort answers. Stored as the 6–10 number the
-  progression has always read; shown as Easy / Solid / Hard / All out.
-- `Services/ActiveWorkout.swift` — drives an in-progress session. Objects are
-  written as you go, so a force-quit mid-workout loses nothing.
-- `Services/TrainingStats.swift` — pure functions over finished sessions. Volume,
-  streaks, records, and the double-progression suggestion.
-- `Services/BackupService.swift` — JSON export/import. **`version` is 2 and stays
-  2**; every field added since is optional so older backups still decode. Read
-  the comments on `bodyMetrics` / `loadScales` / `exerciseCatalog` before adding
-  one.
-- `docs/AI_COACH.md` — the coach loop: the Mac-side review run in Claude Code,
-  the phone↔Mac file contract, the coaching policy and the reviewer, and how we
-  will know the coach helps. Read it before designing AI coach work.
-- `tools/coach/` and `.claude/skills/coach-review/` — the Mac side of that loop
-  (pull the export, compute stats, run the reviewer, push a proposal), driven by
-  `/coach-review`. Review data lives in `~/Documents/GymTrackCoach` and never
-  enters the repo.
-- `Services/LoadScaleBook.swift` — what each machine is marked in and what one
-  step on it is worth. Every weight the app suggests must be a rung the equipment
-  actually has.
-- `Services/HealthKitService.swift` — workout writing and vitals backfill.
-- `Services/WatchCommandCenter.swift`, `WatchBridge.swift`,
-  `GymTrackShared/WatchLink.swift` — the phone↔wrist link. Note the **headless**
-  path: iOS wakes a terminated app to hand it a watch message, so commands must
-  apply without a view hierarchy.
-- `DesignSystem/` — `Theme`, `SessionPhase`, `gtCard`, `SectionHeader`,
-  `StatTile`, `StepperField`, `GlyphTile`, `ProgressRing`, `FlowRow`. Use these.
-  Do not invent colours or spacing.
-
-## Building
-
-```
-xcodebuild -project GymTrack.xcodeproj -scheme GymTrack -configuration Debug \
-  -destination 'generic/platform=iOS Simulator' -derivedDataPath build/dd build
-xcodebuild -project GymTrack.xcodeproj -scheme GymTrackWidgets -configuration Debug \
-  -destination 'generic/platform=iOS Simulator' -derivedDataPath build/dd build
-xcodebuild -project GymTrack.xcodeproj -scheme GymTrackWatch -configuration Debug \
-  -destination 'generic/platform=watchOS Simulator' -derivedDataPath build/watch build
-```
-
-Build all three before claiming a change is done — the shared folder reaches the
-watch and the widgets, and breaking them is easy to miss.
-
-To put a build on the phone, use `sh scripts/install-phone.sh`, not Xcode's
-Run button. A free Apple ID signs for seven days counted from when the
-provisioning profile was made, and Xcode reuses a cached one, so a fresh
-install can have two days left; the script fetches new profiles first. It also
-records what was installed, and a background job (`--schedule`, installed)
-re-signs and reinstalls that same source every two days. Installing another
-way leaves the job unsure what is on the phone, and it stops and says so.
-The app shows a line on Today three days before its signing runs out; seeing
-it means the refresh has stopped reaching the phone.
-
-If every build suddenly exits 69, Xcode's licence needs re-accepting after a
-major upgrade (`sudo xcodebuild -license accept`). Only the user can run that.
-
-## Testing
-
-The user tests changes on the simulator themselves. Don't drive the simulator to
-verify your own work, not even as a spot check, unless the user asks for it. The
-check that is yours is the big one: all three schemes build (see above). Say
-plainly that nothing was UI-tested, and end with a short list of what the user
-should try.
-
-## Driving the simulator, when asked
-
-When the user does ask for a simulator check, drive the real UI with
-`mcp__Claude_Code_iOS_Simulator__control` rather than asserting from code. Find a
-booted device with `xcrun simctl list devices booted`.
-
-Things that will cost you an hour if you rediscover them:
-
-- **Coordinates are 402x874 pt; screenshots come back ~919x1990 px.** Scale by
-  402/919 and 874/1990.
-- **The data container UUID changes on every install.** Re-resolve
-  `xcrun simctl get_app_container <udid> com.marwanmohamed.gymtrack data` *after*
-  installing. A path cached from before the install silently reads the old
-  container.
-- **A `Toggle` ignores `tap`.** Use a short horizontal `swipe` across the switch.
-- **Writing to the store needs a WAL checkpoint.** Inject with `sqlite3` while
-  the app is terminated, then `PRAGMA wal_checkpoint(TRUNCATE);` before
-  relaunching, or the app comes up on pre-injection state and you will conclude
-  your code failed when it never ran. Store lives at
-  `<container>/Library/Application Support/default.store`. Core Data timestamps
-  are seconds since 2001 (`Date(timeIntervalSinceReferenceDate:)`).
-- **HealthKit cannot be authorised on an iPhone simulator.** The Health sheet
-  accepts taps on its toggles but ignores its own Allow button, and
-  `simctl privacy` has no health service. Anything behind Health read access can
-  only be proven on a real phone — say so plainly rather than implying otherwise.
-- **The watch simulator takes taps too.** Value tiles, the steppers and Log set
-  all drive fine; this note used to say otherwise and cost an afternoon of
-  working around it. Its coordinate space is 208x248 pt against a 416x496 px
-  screenshot, so scale by exactly 0.5.
-- **Bringing the link up takes both sims in the right order.** Boot the phone
-  first and the watch second — `simctl list pairs` has to read
-  `active, connected`, not `disconnected`. Then install the phone `.app` and
-  install `GymTrack.app/Watch/GymTrackWatch.app` *from inside that bundle*: a
-  separately built watch app leaves `WCSession` reporting `appInstalled: NO` and
-  the phone refusing every push with `WCErrorCodeWatchAppNotInstalled`.
-  Reinstalling the phone app does not resurrect the running session, so start a
-  fresh workout rather than concluding the session was lost.
-- **`simctl launch` drops app arguments unless they follow `--`**:
-  `launch --terminate-running-process <udid> <bundle> -- -GTSeedSampleData`.
-  That flag seeds ~9 weeks of history, but only when an active plan already
-  exists and there are no sessions yet.
-- `simctl io screenshot` does not composite the Dynamic Island; its contents come
-  out blank.
+## Cloud runs and CI
+A Claude run in GitHub Actions can't compile or run tests; CI does. `build-and-test` in
+`.github/workflows/pr-check.yml` builds all three targets, runs every suite and gates merging. Write
+code you're confident compiles, and say in the PR what you couldn't check. Any change to the pipeline
+(workflows, `scripts/claude-pipeline/`, repo settings, the ruleset) updates `docs/claude-pipeline.md`
+in the same PR.
 
 ## House style
-
-The prose in this codebase is deliberate. Match it.
-
-- **Comments explain *why*, in plain prose, usually naming the failure they
-  prevent.** They never narrate what the next line does. If a comment would just
-  restate the code, delete it.
-- Doc comments on types and on any property whose purpose isn't obvious.
-- No emoji, anywhere.
-- Prefer a named computed property over a clever inline expression — SwiftUI's
-  type checker gives up on long chained ternaries inside a view builder, and it
-  has already happened here more than once.
-
-## Commits
-
-Subject is a descriptive sentence, not a conventional-commit prefix. Look at
-`git log`: *"Find every machine, and let the library be trimmed to your gym"*,
-*"Say when a set starts, so the rest stops hiding the set inside it"*. The body
-explains why in prose, not a bullet list of what changed.
+- Comments explain *why* in plain prose, usually naming the failure they prevent; they never narrate
+  the next line. Doc comments on types and non-obvious properties. No emoji. In view builders,
+  prefer a named computed property to a long inline expression; the type checker gives up.
+- Commit subjects are descriptive sentences (see `git log`), never `feat:` prefixes; bodies say why.
