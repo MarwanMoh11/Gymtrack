@@ -172,6 +172,10 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   any file in the checkout, so a checker it could edit would let it run any command; the copy
   outside the checkout is out of its reach.
 - `CLAUDE_CODE_EFFORT_LEVEL: xhigh` runs Opus at its extra-high effort, in the review too.
+- `ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-sonnet-5-5` moves the small background jobs Claude Code
+  would give a Haiku model to Sonnet, in `claude.yml` and `claude-retry.yml`. The owner wants no
+  Haiku anywhere. The review in `pr-check.yml` still needs the same line, and like every change
+  to that file it must reach `main` before the PR that carries it.
 - `Bash(gh issue create:*)` and `Bash(gh api repos/<repo>/issues/:*)` let a planning run create
   the parts and link them as sub-issues. `gh api` is limited to this repo's issues.
 - `${{ vars.CLAUDE_AUTO_SPLIT == 'true' && ... }}` in the system prompt is the toggle: with the
