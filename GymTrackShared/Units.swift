@@ -26,7 +26,12 @@ enum WeightUnit: String, CaseIterable, Identifiable, Codable, Sendable {
     /// "60 kg" / "135 lb" from a stored kilogram value.
     func format(_ kg: Double, showUnit: Bool = true, decimals: Int? = nil) -> String {
         let value = fromKg(kg)
-        let places = decimals ?? (value.truncatingRemainder(dividingBy: 1) == 0 ? 0 : 1)
+        // A whole number of pounds is stored in kilograms, so it comes back
+        // with float noise (3 lb reads back as 3.0000000000000004) and an exact
+        // test would label it "3.0 lb". The tolerance sits far below the tenth
+        // shown here, so a real fraction still keeps its decimal.
+        let isWhole = abs(value - value.rounded()) < 1e-9
+        let places = decimals ?? (isWhole ? 0 : 1)
         let number = String(format: "%.\(places)f", value)
         return showUnit ? "\(number) \(short)" : number
     }
