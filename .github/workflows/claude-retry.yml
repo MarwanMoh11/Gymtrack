@@ -1,0 +1,61 @@
+name: Claude retry
+
+# When a Claude run stops on the subscription's usage limit, this waits on a
+# Linux runner until the limit has reset, then re-runs it, and the re-run carries
+# on from the work the stopped run saved. `@claude stop` cancels the wait.
+# The why behind each line is in docs/claude-pipeline.md.
+
+run-name: Waiting to retry ${{ github.event.workflow_run.display_title || inputs.title }}
+
+on:
+  workflow_run:
+    workflows: [Claude Code]
+    types: [completed]
+  # A job may run 6 hours at most and a weekly limit can take days, so a wait
+  # that runs out of time hands itself on through this.
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: The Claude run that stopped on the limit
+        required: true
+      attempt:
+        description: Its attempt number
+        required: true
+      title:
+        description: Its name, "Claude on #N"
+        required: true
+      since:
+        description: When the wait began, in Unix time
+        required: true
+
+# One wait per stopped run.
+concurrency:
+  group: claude-retry-${{ github.event.workflow_run.id || inputs.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  wait:
+    # Every Claude run ends here, most of them skipped or finished; only a failed
+    # one may have stopped on the limit, and wait-for-reset.sh checks for its note.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: read
+      actions: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/claude-pipeline
+      - name: Wait for the usage limit to reset, then re-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.attempt }}
+          TITLE: ${{ github.event.workflow_run.display_title || inputs.title }}
+          SINCE: ${{ inputs.since }}
+        run: sh scripts/claude-pipeline/wait-for-reset.sh

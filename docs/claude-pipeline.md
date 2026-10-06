@@ -89,6 +89,23 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 | Issue | `@claude plan this` | Claude splits the issue into ordered sub-issues and comments with the plan, without writing code |
 | Issue | `@claude just do it` | With `CLAUDE_AUTO_SPLIT` on: implement this issue as one PR rather than splitting it |
 | PR | `@claude fix the conflicts` | Claude merges the latest `main` into the PR, resolves the conflicts, rebuilds, runs the suites and pushes |
+| Issue or PR | `@claude stop` (or `@claude pause`) | Cancels Claude's run there and any wait for the usage limit. The run saves its work as it ends |
+| Issue or PR | `@claude continue` | Starts a run that merges the newest saved work (`claude/rescue-<n>-...`) and carries on from it |
+
+**Nothing a run did is lost.** However a run ends (failed, stopped, timed out, or finished with its
+push refused), `scripts/claude-pipeline/save-work.sh` runs last, from a copy taken before Claude
+started, with git hooks and credential helpers off. It commits what's left, pushes anything not on
+GitHub to `claude/rescue-<n>-<run>-<attempt>` (merging `main` first, so a workflow change on `main`
+can't get it refused), falls back to an `unsaved-work` artifact, and comments on the issue. The next
+run on that issue finds the newest rescue branch and merges it; a finished run deletes the rescue
+branches it carried on from.
+
+**Usage limits.** When a run stops on the subscription's limit, the saver leaves a
+`claude-usage-limit-<attempt>` artifact. [`claude-retry.yml`](../.github/workflows/claude-retry.yml)
+then waits on Linux (`scripts/claude-pipeline/wait-for-reset.sh`): every 20 minutes it asks Opus for
+one word, which the limit refuses at no cost, and re-runs the failed job on the first answer. A wait
+hands itself on every ~5.5 hours, gives up after 8 days or 6 stopped attempts, and stops on any
+other error three times running. The reset time isn't parsed, because the message's wording varies.
 
 **Several issues at once.** One comment starts one run, so comment `@claude implement this` on each
 issue you want built; each run gets its own Mac and its own PR. Two or three at a time works best:

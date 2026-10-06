@@ -4,6 +4,10 @@ name: Claude Code
 # and Claude implements it on a branch and opens a pull request.
 # The why behind each line is in docs/claude-pipeline.md.
 
+# Named after the issue or PR, so `@claude stop` and claude-retry.yml can find a
+# run by the number it works on.
+run-name: Claude on #${{ github.event.issue.number || github.event.pull_request.number }}
+
 on:
   issues:
     types: [opened]
@@ -22,7 +26,9 @@ jobs:
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' &&
         (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
       (github.event_name != 'issues' && github.event.comment.user.type != 'Bot' &&
-        contains(github.event.comment.body, '@claude'))
+        contains(github.event.comment.body, '@claude') &&
+        !startsWith(github.event.comment.body, '@claude stop') &&
+        !startsWith(github.event.comment.body, '@claude pause'))
     # A Mac, so the run can build and test its own change before pushing it
     # (free on a public repo). The limit is a ceiling for hard bugs that need many
     # build rounds; a normal run takes 10 to 30 minutes.
@@ -33,7 +39,8 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
-      actions: read
+      # Write, so a new run can cancel a wait for the usage limit on the same issue.
+      actions: write
     steps:
       # persist-credentials: false would change nothing here: the action removes the
       # checkout's credential and puts its own token in the remote URL. Why that
@@ -43,11 +50,31 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      # The checker is copied out of the repo before Claude starts. Claude may edit
-      # any file in the checkout, and a copy it can edit would let it run anything.
-      - name: Install the checker
-        run: cp scripts/claude-pipeline/check.sh "$RUNNER_TEMP/check.sh"
+      # The checker and the saver are copied out of the repo before Claude starts.
+      # Claude may edit any file in the checkout, and a copy it can edit would let it
+      # run anything.
+      - name: Install the checker and the saver
+        run: cp scripts/claude-pipeline/check.sh scripts/claude-pipeline/save-work.sh "$RUNNER_TEMP/"
+      # Finds the work an earlier run on this issue saved when it stopped
+      # (save-work.sh), for Claude to carry on from, and cancels any wait for the
+      # usage limit on it, which would otherwise start a second run later.
+      - name: Pick up saved work
+        id: saved
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          branch=$(git for-each-ref --sort=-committerdate --count=1 --format='%(refname:lstrip=3)' \
+            "refs/remotes/origin/claude/rescue-$NUMBER-*")
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          gh run list -R "$GITHUB_REPOSITORY" --workflow claude-retry.yml --limit 50 \
+            --json databaseId,displayTitle,status \
+            --jq ".[] | select(.status != \"completed\" and .displayTitle == \"Waiting to retry Claude on #$NUMBER\") | .databaseId" |
+            while read -r id; do gh run cancel "$id" -R "$GITHUB_REPOSITORY"; done || true
       - uses: anthropics/claude-code-action@v1
+        id: claude
+        # Ten minutes short of the job's limit, so saving the work still has time to run.
+        timeout-minutes: 170
         env:
           # Opus 5.5 at its extra-high effort: more thinking per turn, fewer wrong turns.
           CLAUDE_CODE_EFFORT_LEVEL: xhigh
@@ -72,5 +99,66 @@ jobs:
           # only when asked).
           claude_args: |
             --model claude-opus-5-5
-            --allowedTools "Bash(${{ runner.temp }}/check.sh:*),Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue create:*),Bash(gh api repos/${{ github.repository }}/issues/:*),Bash(git fetch origin main),Bash(git merge origin/main:*),Bash(git merge --abort),Bash(git status:*)"
-            --append-system-prompt "Follow CLAUDE.md. Keep changes small and scoped to the issue. Add or update tests for every behavior change. Apart from gh for issues and pull requests and git, you can run one command, the checker: '${{ runner.temp }}/check.sh build' compiles all three targets and prints only the errors; '${{ runner.temp }}/check.sh test GymTrackTests/SomeSuite ...' runs the named suites. Run it exactly as written, with no pipes, redirects or cd. Before every push, the build must pass and the suites you added or changed must pass; leave the full suite to CI. Its full logs are in build/claude-check/. When you finish work on an issue, push your branch and open the pull request yourself: write the body to build/pr-body.md with 'Closes #<issue number>', the suites you ran, and the test checklist that .github/claude-test-checklist.md describes, then run gh pr create --base main --head <your branch> --title '<a descriptive sentence>' --body-file build/pr-body.md. When a comment on a pull request makes you change it, update its checklist as that file says. When asked to fix conflicts or bring a pull request up to date, run git merge origin/main (the checkout has main as of your start), resolve every conflict so both sides' intent survives, run the checker as before any push, then git commit --no-edit and push; never rebase or force-push. If GitHub refuses a push because a GitHub App may not create or update a workflow, main changed a workflow while you worked: run git fetch origin main, merge it in the same way and push once more, and if that is refused too, stop and say so in your comment. If the issue or the comment that started you asks you to plan (for example 'plan this'), follow .github/claude-planning.md instead of implementing. ${{ vars.CLAUDE_AUTO_SPLIT == 'true' && 'Automatic splitting is on: also follow it, instead of implementing, when an issue is too big for one pull request you would be confident in, unless the issue or a comment says just do it.' || 'Otherwise implement, even when the issue is big; if it should have been split, say so in the pull request.' }}"
+            --allowedTools "Bash(${{ runner.temp }}/check.sh:*),Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue create:*),Bash(gh api repos/${{ github.repository }}/issues/:*),Bash(git fetch origin main),Bash(git merge origin/main:*),Bash(git merge origin/claude/rescue-:*),Bash(git merge --abort),Bash(git status:*)"
+            --append-system-prompt "Follow CLAUDE.md. Keep changes small and scoped to the issue. Add or update tests for every behavior change. Apart from gh for issues and pull requests and git, you can run one command, the checker: '${{ runner.temp }}/check.sh build' compiles all three targets and prints only the errors; '${{ runner.temp }}/check.sh test GymTrackTests/SomeSuite ...' runs the named suites. Run it exactly as written, with no pipes, redirects or cd. Before every push, the build must pass and the suites you added or changed must pass; leave the full suite to CI. Its full logs are in build/claude-check/. When you finish work on an issue, push your branch and open the pull request yourself: write the body to build/pr-body.md with 'Closes #<issue number>', the suites you ran, and the test checklist that .github/claude-test-checklist.md describes, then run gh pr create --base main --head <your branch> --title '<a descriptive sentence>' --body-file build/pr-body.md. When a comment on a pull request makes you change it, update its checklist as that file says. When asked to fix conflicts or bring a pull request up to date, run git merge origin/main (the checkout has main as of your start), resolve every conflict so both sides' intent survives, run the checker as before any push, then git commit --no-edit and push; never rebase or force-push. If GitHub refuses a push because a GitHub App may not create or update a workflow, main changed a workflow while you worked: run git fetch origin main, merge it in the same way and push once more, and if that is refused too, stop and say so in your comment. If the issue or the comment that started you asks you to plan (for example 'plan this'), follow .github/claude-planning.md instead of implementing. ${{ vars.CLAUDE_AUTO_SPLIT == 'true' && 'Automatic splitting is on: also follow it, instead of implementing, when an issue is too big for one pull request you would be confident in, unless the issue or a comment says just do it.' || 'Otherwise implement, even when the issue is big; if it should have been split, say so in the pull request.' }}${{ steps.saved.outputs.branch && format(' An earlier run on this stopped before it finished and saved its work on origin/{0}. Unless the comment that started you asks to start over, merge it first (git merge origin/{0}), read your earlier progress comments, and carry on from where it stopped instead of redoing it.', steps.saved.outputs.branch) || '' }}"
+
+      # However the run ended (failed, stopped, timed out, or finished with its push
+      # refused), nothing it did is lost. Then it says on the issue what happened.
+      - name: Save the work
+        id: save
+        if: always() && steps.claude.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTCOME: ${{ steps.claude.outcome }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: sh "$RUNNER_TEMP/save-work.sh"
+      # The note claude-retry.yml looks for: this attempt stopped on the usage limit.
+      - name: Note the usage limit
+        if: always() && steps.save.outputs.limited == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: claude-usage-limit-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/usage-limit
+          retention-days: 10
+      - name: Keep the work GitHub refused
+        if: always() && steps.save.outputs.bundle != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsaved-work-${{ github.run_attempt }}
+          path: ${{ steps.save.outputs.bundle }}
+          retention-days: 30
+
+  # `@claude stop` (or `@claude pause`) cancels Claude's run on this issue or PR and
+  # any wait for the usage limit. The stopped run saves its work as it ends, and
+  # `@claude continue` picks it up. Linux, since this only calls the API.
+  stop:
+    if: |
+      github.event_name == 'issue_comment' && github.event.comment.user.type != 'Bot' &&
+      (startsWith(github.event.comment.body, '@claude stop') ||
+        startsWith(github.event.comment.body, '@claude pause')) &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Stop Claude on this issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          SELF: ${{ github.run_id }}
+        run: |
+          ids=$(gh run list -R "$GITHUB_REPOSITORY" --limit 100 --json databaseId,displayTitle,status \
+            --jq ".[] | select(.status != \"completed\") | select(.displayTitle == \"Claude on #$NUMBER\" or .displayTitle == \"Waiting to retry Claude on #$NUMBER\") | .databaseId" |
+            grep -vx "$SELF" || true)
+          for id in $ids; do gh run cancel "$id" -R "$GITHUB_REPOSITORY"; done
+          if [ -z "$ids" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" -f body="Nothing to stop: Claude isn't running or waiting on #$NUMBER." > /dev/null
+          fi
