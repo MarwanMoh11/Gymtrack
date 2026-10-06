@@ -31,7 +31,8 @@ The backup's `version` stays 2; every field added since is optional.
   is pure functions over finished sessions. Every suggested weight is a rung `LoadScaleBook` allows.
 - The watch link (`WatchCommandCenter`, `WatchBridge`, `WatchLink`) applies commands headlessly:
   iOS can wake a terminated app to deliver one.
-- `LaunchMode`: a unit-test host opens an in-memory store and leaves singletons unconfigured;
+- `LaunchMode`: a unit-test host opens an in-memory store, leaves singletons unconfigured and shows
+  no `RootView` (`GymTrackApp.showsInterface`), so no launch work touches what a test set up;
   `-GTUITesting` gives UI tests a fresh install, an in-memory store, no prompts, no Live Activity.
 - Seams: `TestStore`, `TestClock`, `ActiveWorkout.init(memory:)`, `RestTimer.init(notifier:)`, the
   `at:`/`now:` parameters on `TrainingStats`, and `defaults:` parameters. Prefer passing a value to a
