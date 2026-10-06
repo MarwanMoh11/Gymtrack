@@ -148,7 +148,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   embedded in the app.
 - **Only the unit tests gate merging.** `ui-tests` and `script-tests` run in parallel on their
   own runners and show red on the PR when they fail, but the ruleset doesn't require them. With
-  everything in one job the gate took over 40 minutes: the 73 scripts alone take about 45.
+  everything in one job the gate took over 40 minutes: the 73 scripts alone take 20 to 30.
 - The review job saves the PR's diff to `pr.diff` (and a summary to `pr-stat.txt`) before Claude
   starts, from the merge commit and its base (`fetch-depth: 2`), so no API limit applies and Claude
   reads it in parts with Read and Grep. It must post within 25 of its 40 turns, then refine.
@@ -265,8 +265,8 @@ From the runs on the setup PR (`macos-26`, Xcode 26.6, October 2026):
 | Picking simulators | 7 seconds |
 | Before the split: iPhone build, then unit and UI tests, in one job | 16 minutes |
 | Watch build and unit tests | 2.6 minutes |
-| Script suite (`Tests/`) | about 27 seconds per script, 45 minutes for all 73 |
-| Claude review | 1.5 minutes, 17 turns |
+| `script-tests` | 22.5 minutes for all 73 scripts (about 18 seconds each); one slower runner managed only 34 in 21 minutes |
+| Claude review | 1.5 minutes and 17 turns on a normal diff; 2.6 minutes on this PR's very large one |
 | `check.sh` on a warm build (a MacBook) | 36 seconds to rebuild all three targets; 22 seconds for one suite |
 
 The one-job layout passed the 40-minute limit in the script suite, which is why the gate now holds
