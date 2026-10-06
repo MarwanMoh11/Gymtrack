@@ -1,0 +1,44 @@
+name: Claude Code
+
+# Mention @claude in a new issue, an issue or PR comment, or a PR review comment,
+# and Claude implements it on a branch and opens a pull request.
+# The why behind each line is in docs/claude-pipeline.md.
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  claude:
+    # Runs only when @claude appears. The action also rejects anyone without write access,
+    # so strangers on this public repo can't trigger it. Keep that check; never add allowed_non_write_users.
+    if: |
+      (github.event_name == 'issues' &&
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name != 'issues' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Lets Claude read CI results, so "@claude fix the build" can see what failed.
+          additional_permissions: |
+            actions: read
+          claude_args: |
+            --model claude-opus-5-5
+            --allowedTools "mcp__github__create_pull_request"
+            --append-system-prompt "Follow CLAUDE.md. Keep changes small and scoped to the issue. Add or update tests for every behavior change. You cannot compile or run tests here; CI does. When you finish work on an issue, open a pull request from your branch into main yourself, with 'Closes #<issue number>' and a short 'How to test on device' section in the body."
