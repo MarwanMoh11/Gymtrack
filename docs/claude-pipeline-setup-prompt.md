@@ -151,8 +151,10 @@ into `docs/DEVELOPMENT.md`. Include:
 
 ## Phase 5: Workflows
 
-Copy the template's `claude.yml` and `pr-check.yml`, and its issue forms in `.github/ISSUE_TEMPLATE/`
-(Bug report and Feature request, whose last question adds `@claude` only on "Yes"). Keep the
+Copy the template's `claude.yml` and `pr-check.yml`, its issue forms in `.github/ISSUE_TEMPLATE/`
+(Bug report and Feature request, whose last question adds `@claude` only on "Yes", or asks for a
+plan first) and `.github/claude-planning.md` (how a run splits a big issue into sub-issues, on
+request or, with the repository variable `CLAUDE_AUTO_SPLIT=true`, on its own). Keep the
 workflows' structure and action inputs. Then:
 - Check the current major versions of `actions/checkout`, `actions/upload-artifact` and
   `anthropics/claude-code-action` (`gh api repos/<owner>/<repo>/releases/latest`), and check the

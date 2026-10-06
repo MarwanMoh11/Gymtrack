@@ -36,9 +36,13 @@ body:
     id: claude
     attributes:
       label: Hand it to Claude now?
-      description: The second answer starts a Claude run that implements it and opens a pull request.
+      description: >-
+        The second answer starts a Claude run that implements it and opens a pull request. The
+        third has Claude split it into sub-issues first, one pull request each, which you start
+        one at a time.
       options:
         - Not yet, just track it
         - "Yes: @claude implement this"
+        - "Yes, but it's big: @claude plan this first and split it into sub-issues"
     validations:
       required: true
