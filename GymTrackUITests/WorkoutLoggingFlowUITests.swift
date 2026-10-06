@@ -56,7 +56,7 @@ final class WorkoutLoggingFlowUITests: GymTrackUITestCase {
     }
 
     /// The unit picked on the second onboarding screen has to reach the weight
-    /// field, or a lifter who chose pounds logs a number he reads as kilos.
+    /// field, or a lifter who chose pounds logs a number they read as kilos.
     func testPoundsChosenInOnboardingAreShownInTheLogger() throws {
         launchFirstRun()
 

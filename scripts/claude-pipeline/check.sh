@@ -3,7 +3,7 @@
 #
 #   check.sh build                         all three targets and all three test bundles
 #   check.sh test GymTrackTests/UnitsTests  the named suites (rebuilding first if needed)
-#   check.sh test                          every suite, the same set CI runs
+#   check.sh test                          every suite, UI tests included (about 15 minutes)
 #
 # This is the one command a Claude run in GitHub Actions may execute (see
 # .github/workflows/claude.yml). Without it the run writes Swift it has never

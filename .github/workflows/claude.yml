@@ -32,6 +32,9 @@ jobs:
       id-token: write
       actions: read
     steps:
+      # persist-credentials: false would change nothing here: the action removes the
+      # checkout's credential and puts its own token in the remote URL. Why that
+      # risk is accepted is in docs/claude-pipeline.md (Security).
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1

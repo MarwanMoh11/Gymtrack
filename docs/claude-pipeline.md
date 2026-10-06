@@ -218,7 +218,8 @@ The merged branch is deleted, and `Closes #N` closes the issue.
   Still, don't trigger `@claude` on a thread where strangers have posted instructions.
 - **What the checker can't hide.** An empty environment keeps the Claude token out of a build,
   but the checkout's git credentials sit in `.git/config`, where a build phase Claude added could
-  read them. Those tokens can do no more than the run already can (push a branch, open a PR, never
+  read them. `persist-credentials: false` wouldn't help: the action deletes the checkout's
+  credential and writes its own token into the remote URL. Those tokens can do no more than the run already can (push a branch, open a PR, never
   touch `main`) and expire with the job, so the risk is accepted rather than sandboxed away.
 
 ## 5. Costs and limits

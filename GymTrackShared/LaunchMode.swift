@@ -23,10 +23,15 @@ enum LaunchMode {
     #endif
 
     /// XCTest sets the configuration path in the host's environment. Only that
-    /// is trusted: a looser check that misfired on a real launch would open an
-    /// in-memory store, and every set logged after it would vanish on quit.
+    /// is trusted, and only in debug builds: a check that misfired on a real
+    /// launch would open an in-memory store, and every set logged after it
+    /// would vanish on quit.
+    #if DEBUG
     static let isUnitTestHost = !isUITesting
         && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    #else
+    static let isUnitTestHost = false
+    #endif
 
     static var isTesting: Bool { isUITesting || isUnitTestHost }
 }
