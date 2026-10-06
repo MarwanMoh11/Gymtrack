@@ -6,6 +6,7 @@ struct WatchControlsView: View {
     let session: WatchSessionSnapshot
     var connector: WatchConnector
     var rest: WatchRestTimer
+    var focus: WatchRestFocus
     let onEnd: () -> Void
     let onDiscard: () -> Void
 
@@ -54,6 +55,7 @@ struct WatchControlsView: View {
                 syncFooter
             }
             .padding(.horizontal, 2)
+            .reportsScrolling(to: focus)
         }
         .navigationTitle("Controls")
         .watchScreenTint(phase)

@@ -3,9 +3,10 @@ import Testing
 @testable import GymTrackWatch
 
 /// The decisions the wrist makes on its own, held to their boundaries: which
-/// taps count, when a rest buzzes and what its countdown shows, what the
-/// recorder does with a session that went quiet or ended somewhere else, and
-/// how a command travels to the phone.
+/// taps count, when a rest buzzes and what its countdown shows, when that
+/// countdown is brought back in front of an idle wrist, what the recorder does
+/// with a session that went quiet or ended somewhere else, and how a command
+/// travels to the phone.
 ///
 /// Complements the script-style `Tests/WatchLoggerRulesTests.swift` and
 /// `Tests/WatchRecordingRulesTests.swift`, which run the same rules without a
@@ -212,6 +213,115 @@ struct WatchRulesTests {
         timer.startLocal(seconds: 0, now: now)
         timer.startLocal(seconds: -30, now: now)
         #expect(!timer.isRunning)
+    }
+
+    // MARK: - Bringing the countdown back
+
+    /// Eight seconds untouched, counted from the last touch: the edge itself
+    /// brings the countdown back and a thousandth short of it does not. Once
+    /// back, nothing is owed until the watch is touched again, so a watch left
+    /// on the countdown is not moved a second time.
+    @Test(arguments: zip(
+        [0, 7.999, 8, 120] as [Double],
+        [false, false, true, true]
+    ))
+    func theCountdownComesBackEightSecondsAfterTheLastTouch(idle: Double, comesBack: Bool) {
+        let touched = Date(timeIntervalSinceReferenceDate: 1_000)
+        let now = touched.addingTimeInterval(idle)
+        let focus = WatchRestFocus()
+        focus.touch(at: touched)
+        #expect(WatchRestFocus.idleDelay == 8)
+        #expect(focus.returnDue(resting: true, now: touched) == touched.addingTimeInterval(8))
+
+        #expect(focus.bringBackIfDue(resting: true, now: now) == comesBack)
+        #expect(focus.returns == (comesBack ? 1 : 0))
+        if comesBack {
+            #expect(focus.touchedAt == nil && focus.lastTouch == nil)
+            #expect(focus.returnDue(resting: true, now: now) == nil)
+            #expect(!focus.bringBackIfDue(resting: true, now: now.addingTimeInterval(600)))
+            #expect(focus.returns == 1)
+        } else {
+            #expect(focus.lastTouch == touched, "a return that is not due yet leaves the touch standing")
+        }
+    }
+
+    @Test func nothingIsBroughtBackWithoutARestOrWithoutATouch() {
+        let t = Date(timeIntervalSinceReferenceDate: 1_000)
+        let focus = WatchRestFocus()
+        #expect(focus.returnDue(resting: true, now: t) == nil, "never touched: the countdown is where it was put")
+        #expect(!focus.bringBackIfDue(resting: true, now: t.addingTimeInterval(600)))
+
+        // No rest, no countdown to bring back, however long the watch sits.
+        focus.touch(at: t)
+        #expect(focus.returnDue(resting: false, now: t.addingTimeInterval(600)) == nil)
+        #expect(!focus.bringBackIfDue(resting: false, now: t.addingTimeInterval(600)))
+        #expect(focus.returns == 0)
+        #expect(focus.lastTouch == t, "a refused return clears nothing")
+    }
+
+    /// A scroll reports every frame. The observed stamp, which restarts the
+    /// wait, moves at most once a second; the delay still counts from the last
+    /// frame, not from the last time the stamp moved.
+    @Test func aScrollRestartsTheWaitOnceASecondButTheDelayCountsFromItsLastFrame() {
+        let t = Date(timeIntervalSinceReferenceDate: 1_000)
+        let focus = WatchRestFocus()
+        var stamps: [Date] = []
+        for frame in 0...25 {
+            focus.touch(at: t.addingTimeInterval(Double(frame) / 10))
+            if let stamp = focus.touchedAt, stamp != stamps.last { stamps.append(stamp) }
+        }
+        #expect(stamps == [t, t.addingTimeInterval(1), t.addingTimeInterval(2)])
+        #expect(focus.lastTouch == t.addingTimeInterval(2.5))
+        #expect(focus.returnDue(resting: true, now: t.addingTimeInterval(2.5)) == t.addingTimeInterval(10.5))
+        #expect(!focus.bringBackIfDue(resting: true, now: t.addingTimeInterval(10)),
+                "eight seconds after the stamp is not eight seconds after the last frame")
+        #expect(focus.bringBackIfDue(resting: true, now: t.addingTimeInterval(10.5)))
+    }
+
+    /// The effort question sits below Log set, and bringing the countdown back
+    /// would carry it off the screen. Left to fold away it is not a touch, so
+    /// the countdown comes back as it goes; answered, it is one, and the
+    /// countdown waits the full delay after the answer.
+    @Test func theEffortQuestionHoldsTheCountdownUntilItIsAnsweredOrFolds() {
+        let t = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        let ignored = WatchRestFocus()
+        ignored.touch(at: t)
+        ignored.questionWaiting = true
+        #expect(ignored.returnDue(resting: true, now: t.addingTimeInterval(9)) == nil)
+        #expect(!ignored.bringBackIfDue(resting: true, now: t.addingTimeInterval(9)))
+        ignored.questionWaiting = false
+        #expect(ignored.bringBackIfDue(resting: true, now: t.addingTimeInterval(10)),
+                "folded ten seconds in, already past due: back at once")
+
+        let answered = WatchRestFocus()
+        answered.touch(at: t)
+        answered.questionWaiting = true
+        answered.touch(at: t.addingTimeInterval(3))
+        answered.questionWaiting = false
+        #expect(answered.returnDue(resting: true, now: t.addingTimeInterval(3)) == t.addingTimeInterval(11))
+        #expect(!answered.bringBackIfDue(resting: true, now: t.addingTimeInterval(10)))
+        #expect(answered.bringBackIfDue(resting: true, now: t.addingTimeInterval(11)))
+    }
+
+    /// A clock that stepped backwards since the last touch must not leave the
+    /// countdown out of sight until the clock catches up, and a touch on the
+    /// stepped-back clock still restarts the wait.
+    @Test func aClockThatWentBackwardsNeverPutsTheReturnMoreThanTheDelayAway() {
+        let t = Date(timeIntervalSinceReferenceDate: 10_000)
+        let earlier = t.addingTimeInterval(-3_600)
+        let focus = WatchRestFocus()
+        focus.touch(at: t)
+        #expect(focus.returnDue(resting: true, now: earlier) == earlier.addingTimeInterval(8))
+        #expect(!focus.bringBackIfDue(resting: true, now: earlier.addingTimeInterval(7)))
+        #expect(focus.returnDue(resting: true, now: earlier.addingTimeInterval(7)) == earlier.addingTimeInterval(8),
+                "the due moment holds still as the stepped-back clock runs on")
+        #expect(focus.bringBackIfDue(resting: true, now: earlier.addingTimeInterval(8)))
+
+        focus.touch(at: t)
+        focus.touch(at: earlier.addingTimeInterval(0.5))
+        #expect(focus.touchedAt == earlier.addingTimeInterval(0.5))
+        #expect(focus.lastTouch == earlier.addingTimeInterval(0.5))
     }
 
     // MARK: - Recording

@@ -14,6 +14,7 @@ struct WatchRootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var rest = WatchRestTimer()
+    @State private var focus = WatchRestFocus()
     @State private var page: Page = .log
     @State private var isEnding = false
 
@@ -48,21 +49,28 @@ struct WatchRootView: View {
                 TabView(selection: $page) {
                     NavigationStack {
                         WatchControlsView(session: session, connector: connector, rest: rest,
-                                          onEnd: end, onDiscard: discard)
+                                          focus: focus, onEnd: end, onDiscard: discard)
                     }
                     .tag(Page.controls)
 
                     NavigationStack {
-                        WatchLoggerView(session: session, connector: connector, rest: rest)
+                        WatchLoggerView(session: session, connector: connector, rest: rest, focus: focus)
                     }
                     .tag(Page.log)
 
                     NavigationStack {
-                        WatchMetricsView(session: session, recorder: recorder)
+                        WatchMetricsView(session: session, recorder: recorder, focus: focus)
                     }
                     .tag(Page.metrics)
                 }
                 .tabViewStyle(.page)
+                // A watch left alone mid-rest comes back to the countdown: the
+                // logger scrolls to it, and this swipes to the logger.
+                .background {
+                    WatchRestReturnClock(focus: focus, rest: rest) {
+                        withAnimation(.easeOut(duration: 0.25)) { page = .log }
+                    }
+                }
             } else {
                 NavigationStack {
                     WatchIdleView(connector: connector)
@@ -86,6 +94,14 @@ struct WatchRootView: View {
             // Land on the logger for a new session rather than wherever the
             // last one was left.
             if id != nil { page = .log }
+        }
+        // A swipe between pages is the lifter using the watch, and a rest that
+        // starts or is extended is something new to look at. Each one gives the
+        // lifter the full wait before the countdown is brought back; a rest the
+        // phone starts while the wrist shows another page comes back after it.
+        .onChange(of: page) { _, _ in focus.touch(at: .now) }
+        .onChange(of: rest.endsAt) { _, endsAt in
+            if endsAt != nil { focus.touch(at: .now) }
         }
         // A raised wrist is the moment the watch is most likely to be holding
         // something out of date — the app can sit on one screen for a day, and
