@@ -14,6 +14,14 @@ enum TestStore {
     }
 
     static func context() throws -> ModelContext {
-        ModelContext(try container())
+        let container = try container()
+        retained.append(container)
+        return ModelContext(container)
     }
+
+    /// A context does not keep its container alive, and SwiftData traps on
+    /// some operations (a rollback after a restore's wipe, for one) once the
+    /// container has gone. In-memory stores are small, so each test's is
+    /// simply kept until the process ends.
+    private static var retained: [ModelContainer] = []
 }
