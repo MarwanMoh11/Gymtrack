@@ -154,8 +154,11 @@ into `docs/DEVELOPMENT.md`. Include:
 Copy the template's `claude.yml` and `pr-check.yml`, its issue forms in `.github/ISSUE_TEMPLATE/`
 (Bug report and Feature request, whose last question adds `@claude` only on "Yes", or asks for a
 plan first) and `.github/claude-planning.md` (how a run splits a big issue into sub-issues, on
-request or, with the repository variable `CLAUDE_AUTO_SPLIT=true`, on its own). Keep the
-workflows' structure and action inputs. Then:
+request or, with the repository variable `CLAUDE_AUTO_SPLIT=true`, on its own), and
+`.github/claude-test-checklist.md` (the **Test before you merge** section every PR ends with;
+rewrite its "About the owner" part for me and this app). Keep the workflows' structure and action
+inputs; on a macOS runner, Claude opens its PR with `gh`, since the action's create-PR tool needs
+Docker. Then:
 - Check the current major versions of `actions/checkout`, `actions/upload-artifact` and
   `anthropics/claude-code-action` (`gh api repos/<owner>/<repo>/releases/latest`), and check the
   Opus model ID.

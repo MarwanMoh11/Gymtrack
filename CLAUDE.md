@@ -48,8 +48,10 @@ The backup's `version` stays 2; every field added since is optional.
 
 ## Cloud runs and CI
 `scripts/claude-pipeline/check.sh build` compiles all three targets and `check.sh test <Target/Suite>`
-runs suites; a cloud run may run only that, and runs both on its change before every push.
-`build-and-test` in `.github/workflows/pr-check.yml` runs every suite and gates merging. Any change
+runs suites. Apart from `gh` for issues and pull requests, a cloud run may run only that, and runs
+both on its change before every push.
+`build-and-test` in `.github/workflows/pr-check.yml` runs every suite and gates merging. Every pull
+request ends with the test checklist `.github/claude-test-checklist.md` describes. Any change
 to the pipeline (workflows, `scripts/claude-pipeline/`, repo settings, the ruleset) updates
 `docs/claude-pipeline.md` in the same PR.
 
