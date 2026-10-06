@@ -7,10 +7,10 @@ import Testing
 /// set leaves behind, what a delete takes with it, and the derived values the
 /// rest of the app reads off a session.
 ///
-/// Complements the swiftc-built `Tests/SessionRulesTests.swift`,
-/// `Tests/PlanRotationTests.swift` and the unlog and session-model checks beside
-/// them, which cannot open the real schema. Everything here runs against an
-/// in-memory store built from `AppSchema.models`.
+/// Complements the swiftc-built `Tests/SessionRulesTests.swift` and the unlog
+/// and session-model checks beside it, which cannot open the real schema, and
+/// `PlanEditingTests`, which covers the rotation and editing a routine.
+/// Everything here runs against an in-memory store built from `AppSchema.models`.
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct EntityPersistenceTests {
@@ -441,6 +441,38 @@ struct EntityPersistenceTests {
         #expect(active.isActive && !spare.isActive)
         #expect(active.days.isEmpty && active.trainingDayCount == 0)
         #expect(try context.fetchCount(FetchDescriptor<Plan>()) == 2)
+    }
+
+    // MARK: - Machine corrections
+
+    /// A machine's correction to a stack marked in pounds must come back
+    /// exactly after a restart, and clearing it must take the stored row as
+    /// well as the book's copy, or the correction returns at the next launch.
+    ///
+    /// The book has no way back to unconfigured. It is left on this test's
+    /// store, emptied, which reads the same: nothing corrected.
+    @Test func aPoundCorrectionIsStoredExactlyReadBackAfterARestartAndClearedFromTheStore() throws {
+        let context = try TestStore.context()
+        let book = LoadScaleBook.shared
+        book.configure(container: context.container)
+        book.clearAll()
+        defer { book.clearAll() }
+
+        let fives = LoadScale(unit: .lb, increment: 5)
+        book.set(fives, for: "lb-machine-test")
+        #expect(book.scale(for: "lb-machine-test") == fives)
+
+        let rows = try context.fetch(FetchDescriptor<ExerciseLoadPreference>())
+        #expect(rows.count == 1)
+        #expect(rows.first?.scale == fives)
+        // What a restart does: read the store again.
+        book.configure(container: context.container)
+        #expect(book.scale(for: "lb-machine-test") == fives)
+        #expect(book.isCustomised("lb-machine-test"))
+
+        book.clear("lb-machine-test")
+        #expect(!book.isCustomised("lb-machine-test"))
+        #expect(try context.fetchCount(FetchDescriptor<ExerciseLoadPreference>()) == 0)
     }
 }
 

@@ -8,11 +8,34 @@ import SwiftData
 /// vanishes, repeats or means something else strands somebody's history.
 ///
 /// Reads the real `exercises.json` from the app bundle, which is what a hosted
-/// run loads. The native counterpart of the legacy `Tests/LibraryDataTests.swift`.
+/// run loads. Also covers searching it, the lifter's own exercises joining it,
+/// and the launch load a headless start from the watch depends on.
+///
+/// The catalog is process-wide. Every test that gives it custom or hidden
+/// exercises does so in its own synchronous body through `withCleanLibrary`,
+/// which empties both again afterwards, so no other suite's search or lookup
+/// sees what one test registered.
 @MainActor @Suite(.serialized)
 struct CatalogIntegrityTests {
 
     private var catalog: ExerciseCatalog { ExerciseCatalog.shared }
+
+    /// Runs `body` on a catalog with nothing custom and nothing hidden, and
+    /// leaves it that way. `loadLibrary` hides whatever the store says, and a
+    /// search that assumed nothing was hidden would fail on what one left.
+    private func withCleanLibrary(_ body: () throws -> Void) rethrows {
+        catalog.setCustom([])
+        catalog.setHidden([])
+        defer {
+            catalog.setCustom([])
+            catalog.setHidden([])
+        }
+        try body()
+    }
+
+    private func names(_ query: String) -> [String] {
+        catalog.search(query).map(\.name)
+    }
 
     /// What the bundled file says, before the app merges and filters it.
     private func rawRows() throws -> [[String: Any]] {
@@ -171,5 +194,195 @@ struct CatalogIntegrityTests {
         #expect(first.isActive)
         #expect(!second.isActive)
         #expect(try context.fetch(FetchDescriptor<Plan>()).filter(\.isActive).count == 1)
+    }
+
+    // MARK: - Search
+
+    /// An alias may only widen a search. Each prefix typed on the way to a
+    /// word the aliases rewrite once found nothing, and the library offered to
+    /// add an exercise it already had.
+    @Test(arguments: ["calves", "flies", "quadriceps", "abdominals"])
+    func everyPrefixOfAWordAnAliasRewritesStillFindsSomething(word: String) {
+        withCleanLibrary {
+            for length in 2...word.count {
+                let prefix = String(word.prefix(length))
+                #expect(!names(prefix).isEmpty, "'\(prefix)' finds nothing")
+            }
+        }
+    }
+
+    @Test func aShortQueryKeepsItsLiteralMatchesBesideWhatTheAliasAdds() {
+        withCleanLibrary {
+            let ham = names("ham")
+            #expect(ham.contains { $0.localizedCaseInsensitiveContains("Hammer Curl") })
+            let hamstrings = Set(names("hamstrings"))
+            #expect(ham.contains { hamstrings.contains($0) }, "'ham' no longer reaches the hamstring entries")
+            #expect(names("hamstring").count >= 10, "the alias no longer widens to hamstring work")
+            #expect(names("ext rot").contains { $0.localizedCaseInsensitiveContains("External Rotation") })
+        }
+    }
+
+    @Test func shorthandStillFindsAndAQueryNothingAnswersStaysEmpty() {
+        withCleanLibrary {
+            #expect(!names("db press").isEmpty)
+            #expect(!names("calv").isEmpty)
+            #expect(catalog.hasMatch(for: "calv"))
+            // Empty is what lets the library offer to add it.
+            #expect(names("zzqqxx").isEmpty)
+            #expect(!catalog.hasMatch(for: "zzqqxx"))
+        }
+    }
+
+    // MARK: - The lifter's own exercises
+
+    /// How each row of a session started from `day` would be measured.
+    private func trackings(_ day: PlanDay, _ plan: Plan, _ context: ModelContext) -> [TrackingMode] {
+        SessionFactory.build(day: day, plan: plan, context: context, history: [])
+            .exerciseGroups.flatMap(\.sets).map(\.tracking)
+    }
+
+    @Test func anEditedCustomExerciseReachesTheCatalogAndSearchAndADeletedOneLeaves() throws {
+        try withCleanLibrary {
+            let context = try TestStore.context()
+            let record = CustomExerciseRecord(name: "Sledge Drag", muscles: [.quads], equipment: ["Sled"],
+                                              tracking: .weightReps)
+            context.insert(record)
+            try context.save()
+            catalog.setCustom([record.asCatalogExercise])
+            #expect(catalog.search("sledge").contains { $0.id == record.id })
+
+            record.apply(name: "Prowler Push", muscles: [.glutes, .hamstrings], equipment: ["Prowler"],
+                         tracking: .bodyweightReps)
+            try context.save()
+            catalog.setCustom([record.asCatalogExercise])
+
+            let renamed = try #require(catalog.exercise(id: record.id))
+            #expect(renamed.name == "Prowler Push")
+            #expect(renamed.equipment == ["Prowler"])
+            #expect(renamed.tracking == .bodyweightReps)
+            #expect(renamed.isCustom)
+            #expect(renamed.muscleGroups == [Muscle.glutes.name, Muscle.hamstrings.name],
+                    "edited muscles must replace the old ones")
+            #expect(catalog.search("prowler").contains { $0.id == record.id })
+            #expect(!catalog.search("sledge").contains { $0.id == record.id }, "the old name still matches")
+            #expect(catalog.search("", muscle: .glutes).contains { $0.id == record.id })
+            #expect(!catalog.search("", muscle: .quads).contains { $0.id == record.id })
+            #expect(catalog.search("", equipment: "Prowler").contains { $0.id == record.id })
+            // Following the rename, or the library offers to add a duplicate.
+            #expect(catalog.hasMatch(for: "prowler"))
+            #expect(!catalog.hasMatch(for: "sledge"))
+
+            catalog.setCustom([])
+            #expect(catalog.exercise(id: record.id) == nil)
+        }
+    }
+
+    /// A workout started from the watch while the phone app is terminated is
+    /// built on a background launch, where no view runs. Before
+    /// `GymTrackApp.configureServices` reads the store, the catalog holds no
+    /// custom exercise, which is what this starts from.
+    @Test func aHeadlessStartBuildsCustomSlotsInTheirOwnTrackingOnceTheLibraryIsLoaded() throws {
+        try withCleanLibrary {
+            let container = try TestStore.context().container
+            let context = ModelContext(container)
+            let hold = CustomExerciseRecord(name: "Farmer Hold", muscles: [], equipment: [], tracking: .duration)
+            let press = CustomExerciseRecord(name: "Gym Press", muscles: [], equipment: ["Machine"],
+                                             tracking: .weightReps)
+            context.insert(hold)
+            context.insert(press)
+            context.insert(HiddenExerciseRecord(catalogID: "hidden-test"))
+            let plan = Plan(name: "Custom")
+            let day = PlanDay(name: "Monday", order: 0)
+            day.plan = plan
+            context.insert(plan)
+            context.insert(day)
+            // Added before slots kept a snapshot: only the catalog can say
+            // this one is timed.
+            let slot = PlanItem(catalogID: hold.id, name: hold.name, order: 0, targetSets: 3,
+                                targetRepsLow: 0, targetRepsHigh: 0, targetSeconds: 40)
+            slot.day = day
+            context.insert(slot)
+            try context.save()
+
+            // The failure, reproduced: nothing has read the store yet.
+            #expect(trackings(day, plan, context) == [.weightReps, .weightReps, .weightReps])
+            #expect(LoadScaleBook.shared.scale(for: press.id) == LoadScaleBook.derived(for: nil))
+
+            // What configureServices runs, from a fresh context as it does there.
+            catalog.loadLibrary(from: ModelContext(container))
+            #expect(trackings(day, plan, context) == [.duration, .duration, .duration])
+            #expect(catalog.isHidden("hidden-test"), "the launch load must bring the hidden list, as RootView does")
+            // A custom machine steps on its own ladder from the wrist.
+            #expect(LoadScaleBook.shared.scale(for: press.id) == LoadScaleBook.derived(for: press.asCatalogExercise))
+            #expect(LoadScaleBook.derived(for: press.asCatalogExercise) != LoadScaleBook.derived(for: nil))
+        }
+    }
+
+    /// The snapshot a new custom slot keeps, so a catalog miss can never fall
+    /// back to weight × reps.
+    @Test func aSnapshottedCustomSlotStaysTimedWhenTheCatalogMisses() throws {
+        try withCleanLibrary {
+            let context = try TestStore.context()
+            let custom = CustomExerciseRecord(name: "Farmer Hold", muscles: [], equipment: [],
+                                              tracking: .duration).asCatalogExercise
+            #expect(custom.slotTrackingSnapshot == TrackingMode.duration.rawValue)
+            // A bundled exercise always resolves and must not gain a plan key
+            // in the export.
+            let bundled = try #require(catalog.builtIn.first { $0.tracking == .duration })
+            #expect(bundled.slotTrackingSnapshot == nil)
+
+            let plan = Plan(name: "Snapshotted")
+            let day = PlanDay(name: "Tuesday", order: 0)
+            day.plan = plan
+            context.insert(plan)
+            context.insert(day)
+            let slot = PlanItem(catalogID: custom.id, name: custom.name, order: 0, targetSets: 2,
+                                targetRepsLow: 0, targetRepsHigh: 0, targetSeconds: 40)
+            slot.trackingRaw = custom.slotTrackingSnapshot
+            slot.day = day
+            context.insert(slot)
+            try context.save()
+
+            let rows = SessionFactory.build(day: day, plan: plan, context: context, history: [])
+                .exerciseGroups.flatMap(\.sets)
+            #expect(rows.map(\.tracking) == [.duration, .duration])
+        }
+    }
+
+    @Test func aTrackingEditCarriesOntoSnapshotsAndARangeTheLifterSetSurvivesIt() throws {
+        let context = try TestStore.context()
+        let custom = CustomExerciseRecord(name: "Farmer Hold", muscles: [], equipment: [],
+                                          tracking: .duration).asCatalogExercise
+        let snapshotted = PlanItem(catalogID: custom.id, name: custom.name, order: 0, targetSets: 2,
+                                   targetRepsLow: 0, targetRepsHigh: 0, targetSeconds: 40)
+        snapshotted.trackingRaw = custom.slotTrackingSnapshot
+        let unsnapshotted = PlanItem(catalogID: custom.id, name: custom.name, order: 0)
+        for (name, slot) in [("Tuesday", snapshotted), ("Wednesday", unsnapshotted)] {
+            let plan = Plan(name: name)
+            let day = PlanDay(name: name, order: 0)
+            day.plan = plan
+            slot.day = day
+            context.insert(plan)
+            context.insert(day)
+            context.insert(slot)
+        }
+        try context.save()
+
+        try context.retrackPlanSlots(of: custom.id, to: .bodyweightReps)
+        #expect(snapshotted.trackingRaw == TrackingMode.bodyweightReps.rawValue)
+        // A slot with no snapshot keeps following the catalog and gains no key.
+        #expect(unsnapshotted.trackingRaw == nil)
+        // Added while timed, it gains the range a new reps slot starts on.
+        #expect(snapshotted.targetRepsLow == 8 && snapshotted.targetRepsHigh == 12)
+
+        // A range the lifter chose is theirs, whichever way the tracking moves.
+        unsnapshotted.targetRepsLow = 5
+        unsnapshotted.targetRepsHigh = 5
+        try context.retrackPlanSlots(of: custom.id, to: .weightReps)
+        #expect(unsnapshotted.targetRepsLow == 5 && unsnapshotted.targetRepsHigh == 5)
+        // Moving to a timed mode leaves the range alone, so a move back finds it intact.
+        try context.retrackPlanSlots(of: custom.id, to: .duration)
+        #expect(snapshotted.targetRepsLow == 8)
+        #expect(snapshotted.trackingRaw == TrackingMode.duration.rawValue)
     }
 }

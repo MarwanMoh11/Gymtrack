@@ -661,6 +661,157 @@ struct ActiveWorkoutLoggingTests {
         }
     }
 
+    /// Three sets with a drop after set 2 is four rows and three efforts. The
+    /// summary and the dock said three while the header, tick bar and cards
+    /// counted four.
+    @Test func theLoggerCountsEffortsTheWayTheSummaryDoesAtEveryPoint() throws {
+        try WorkoutBench.run { testBench in
+            let session = testBench.session()
+            let a = testBench.addRows("A-count", to: session, count: 4)
+            a[2].continuesPreviousSet = true
+            let b = testBench.addRows("B-count", to: session, count: 1, order: 1)
+            let workout = testBench.open(session)
+            #expect(workout.totalCount == 4)
+            #expect(session.sets.count == 5)
+            #expect(workout.completedCount == 0)
+
+            workout.complete(a[0], restSeconds: nil, at: at(60))
+            workout.complete(a[1], restSeconds: nil, at: at(240))
+            workout.complete(a[2], restSeconds: nil, at: at(300))
+            #expect(session.sets.filter(\.isCompleted).count == 3)
+            // The drop belongs to set 2 and adds nothing of its own.
+            #expect(workout.completedCount == 2)
+            // The card and the queue read 2/3, which its row badges already show.
+            let group = try testBench.group(workout, "A-count")
+            #expect(workout.loggedEffortCount(in: group) == 2)
+            #expect(group.effortCount == 3)
+            #expect(workout.completedCount == session.effortSets.count)
+
+            workout.complete(a[3], restSeconds: nil, at: at(500))
+            workout.complete(b[0], restSeconds: nil, at: at(700))
+            #expect(workout.completedCount == 4)
+            #expect(workout.totalCount == 4)
+            #expect(workout.completedCount == session.effortSets.count)
+        }
+    }
+
+    private func exercise(_ id: String) -> CatalogExercise {
+        CatalogExercise(id: id, name: id, category: "strength", muscleGroups: [], equipment: [],
+                        details: nil, difficulty: nil, tracking: .weightReps)
+    }
+
+    /// A plan with one slot, opened as a session the logger holds.
+    private func plannedRemovalSession(_ testBench: WorkoutBench) throws -> ActiveWorkout {
+        let (plan, day) = testBench.planDay(named: "Day", planName: "Removal", slots: [
+            .init(catalogID: "planned-removal", sets: 2, low: 8, high: 8, kg: 40),
+        ])
+        let session = SessionFactory.build(day: day, plan: plan, context: testBench.context, history: [])
+        try testBench.context.save()
+        return testBench.open(session)
+    }
+
+    /// A card is a copy taken when it was drawn; a set logged since, from the
+    /// phone or the wrist, must still stop the removal.
+    @Test func aCardDrawnBeforeALogStillCannotRemoveTheExerciseAfterIt() throws {
+        try WorkoutBench.run { testBench in
+            let workout = try plannedRemovalSession(testBench)
+            workout.addExercise(exercise("mistake-removal"), sets: 3)
+            let staleCopy = try testBench.group(workout, "mistake-removal")
+
+            workout.complete(staleCopy.sets[1], restSeconds: nil, at: at(60))
+            #expect(!workout.canRemove(staleCopy))
+            workout.uncomplete(staleCopy.sets[1])
+            let redrawn = try testBench.group(workout, "mistake-removal")
+            #expect(workout.canRemove(redrawn))
+        }
+    }
+
+    @Test func aPlannedLiftAddedAgainJoinsItsOwnCardWhichStaysPlanned() throws {
+        try WorkoutBench.run { testBench in
+            let workout = try plannedRemovalSession(testBench)
+            workout.addExercise(exercise("planned-removal"), sets: 1)
+            #expect(workout.groups.count == 1)
+            let planned = try testBench.group(workout, "planned-removal")
+            #expect(!workout.canRemove(planned))
+        }
+    }
+
+    @Test func everythingInAFreestyleSessionCountsAsAddedOnTheDay() throws {
+        try WorkoutBench.run { testBench in
+            let freestyle = testBench.startFreestyle()
+            freestyle.addExercise(exercise("free-removal"), sets: 2)
+            let added = try testBench.group(freestyle, "free-removal")
+            #expect(freestyle.canRemove(added))
+        }
+    }
+
+    @Test func removingAnExerciseLeavesNoRowNoPickAndPutsTheWorkingPositionBack() throws {
+        try WorkoutBench.run { testBench in
+            let session = testBench.session()
+            let kept = testBench.addRows("keep-removal", to: session, count: 2)
+            kept[0].isCompleted = true
+            kept[0].completedAt = WorkoutBench.t0
+            let workout = testBench.open(session)
+            workout.addExercise(exercise("wrong-removal"), sets: 3)
+            #expect(workout.openFromQueue("wrong-removal") == false)
+            #expect(session.preferredExerciseID == "wrong-removal")
+            #expect(workout.currentGroup?.catalogID == "wrong-removal")
+
+            workout.removeExercise(try testBench.group(workout, "wrong-removal"))
+
+            #expect(session.sets.allSatisfy { $0.catalogID != "wrong-removal" })
+            // Nothing outside the removed exercise is touched, logged rows above all.
+            let remaining = try testBench.context.fetch(FetchDescriptor<SetLog>())
+                .filter { $0.session?.id == session.id }
+            #expect(remaining.count == 2)
+            #expect(remaining.allSatisfy { $0.catalogID == "keep-removal" })
+            // No pick is left naming an exercise that is gone, so the wrist and
+            // the Lock Screen are back on the lift in progress.
+            #expect(session.preferredExerciseID == nil)
+            #expect(workout.currentGroup?.catalogID == "keep-removal")
+            #expect(workout.totalCount == 2)
+
+            // Adding the same lift again starts clean rather than on the old pick.
+            workout.addExercise(exercise("wrong-removal"), sets: 1)
+            #expect(workout.currentGroup?.catalogID == "keep-removal")
+        }
+    }
+
+    @Test func aCardWithALoggedSetIsNeverRemovedEvenWhenAskedDirectly() throws {
+        try WorkoutBench.run { testBench in
+            let session = testBench.session()
+            let rows = testBench.addRows("done-refuse", to: session, count: 2)
+            rows[0].isCompleted = true
+            rows[0].completedAt = WorkoutBench.t0
+            let workout = testBench.open(session)
+
+            workout.removeExercise(try testBench.group(workout, "done-refuse"))
+            #expect(session.sets.count == 2)
+            #expect(!session.sets.filter(\.isCompleted).isEmpty)
+
+            // Logged from the wrist after the card was drawn: the copy lists no
+            // logged row, and the set is still kept.
+            let fresh = testBench.startFreestyle()
+            fresh.addExercise(exercise("late-refuse"), sets: 2)
+            let stale = try testBench.group(fresh, "late-refuse")
+            stale.sets[0].isCompleted = true
+            stale.sets[0].completedAt = WorkoutBench.t0
+            fresh.removeExercise(stale)
+            #expect(fresh.session.sets.count == 2)
+        }
+    }
+
+    /// What the logger's scale and info sheets are built from. When it is nil
+    /// the caption and the info button offer no sheet, which the view does by
+    /// reading this same value.
+    @Test func aSetWhoseCustomExerciseWasDeletedResolvesToNoCatalogEntry() throws {
+        let gone = SetLog(catalogID: "custom-deleted-removal", exerciseName: "Iso Row", exerciseOrder: 0, setIndex: 0)
+        #expect(gone.catalog == nil)
+        let bundled = try #require(ExerciseCatalog.shared.all.first)
+        let known = SetLog(catalogID: bundled.id, exerciseName: "Known", exerciseOrder: 0, setIndex: 0)
+        #expect(known.catalog != nil)
+    }
+
     // MARK: Notes
 
     @Test func aNoteIsWrittenOnlyWhereSomethingWasSaidAndPrunedWhenEmptied() throws {
