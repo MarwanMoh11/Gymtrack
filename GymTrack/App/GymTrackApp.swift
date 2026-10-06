@@ -114,7 +114,7 @@ struct GymTrackApp: App {
 
     private func retryStore() {
         let retriedState = Self.openStore()
-        if case .ready(let container) = retriedState {
+        if case .ready(let container) = retriedState, !LaunchMode.isUnitTestHost {
             Self.configureServices(container: container)
         }
         storeState = retriedState
