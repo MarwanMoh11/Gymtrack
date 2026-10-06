@@ -123,7 +123,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          # The merge commit and its base, so the diff can be taken locally.
+          fetch-depth: 2
+      # The diff is saved to files rather than read through `gh pr diff`, whose
+      # output gets cut short on a large PR. A review that lost its turns
+      # trying other ways to read it ended without ever posting.
+      - name: Save the diff for the review
+        run: |
+          git diff HEAD^1 HEAD > pr.diff
+          git diff --stat=120 HEAD^1 HEAD > pr-stat.txt
       - uses: anthropics/claude-code-action@v1
         env:
           # Opus 5.5 at its extra-high effort: more thinking per turn, fewer wrong turns.
@@ -142,7 +150,10 @@ jobs:
             It was probably written by another Claude run that built it and ran only the suites
             it touched, so be skeptical and specific. Follow CLAUDE.md, especially its three data rules.
 
-            1. Read the PR with `gh pr view` and `gh pr diff`. If the body says "Closes #N",
+            The PR's full diff is in pr.diff, with a per-file summary in pr-stat.txt, and the
+            checkout is the merged code. Read them with Read and Grep; don't run git.
+
+            1. Read the PR's description with `gh pr view`. If the body says "Closes #N",
                read that issue with `gh issue view N` and judge whether the change does what was asked.
             2. Update your previous review comment if one exists, otherwise post a new one:
                `gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file <file>`.
@@ -160,9 +171,11 @@ jobs:
 
             Rules: give ✅ only for small, low-risk changes with adequate tests that you are confident compile.
             Keep it under 220 words. Never write "@claude" in the comment.
-          # 30 turns: a review that reads the linked issue and a few files took 17, and
-          # past the cap the action marks a review it already posted as failed.
+            Budget: post the comment within your first 25 turns, then refine it with --edit-last
+            if turns remain. On a large PR, read the riskiest files first and say which you skipped.
+          # 40 turns, with the comment due by 25: a small PR's review took 17, and a
+          # review that runs out before posting leaves nothing on the PR.
           claude_args: |
             --model claude-opus-5-5
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Write"
-            --max-turns 30
+            --max-turns 40

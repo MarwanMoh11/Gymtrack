@@ -149,6 +149,9 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 - **Only the unit tests gate merging.** `ui-tests` and `script-tests` run in parallel on their
   own runners and show red on the PR when they fail, but the ruleset doesn't require them. With
   everything in one job the gate took over 40 minutes: the 73 scripts alone take about 45.
+- The review job saves the PR's diff to `pr.diff` (and a summary to `pr-stat.txt`) before Claude
+  starts, from the merge commit and its base (`fetch-depth: 2`), so no API limit applies and Claude
+  reads it in parts with Read and Grep. It must post within 25 of its 40 turns, then refine.
 - On failure, the `.xcresult` bundles and script logs are uploaded as an artifact for 7 days.
 - The review job's `if:` skips PRs from forks. Forks get no secrets, so the job would fail anyway,
   and skipping it keeps a stranger's PR from ever reaching Claude.
@@ -242,7 +245,7 @@ The merged branch is deleted, and `Closes #N` closes the issue.
 | Claude leaves a "Create PR" link instead of a PR | The create-PR tool wasn't allowed or failed | Tap the link, or comment `@claude open the pull request`. Check `--allowedTools` in `claude.yml` |
 | The review comment is missing | A fork PR (by design), a draft PR, a missing secret, or the PR changes `pr-check.yml` itself | For a PR that edits `pr-check.yml`, the action refuses to run a workflow that differs from `main`'s copy ("Workflow validation failed"). That's expected: merge it, and later PRs get reviews |
 | The build is red | A compile error or failing test | The failed step's log lists only the errors and failures; full logs are in the `*-logs-N` artifact. Comment `@claude fix the build` |
-| The review fails after posting its comment | It used more turns than `--max-turns` allows; the action then marks a finished review failed | Raise `--max-turns` in `pr-check.yml` (now 30; 17 was seen), on `main` too |
+| The review fails after posting its comment, or never posts | It ran out of turns. Past `--max-turns` the action marks even a posted review failed, and on a large PR the turns can run out before it posts | The prompt asks for the comment within 25 of the 40 turns, and the diff is saved to `pr.diff` so it can be read in parts. If it still happens, raise `--max-turns` in `pr-check.yml`, on `main` too |
 | A step hangs for minutes after a test fails | `xcodebuild` collecting simulator diagnostics | `check.sh` passes `-collect-test-diagnostics never`; keep it if you replace the checker |
 | The action fails within seconds and the log says nothing | Hidden output: the action shows Claude's log only when asked | Re-running with debug logging isn't enough. Add `show_full_output: "true"`, or set the repository variable `ACTIONS_STEP_DEBUG` to `true`, then remove it: the log can show file contents |
 | 401 "OAuth access token is invalid" or "Invalid bearer token" | The token was mangled in the copy: line wraps from the terminal, or the clipboard held the sign-in code instead | Copy the token with nothing else, then `pbpaste \| tr -d '[:space:]' \| gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>` and clear the clipboard |
