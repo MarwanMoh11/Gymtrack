@@ -15,7 +15,7 @@ import SwiftData
 /// edits to a custom exercise reaching the catalog and search. The search
 /// prefix cases and the tracking-edit retrack already live in
 /// test-library-fixes.sh and test-custom-exercise-launch.sh; the export side of
-/// custom edits and of lb scales is in test-backup-round-trip.sh.
+/// custom edits and of lb scales is in GymTrackTests/BackupRestoreTests.swift.
 @main
 struct LibraryDataTests {
     @MainActor static var failures = 0
