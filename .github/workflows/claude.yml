@@ -16,10 +16,13 @@ jobs:
   claude:
     # Runs only when @claude appears. The action also rejects anyone without write access,
     # so strangers on this public repo can't trigger it. Keep that check; never add allowed_non_write_users.
+    # Bots are skipped here, before a Mac starts: a review that quotes "@claude plan this"
+    # would otherwise boot a runner only for the action to refuse the bot.
     if: |
-      (github.event_name == 'issues' &&
+      (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' &&
         (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
-      (github.event_name != 'issues' && contains(github.event.comment.body, '@claude'))
+      (github.event_name != 'issues' && github.event.comment.user.type != 'Bot' &&
+        contains(github.event.comment.body, '@claude'))
     # A Mac, so the run can build and test its own change before pushing it
     # (free on a public repo). The limit is a ceiling for hard bugs that need many
     # build rounds; a normal run takes 10 to 30 minutes.
