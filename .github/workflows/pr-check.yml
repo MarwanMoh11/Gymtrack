@@ -125,6 +125,9 @@ jobs:
         with:
           fetch-depth: 1
       - uses: anthropics/claude-code-action@v1
+        env:
+          # Opus 5.5 at its extra-high effort: more thinking per turn, fewer wrong turns.
+          CLAUDE_CODE_EFFORT_LEVEL: xhigh
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # PRs opened by Claude have claude[bot] as the actor, which is rejected by default.
