@@ -9,9 +9,8 @@ import XCTest
 /// "Pounds" and "0/3 sets" the same way.
 ///
 /// Every wait here has a timeout and no test sleeps: a flow that is slow on a
-/// loaded CI runner gets ten seconds per step, and a flow that is broken fails
-/// at the step that broke rather than at the end. A step known to need longer,
-/// like the Library's first open, passes its own timeout and says why.
+/// loaded CI runner gets a minute per step (`GymTrackUITestCase.stepTimeout`),
+/// and a flow that is broken fails at the step that broke rather than at the end.
 
 /// Identifiers the app sets for the few controls that have no stable visible
 /// text. Everything else the tests reach through its on-screen words.
@@ -43,6 +42,19 @@ func launchApp(onboarded: Bool, extra: [String] = []) -> XCUIApplication {
 class GymTrackUITestCase: XCTestCase {
     var app: XCUIApplication!
 
+    /// How long any one step may take to show.
+    ///
+    /// On an idle CI runner a tab's screen appears three to five seconds after
+    /// the tap, and the app builds it in half a second at most; the rest is
+    /// XCUITest waiting for the app to go idle and taking accessibility
+    /// snapshots. A busy runner has spent 36 seconds on one snapshot, and that
+    /// can land on any step. A ten-second wait failed the Library's first open
+    /// in #34, and once that step alone had a minute, the Progress title in
+    /// #41, a screen the app builds in a tenth of a second. A step that shows
+    /// waits only as long as it takes, so the minute is spent only on a step
+    /// that never shows, and that step still fails.
+    static let stepTimeout: TimeInterval = 60
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -61,7 +73,7 @@ class GymTrackUITestCase: XCTestCase {
     /// missing button.
     func launchFirstRun() {
         app = launchApp(onboarded: false)
-        if !app.buttons["Continue"].waitForExistence(timeout: 10), app.tabBars.firstMatch.exists {
+        if !app.buttons["Continue"].waitForExistence(timeout: Self.stepTimeout), app.tabBars.firstMatch.exists {
             XCTFail("The app skipped onboarding. This simulator's device-level preferences hold "
                     + "settings.hasOnboarded; clear them with `xcrun simctl spawn <udid> defaults "
                     + "delete com.marwanmohamed.gymtrack settings.hasOnboarded`.")
@@ -71,7 +83,7 @@ class GymTrackUITestCase: XCTestCase {
     /// Waits for `element` and fails the test, naming it, if it never shows.
     @discardableResult
     func require(_ element: XCUIElement, _ name: String,
-                 timeout: TimeInterval = 10,
+                 timeout: TimeInterval = GymTrackUITestCase.stepTimeout,
                  file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         XCTAssertTrue(element.waitForExistence(timeout: timeout),
                       "\(name) never appeared", file: file, line: line)
@@ -90,7 +102,7 @@ class GymTrackUITestCase: XCTestCase {
                      file: StaticString = #filePath, line: UInt = #line) {
         let matches = NSPredicate(format: "label == %@", text)
         let wait = XCTNSPredicateExpectation(predicate: matches, object: element)
-        let result = XCTWaiter().wait(for: [wait], timeout: 10)
+        let result = XCTWaiter().wait(for: [wait], timeout: Self.stepTimeout)
         XCTAssertEqual(result, .completed,
                        "expected label \"\(text)\", found \"\(element.label)\"",
                        file: file, line: line)
