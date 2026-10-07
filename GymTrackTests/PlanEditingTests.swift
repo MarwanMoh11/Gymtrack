@@ -82,7 +82,7 @@ struct PlanEditingTests {
 
     @Test func withNoHistoryTheRotationStartsAtTheFirstUnpinnedDay() throws {
         let fixture = try rotation()
-        #expect(fixture.plan.day(for: today) == nil, "nothing is pinned to today")
+        #expect(fixture.plan.day(for: today, calendar: calendar) == nil, "nothing is pinned to today")
         #expect(fixture.plan.nextDay(on: today, after: [], calendar: calendar)?.id == fixture.push.id)
     }
 
@@ -122,6 +122,26 @@ struct PlanEditingTests {
         pinned.weekday = otherWeekday
         let pinnedDone = finished(pinned, daysAgo: 4, in: fixture.context)
         #expect(fixture.plan.nextDay(on: today, after: [pinnedDone], calendar: calendar)?.id == fixture.push.id)
+    }
+
+    /// Training late is still the night's training. Until 04:00 the next
+    /// morning the day pinned to tonight's weekday is the one on offer, and
+    /// from 04:00 the next weekday's is. `today` is Wednesday 11 March at noon.
+    @Test func theSmallHoursStillOfferTheNightsPinnedDay() throws {
+        let context = try TestStore.context()
+        let fixed = Plan(name: "Fixed")
+        context.insert(fixed)
+        let tonight = day("Tonight", in: fixed, weekday: weekday, context: context)
+        let tomorrow = day("Tomorrow", in: fixed, weekday: otherWeekday, context: context)
+
+        for stamp in ["2026-03-12T00:00:00", "2026-03-12T00:30:00", "2026-03-12T03:59:59"] {
+            let night = TestClock.at(stamp)
+            #expect(fixed.day(for: night, calendar: calendar)?.id == tonight.id, "\(stamp)")
+            #expect(fixed.nextDay(on: night, after: [], calendar: calendar)?.id == tonight.id, "\(stamp)")
+        }
+        let morning = TestClock.at("2026-03-12T04:00:00")
+        #expect(fixed.day(for: morning, calendar: calendar)?.id == tomorrow.id)
+        #expect(fixed.nextDay(on: morning, after: [], calendar: calendar)?.id == tomorrow.id)
     }
 
     @Test func aFullyPinnedPlanStillHasRestDays() throws {

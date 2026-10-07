@@ -13,7 +13,7 @@ struct SessionDigest {
     private let values: [TrainingStats.Metric: Double]
 
     init(_ session: WorkoutSession, calendar: Calendar) {
-        day = calendar.startOfDay(for: session.startedAt)
+        day = TrainingDay.key(for: session.startedAt, calendar: calendar)
         values = Dictionary(uniqueKeysWithValues: TrainingStats.Metric.allCases.map { ($0, $0.value(of: session)) })
     }
 
@@ -129,7 +129,7 @@ final class ProgressHistory {
 
         // Sessions older than anything on screen are never read. The extra day
         // is margin, so no calendar edge can leave a charted day half-summed.
-        let today = calendar.startOfDay(for: .now)
+        let today = TrainingDay.key(for: .now, calendar: calendar)
         let horizon = calendar.date(byAdding: .day, value: -(layout.horizonDays + 1), to: today) ?? .distantPast
         var digests: [ObjectIdentifier: SessionDigest] = [:]
         var dailyTotals: [TrainingStats.Metric: [Date: Double]] = [:]
@@ -274,8 +274,9 @@ final class ProgressHistoryCache {
     ///   hundred sessions it costs about the same and cannot collide. `id` is
     ///   used and not `persistentModelID`, which changes when a new session is
     ///   first saved and would cost a second rebuild for nothing.
-    /// - Today, because every window counts back from it. The first pass after
-    ///   midnight rebuilds, as the screen always recomputed on its next pass.
+    /// - Today's training day, because every window counts back from it. The
+    ///   first pass after the day turns over at the cutoff rebuilds, as the
+    ///   screen always recomputed on its next pass; see `TrainingDay`.
     /// - The weight unit, because volume is summed in the unit on screen.
     /// - A revision the view bumps when a save changes the history in place: a
     ///   late set from the watch, a restore over existing sessions, a deleted
@@ -299,7 +300,7 @@ final class ProgressHistoryCache {
     func history(for allSessions: [WorkoutSession], revision: Int) -> ProgressHistory {
         let finished = allSessions.filter { !$0.isActive }
         let key = Key(sessionIDs: finished.map(\.id),
-                      today: Calendar.current.startOfDay(for: .now),
+                      today: TrainingDay.key(for: .now, calendar: .current),
                       weightUnit: AppSettings.shared.weightUnit,
                       revision: revision)
         if let current, key == self.key { return current }

@@ -117,6 +117,37 @@ struct ProgressHistoryTests {
         }
     }
 
+    // MARK: - Training days
+
+    /// The chart and the calendar beside it file a session that started at
+    /// 00:30 under the night before, as Today and the streak do. Built from
+    /// the wall clock, as the cache is, two nights back.
+    @Test func aSessionStartedAfterMidnightIsChartedOnTheNightBefore() throws {
+        try inUnit(.kg) {
+            let context = try TestStore.context()
+            let calendar = Calendar.current
+            let night = TrainingStats.startOfDay(-2, from: TrainingDay.key(for: .now, calendar: calendar),
+                                                 calendar: calendar)
+            let morning = TrainingStats.startOfDay(1, from: night, calendar: calendar)
+            let start = morning.addingTimeInterval(30 * 60)
+            let session = WorkoutSession(title: "Late", startedAt: start)
+            session.endedAt = start.addingTimeInterval(3_600)
+            context.insert(session)
+            let set = SetLog(catalogID: "barbell-bench-press", exerciseName: "Barbell Bench Press", exerciseOrder: 0,
+                             setIndex: 0, weightKg: 100, reps: 5, tracking: .weightReps)
+            set.isCompleted = true
+            set.completedAt = start.addingTimeInterval(60)
+            set.session = session
+            context.insert(set)
+
+            let history = ProgressHistory(sessions: [session], layout: Self.layout)
+            #expect(history.trainedDays == [night])
+            #expect(history.volumeByDay[night] == 500)
+            #expect(history.volumeByDay[morning] == 0)
+            #expect(history.points(.sets, days: 7).first { $0.date == night }?.value == 1)
+        }
+    }
+
     // MARK: - A tap reads no set
 
     @Test func aMetricOrWindowTapReadsNoSet() throws {

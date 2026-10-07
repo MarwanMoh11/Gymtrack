@@ -338,11 +338,26 @@ struct WatchLinkWireTests {
         var idle = WatchIdleSnapshot.empty
         #expect(idle.describesToday)
 
-        idle.day = .now
+        idle.day = TrainingDay.key(for: .now, calendar: .current)
         #expect(idle.describesToday)
 
         idle.day = Date.now.addingTimeInterval(-3 * 86_400)
         #expect(!idle.describesToday)
+    }
+
+    /// The phone stamps the training day, and the wrist reads its own clock
+    /// the same way: a mirror built on Wednesday evening still describes
+    /// 00:30 on Thursday, and goes stale at 04:00.
+    @Test func aMirrorDescribesItsTrainingDayUntilTheCutoff() {
+        let calendar = TestClock.calendar
+        var idle = WatchIdleSnapshot.empty
+        idle.day = TestClock.at("2026-03-11T00:00:00")
+        #expect(idle.describesTrainingDay(at: TestClock.at("2026-03-11T23:00:00"), calendar: calendar))
+        #expect(idle.describesTrainingDay(at: TestClock.at("2026-03-12T00:30:00"), calendar: calendar))
+        #expect(idle.describesTrainingDay(at: TestClock.at("2026-03-12T03:59:59"), calendar: calendar))
+        #expect(!idle.describesTrainingDay(at: TestClock.at("2026-03-12T04:00:00"), calendar: calendar))
+        #expect(!idle.describesTrainingDay(at: TestClock.at("2026-03-11T03:00:00"), calendar: calendar),
+                "The small hours of the stamped date are the night before's")
     }
 
     // MARK: - Riders, end to end

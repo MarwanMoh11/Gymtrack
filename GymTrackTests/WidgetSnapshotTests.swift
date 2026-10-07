@@ -101,31 +101,35 @@ struct WidgetSnapshotTests {
     /// STATS-09. The done card used to ask "did anything finish today", which a
     /// freestyle arm pump or the tail of last night's session also answered,
     /// and put a victory card over a Legs day the phone was still offering.
+    /// Last night includes the small hours: before 04:00 is still the night
+    /// before.
     @Test func theDoneCardShowsOnlyAWorkoutOfThePlanThatStartedToday() throws {
         let context = try TestStore.context()
         let (plan, legs, push) = Self.plan(in: context)
 
         #expect(Self.snapshot(plan, []).finishedToday == nil)
 
-        let freestyle = Self.session(nil, from: Self.at(hours: 0.1), in: context)
+        let freestyle = Self.session(nil, from: Self.at(hours: 8.1), in: context)
         #expect(Self.snapshot(plan, [freestyle]).finishedToday == nil)
 
         let lastNight = Self.session(legs, from: Self.at(hours: -0.8), lasting: 90 * 60, in: context)
         #expect(Self.snapshot(plan, [lastNight]).finishedToday == nil)
+        let smallHours = Self.session(legs, from: Self.at(hours: 0.5), in: context)
+        #expect(Self.snapshot(plan, [smallHours]).finishedToday == nil)
 
         // A plan day swapped in for Legs is today's workout,
-        let swapped = Self.session(push, from: Self.at(hours: 0.2), in: context)
+        let swapped = Self.session(push, from: Self.at(hours: 8.2), in: context)
         #expect(Self.snapshot(plan, [swapped]).finishedToday?.title == "Push")
 
         // and the scheduled day wins when it was trained.
-        let trained = Self.session(legs, from: Self.at(hours: 0.3), in: context)
+        let trained = Self.session(legs, from: Self.at(hours: 8.3), in: context)
         #expect(Self.snapshot(plan, [freestyle, swapped, trained]).finishedToday?.title == "Legs")
     }
 
     @Test func theDoneCardKeepsWhatTheWidgetsDrawAndTheRestOfTheSnapshotStands() throws {
         let context = try TestStore.context()
         let (plan, legs, _) = Self.plan(in: context)
-        let trained = Self.session(legs, from: Self.at(hours: 0.3), lasting: 45 * 60, in: context)
+        let trained = Self.session(legs, from: Self.at(hours: 8.3), lasting: 45 * 60, in: context)
 
         let snapshot = Self.snapshot(plan, [trained])
 
@@ -158,6 +162,54 @@ struct WidgetSnapshotTests {
         #expect(todayTitle() == "Legs")
         newer.isActive = true
         #expect(todayTitle() == "Push")
+    }
+
+    // MARK: - The small hours
+
+    /// The issue's night, as the widgets and the wrist tell it. Legs is pinned
+    /// to Wednesday and Push to Thursday. Legs is skipped in the day and
+    /// trained at 00:30 on Thursday, which is still Wednesday night.
+    @Test func aSessionStartedAfterMidnightIsTheNightBeforesOnTheWidgetsAndTheWatch() throws {
+        let context = try TestStore.context()
+        let (plan, legs, _) = Self.plan(in: context)
+        let thursday = Self.at(hours: 24)
+        @MainActor func snapshot(_ sessions: [WorkoutSession], at now: Date) -> GymTrackSnapshot {
+            WidgetPublisher.snapshot(plans: [plan], sessions: sessions, running: nil, calendar: Self.calendar, now: now)
+        }
+        @MainActor func wrist(_ sessions: [WorkoutSession], at now: Date) -> WatchIdleSnapshot {
+            WatchMirrorBuilder.idle(plans: [plan], sessions: sessions, calendar: Self.calendar, now: now)
+        }
+        let tuesday = Self.session(nil, from: Self.at(hours: -6), in: context)
+
+        // At 00:30 on Thursday, Wednesday's Legs is still today's.
+        let smallHours = Self.at(hours: 24.5)
+        let before = snapshot([tuesday], at: smallHours)
+        #expect(before.todayTitle == "Legs" && before.todayIsRotation == false)
+        #expect(before.day == Self.midnight && before.finishedToday == nil && before.streak == 1)
+        #expect(wrist([tuesday], at: smallHours).todayTitle == "Legs")
+        #expect(wrist([tuesday], at: smallHours).day == Self.midnight)
+
+        let lateNight = Self.session(legs, from: smallHours, in: context)
+        let sessions = [tuesday, lateNight]
+        let afterward = snapshot(sessions, at: Self.at(hours: 25.75))
+        #expect(afterward.finishedToday?.title == "Legs", "The night's workout is done")
+        #expect(afterward.lastTrainedDay == Self.midnight && afterward.streak == 2)
+
+        // Thursday evening offers Thursday's Push, not a done card.
+        let evening = Self.at(hours: 42)
+        let next = snapshot(sessions, at: evening)
+        #expect(next.todayTitle == "Push" && next.finishedToday == nil)
+        #expect(next.day == thursday && next.lastTrainedDay == Self.midnight)
+        #expect(next.streak == 2 && next.sessionsThisWeek == 2)
+        #expect(wrist(sessions, at: evening).todayTitle == "Push")
+        #expect(wrist(sessions, at: evening).streak == 2)
+
+        // A widget left with Wednesday evening's snapshot rolls over at the
+        // cutoff, not at midnight.
+        let wednesdayEvening = snapshot([tuesday], at: Self.at(hours: 23))
+        #expect(wednesdayEvening.asOf(smallHours, calendar: Self.calendar) == wednesdayEvening)
+        let rolled = wednesdayEvening.asOf(Self.at(hours: 28.5), calendar: Self.calendar)
+        #expect(rolled.todayTitle == "Push" && rolled.day == thursday)
     }
 
     // MARK: - A snapshot read on a later day

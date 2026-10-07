@@ -35,16 +35,25 @@ struct PastWorkoutSheet: View {
 
     private var selectedDay: PlanDay? { trainingDays.first { $0.id == dayID } }
 
+    /// Noon on the chosen day. The picker keeps the time of day the sheet
+    /// opened at, and opened in the small hours that time belongs to the
+    /// night before (see `TrainingDay`), so the plan would be asked about the
+    /// wrong weekday. Noon is inside the chosen day however the clocks move.
+    private var noon: Date {
+        Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
+    }
+
     /// What the progression knew on the chosen day. A session trained since
     /// would otherwise lift the opening numbers past what was on offer then.
     private var earlier: [WorkoutSession] {
-        let start = Calendar.current.startOfDay(for: date)
-        return history.filter { $0.startedAt < start }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+        return history.filter { TrainingDay.key(for: $0.startedAt, calendar: calendar) < start }
     }
 
     /// The day the plan would have offered on the chosen date.
     private var plannedDay: PlanDay? {
-        plan.nextDay(on: date, after: earlier) ?? trainingDays.first
+        plan.nextDay(on: noon, after: earlier) ?? trainingDays.first
     }
 
     private var tickedCount: Int {
@@ -171,7 +180,6 @@ struct PastWorkoutSheet: View {
         // a time zone either way; the hour itself means nothing. Never later
         // than now, or a session logged this morning would sort after one
         // trained this afternoon and hold the rotation back a day.
-        let noon = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
         let anchor = min(noon, .now)
         let session = WorkoutSession(title: day.name, planDayID: day.id, planName: plan.name, startedAt: anchor)
         session.endedAt = anchor

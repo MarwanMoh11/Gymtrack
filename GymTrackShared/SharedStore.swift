@@ -161,7 +161,8 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
     }
 
     var updatedAt: Date
-    /// Midnight of the day everything "today" below was worked out for.
+    /// Midnight of the training day everything "today" below was worked out
+    /// for; see `TrainingDay`.
     ///
     /// The app only restamps the snapshot when it runs, and nothing wakes it at
     /// midnight — so a widget reloading at 00:01 used to read back exactly what
@@ -177,8 +178,8 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
     /// What each training weekday of the routine prescribes. Empty with no
     /// routine; absent on a snapshot from an older build.
     var schedule: [ScheduledDay]?
-    /// The last day a session was finished on, which is all it takes to tell
-    /// whether the streak below has survived to a later day.
+    /// The last training day a session was finished on, which is all it takes
+    /// to tell whether the streak below has survived to a later day.
     var lastTrainedDay: Date?
     /// The start of the week `sessionsThisWeek` and `weekVolumeKg` count.
     var weekStart: Date?
@@ -258,13 +259,15 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
     func asOf(_ date: Date, calendar: Calendar = .current) -> GymTrackSnapshot {
         var next = self
         if let session, session.isStale(at: date) { next.session = nil }
-        guard let day, date > day, !calendar.isDate(day, inSameDayAs: date) else { return next }
-        let midnight = calendar.startOfDay(for: date)
-        next.day = midnight
+        // The day turns over at the cutoff, as the app's does, so a widget at
+        // 00:30 still describes the night it is part of. See `TrainingDay`.
+        let trainingDay = TrainingDay.key(for: date, calendar: calendar)
+        guard let day, trainingDay > day, !calendar.isDate(day, inSameDayAs: trainingDay) else { return next }
+        next.day = trainingDay
         next.finishedToday = nil
 
         if let schedule {
-            let weekday = calendar.component(.weekday, from: date)
+            let weekday = calendar.component(.weekday, from: trainingDay)
             let today = schedule.first { $0.weekday == weekday }
             next.todayTitle = today?.title
             next.todayIsRotation = today?.isRotation
@@ -273,11 +276,11 @@ struct GymTrackSnapshot: Codable, Hashable, Sendable {
             next.todayMuscles = today?.muscles ?? []
         }
 
-        if (lastTrainedDay ?? .distantPast) < Self.startOfDay(before: date, calendar: calendar) {
+        if (lastTrainedDay ?? .distantPast) < Self.startOfDay(before: trainingDay, calendar: calendar) {
             next.streak = 0
         }
 
-        if let weekStart, let thisWeek = calendar.dateInterval(of: .weekOfYear, for: date)?.start,
+        if let weekStart, let thisWeek = calendar.dateInterval(of: .weekOfYear, for: trainingDay)?.start,
            thisWeek > weekStart {
             next.sessionsThisWeek = 0
             next.weekVolumeKg = 0

@@ -223,7 +223,7 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
 
 /// What the watch shows when nothing is running.
 struct WatchIdleSnapshot: Codable, Hashable, Sendable {
-    /// Midnight of the day this was built for.
+    /// Midnight of the training day this was built for; see `TrainingDay`.
     ///
     /// Everything below answers "today", and the watch may be holding the
     /// answer for a day that has since ended — the phone only restamps the
@@ -255,9 +255,14 @@ struct WatchIdleSnapshot: Codable, Hashable, Sendable {
 
     /// Whether this still describes today. A snapshot from an older build
     /// carries no day and is believed — it is the only thing the watch has.
-    var describesToday: Bool {
+    var describesToday: Bool { describesTrainingDay(at: .now, calendar: .current) }
+
+    /// Whether this describes the training day holding `moment` (see
+    /// `TrainingDay`). Asked of the calendar day, a mirror the phone built at
+    /// 23:00 went stale at midnight, in the middle of the night's session.
+    func describesTrainingDay(at moment: Date, calendar: Calendar) -> Bool {
         guard let day else { return true }
-        return Calendar.current.isDateInToday(day)
+        return calendar.isDate(day, inSameDayAs: TrainingDay.key(for: moment, calendar: calendar))
     }
 
     static let empty = WatchIdleSnapshot(
