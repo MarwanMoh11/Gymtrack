@@ -6,11 +6,22 @@ import Foundation
 /// in front of you actually has: `LoadScale` snapping, stepping, laddering and
 /// formatting in both units, and the equipment table behind each default.
 ///
-/// The native counterpart of the legacy `Tests/PoundLoadTests.swift` and
-/// `Tests/LoadScale*Tests.swift`, which cover storage and merging; this file
-/// covers the arithmetic and stays off the persisted overrides.
+/// This file covers the arithmetic and stays off the persisted overrides;
+/// `LoadScaleMergeTests` covers storing a correction and finding it again.
 @MainActor @Suite(.serialized)
 struct LoadScaleTests {
+
+    nonisolated static let poundsPerKilo = 2.20462262
+
+    private func near(_ lhs: Double, _ rhs: Double) -> Bool { abs(lhs - rhs) < 0.001 }
+
+    /// Runs `body` with the app-wide unit set to `unit`, then puts it back.
+    private func inUnit(_ unit: WeightUnit, _ body: () throws -> Void) throws {
+        let saved = AppSettings.shared.weightUnit
+        defer { AppSettings.shared.weightUnit = saved }
+        AppSettings.shared.weightUnit = unit
+        try body()
+    }
 
     /// Scales a real gym has, in both units: a barbell's microplates, a pin
     /// stack in pounds, a kettlebell rack.
@@ -274,5 +285,90 @@ struct LoadScaleTests {
         #expect(LoadScaleBook.derived(for: barbell, unit: .lb) == LoadScale(unit: .lb, increment: 5))
         #expect(LoadScaleBook.derived(for: barbell, unit: .kg) == LoadScale(unit: .kg, increment: 2.5))
         #expect(LoadScaleBook.derived(for: nil, unit: .kg) == LoadScale(unit: .kg, increment: 1.25))
+    }
+
+    // MARK: - Both units, through the phone's setting
+
+    /// Pound gyms have their own ladder rather than a conversion of the metric
+    /// one, and an exercise nobody corrected follows the phone's unit to it.
+    @Test(arguments: WeightUnit.allCases)
+    func anUncorrectedExerciseStepsByItsKitsRungInThePhonesUnit(unit: WeightUnit) throws {
+        let expected: [(id: String, kg: Double, lb: Double)] = [
+            ("barbell-bench-press", 2.5, 5), ("leg-press", 5, 10),
+            ("cable-crossover", 2.5, 5), ("dumbbell-lateral-raise", 2, 5),
+        ]
+        try inUnit(unit) {
+            for rung in expected {
+                try #require(!LoadScaleBook.shared.isCustomised(rung.id), "\(rung.id) was corrected elsewhere")
+                let scale = LoadScaleBook.shared.scale(for: rung.id)
+                #expect(scale.unit == unit, "\(rung.id)")
+                #expect(scale.increment == (unit == .kg ? rung.kg : rung.lb), "\(rung.id)")
+            }
+            // The default must not be one unit's number under the other's label.
+            #expect(LoadScale.standard(unit).increment == (unit == .kg ? 2.5 : 5))
+        }
+    }
+
+    /// 60 kg is 132.28 lb: a rung of the barbell in kilograms, and between two
+    /// rungs of it in pounds.
+    @Test(arguments: WeightUnit.allCases)
+    func aBarbellsLadderSnapsAndStepsInEitherUnit(unit: WeightUnit) {
+        let pounds = unit == .lb
+        let scale = LoadScale(unit: unit, increment: pounds ? 5 : 2.5)
+        func kg(_ display: Double) -> Double { pounds ? display / Self.poundsPerKilo : display }
+
+        #expect(near(scale.snap(kg: 60), pounds ? kg(130) : 60))
+        // 61.5 kg is 135.58 lb: down to 135 in pounds, up to 62.5 in kilograms.
+        #expect(near(scale.snap(kg: 61.5), pounds ? kg(135) : 62.5))
+        #expect(scale.snap(kg: 0) == 0)
+        #expect(scale.snap(kg: -3) == 0)
+
+        // A rung stored in kilograms reads back a hair off, and must not cost a rung.
+        let start = pounds ? 135.0 : 60.0
+        let stored = kg(start)
+        #expect(near(scale.display(scale.step(kg: stored, by: 1)), start + scale.increment))
+        #expect(near(scale.display(scale.step(kg: stored, by: -1)), start - scale.increment))
+        // Off the ladder, the first tap pulls back onto it.
+        let off = pounds ? 132.0 : 61.0
+        #expect(near(scale.display(scale.step(kg: kg(off), by: 1)), pounds ? 135 : 62.5))
+        #expect(near(scale.display(scale.step(kg: kg(off), by: -1)), pounds ? 130 : 60))
+        #expect(scale.step(kg: 0, by: -1) == 0)
+
+        let window = scale.ladder(around: stored)
+        let expected = (-2...2).map { start + Double($0) * scale.increment }
+        #expect(window.count == 5)
+        #expect(zip(window, expected).allSatisfy { near($0, $1) }, "\(window)")
+        #expect(scale.displayCeiling == (pounds ? 2_200 : 1_000))
+    }
+
+    @Test(arguments: WeightUnit.allCases)
+    func aRungReadsAsTheNumberTheKitCarriesInEitherUnit(unit: WeightUnit) throws {
+        let pounds = unit == .lb
+        let coarse = LoadScale(unit: unit, increment: pounds ? 5 : 2.5)
+        let fine = LoadScale(unit: unit, increment: pounds ? 2.5 : 1.25)
+        let rung = pounds ? 135 / Self.poundsPerKilo : 62.5
+
+        #expect(coarse.format(rung) == (pounds ? "135 lb" : "62.5 kg"))
+        #expect(coarse.format(rung, showUnit: false) == (pounds ? "135" : "62.5"))
+        // An off-ladder weight is rounded to what the ladder can express.
+        #expect(coarse.format(60) == (pounds ? "132 lb" : "60 kg"))
+        #expect(fine.format(60) == (pounds ? "132.3 lb" : "60 kg"))
+        #expect(fine.format(61.25) == (pounds ? "135 lb" : "61.25 kg"))
+        #expect(coarse.incrementLabel == (pounds ? "5 lb" : "2.5 kg"))
+        #expect(fine.incrementLabel == (pounds ? "2.5 lb" : "1.25 kg"))
+        #expect(coarse.shortLabel == (pounds ? "lb · 5" : "kg · 2.5"))
+
+        // A set reads itself off its own exercise's ladder in the phone's unit.
+        try inUnit(unit) {
+            for id in ["barbell-bench-press", "leg-press"] {
+                try #require(!LoadScaleBook.shared.isCustomised(id), "\(id) was corrected elsewhere")
+            }
+            let bench = SetLog(catalogID: "barbell-bench-press", exerciseName: "Barbell Bench Press",
+                               exerciseOrder: 0, setIndex: 0, weightKg: rung, reps: 8)
+            #expect(bench.weightLabel == (pounds ? "135 lb" : "62.5 kg"))
+            let stack = SetLog(catalogID: "leg-press", exerciseName: "Leg Press",
+                               exerciseOrder: 1, setIndex: 0, weightKg: 100, reps: 10)
+            #expect(stack.weightLabel == (pounds ? "220 lb" : "100 kg"))
+        }
     }
 }
