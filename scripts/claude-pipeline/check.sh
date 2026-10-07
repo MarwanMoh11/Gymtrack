@@ -98,6 +98,20 @@ run() {
         echo "ok: $label"
         return 0
     fi
+    # A simulator can refuse to launch an app it has just installed ("Unknown
+    # application display identifier"). No test runs, so the failure says nothing
+    # about the change, yet it turned a pull request's required check red. One
+    # more try, keeping the first log. Nothing else is retried, and a launch the
+    # change itself breaks fails twice, so this can't hide a failure.
+    if grep -q 'Failed to install or launch the test runner' "$log"; then
+        mv "$log" "${log%.log}-first-try.log"
+        echo "retrying: $label (the simulator never launched the test runner)"
+        # shellcheck disable=SC2086
+        if xcodebuild "$@" $verbosity CODE_SIGNING_ALLOWED=NO > "$log" 2>&1; then
+            echo "ok: $label"
+            return 0
+        fi
+    fi
     echo "FAILED: $label"
     report "$log"
     return 1

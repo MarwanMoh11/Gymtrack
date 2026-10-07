@@ -44,6 +44,7 @@ struct LoadScaleTests {
     @Test func aZeroOrNegativeIncrementFallsBackToTheUnitsStep() {
         // A zero step would freeze every stepper on the screen.
         #expect(LoadScale(unit: .kg, increment: 0).increment == 2.5)
+        #expect(LoadScale(unit: .lb, increment: 0).increment == WeightUnit.lb.step)
         #expect(LoadScale(unit: .lb, increment: -5).increment == 5)
         #expect(LoadScale(unit: .kg, increment: .nan).increment == 2.5)
         #expect(LoadScale(unit: .kg, increment: 1.25).increment == 1.25)
@@ -128,6 +129,49 @@ struct LoadScaleTests {
             #expect(abs(stack.display(stack.step(kg: kg, by: 1)) - (pounds + 5)) < 1e-9)
             #expect(abs(stack.display(stack.step(kg: kg, by: -1)) - (pounds - 5)) < 1e-9)
         }
+    }
+
+    /// In pounds every value goes through a 2.20462 conversion, and a stored
+    /// kilogram never lands exactly on a rung. Each rung up to 300 lb, stored
+    /// and read back, must be the same rung, not 44.99999 lb that prints as 45
+    /// and steps to 45 again.
+    @Test(arguments: LoadScale.choices(for: .lb))
+    func everyPoundRungSurvivesItsTripThroughKilograms(increment: Double) {
+        let scale = LoadScale(unit: .lb, increment: increment)
+        func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
+        var pounds = 0.0
+        while pounds <= 300 {
+            let kg = scale.kilograms(pounds)
+            #expect(near(scale.display(kg), pounds), "\(pounds) lb at \(increment) lb steps")
+            #expect(near(scale.display(scale.snap(kg: kg)), pounds), "\(pounds) lb snapped at \(increment) lb steps")
+            if pounds > 0 {
+                #expect(near(scale.display(scale.step(kg: kg, by: 1)), pounds + increment), "up from \(pounds) lb")
+                #expect(near(scale.display(scale.step(kg: kg, by: -1)), max(0, pounds - increment)),
+                        "down from \(pounds) lb")
+            }
+            let printed = Double(scale.text(pounds))
+            #expect(printed.map { near($0, pounds) } == true, "\(pounds) lb printed as \(scale.text(pounds))")
+            pounds += increment
+        }
+        #expect(scale.step(kg: 0, by: -1) == 0)
+        #expect(scale.snap(kg: 0) == 0 && scale.snap(kg: -3) == 0)
+        let ladder = scale.ladder(around: scale.kilograms(100), rungs: 2).map { $0 / increment }
+        #expect(ladder.allSatisfy { abs($0.rounded() - $0) < 1e-9 }, "a ladder off the \(increment) lb rungs")
+    }
+
+    @Test func aWeightTypedInKilogramsOpensOnAPoundStacksOwnRung() {
+        let fives = LoadScale(unit: .lb, increment: 5)
+        #expect(abs(fives.display(fives.snap(kg: 27.76)) - 60) < 1e-9)
+        // A machine marked in 2.5 lb keeps its half rungs.
+        let twoHalf = LoadScale(unit: .lb, increment: 2.5)
+        #expect(twoHalf.text(twoHalf.display(twoHalf.kilograms(52.5))) == "52.5")
+    }
+
+    @Test(arguments: LoadScale.choices(for: .lb))
+    func aPoundScaleStaysPutInPoundsAndLandsOnAnOfferedIncrementInKilograms(increment: Double) {
+        let scale = LoadScale(unit: .lb, increment: increment)
+        #expect(scale.converted(to: .lb) == scale)
+        #expect(LoadScale.choices(for: .kg).contains(scale.converted(to: .kg).increment))
     }
 
     @Test(arguments: LoadScaleTests.scales)
