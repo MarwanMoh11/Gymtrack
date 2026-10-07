@@ -1,10 +1,12 @@
 import Foundation
+import HealthKit
 import SwiftData
 import Testing
 @testable import GymTrack
 
 /// The decisions `HealthKitService` makes without HealthKit, run against
-/// made-up answers from Health: the cleanup list and its attempt cap, whether a
+/// made-up answers from Health: the types the permission sheet asks for, the
+/// cleanup list and its attempt cap, whether a
 /// session may be written and what becomes of the workout once it is, which
 /// workouts go into a delete, the workout's activities, when a set's heart rate
 /// may be read again, the energy a session keeps, and whether a session held
@@ -538,6 +540,29 @@ struct HealthKitServiceTests {
         _ = await (first, second)
         #expect(harness.maxDeleting == 1)
         #expect(harness.stored.isEmpty, "The list is worked through")
+    }
+
+    // MARK: - What the Health sheet asks for
+
+    /// The sheet lists a toggle for every type asked for, so a type nothing
+    /// reads is a permission the lifter is asked for no reason, and one a
+    /// later change could start using without anyone noticing. Heart rate and
+    /// active energy are read over a session's window and body weight both
+    /// ways; workouts, asked for beside these, are written and found again to
+    /// delete.
+    @Test func thePhoneAsksForExactlyTheQuantitiesItReadsAndWrites() {
+        let read = Set(HealthKitService.readQuantityIdentifiers)
+        let share = Set(HealthKitService.shareQuantityIdentifiers)
+        #expect(read == [.heartRate, .activeEnergyBurned, .bodyMass])
+        #expect(share == [.bodyMass], "the phone's workouts add no energy samples, so only body weight is written")
+    }
+
+    /// Resting heart rate is recovery data, which the product has rejected, and
+    /// basal energy was never read. Neither is the phone's to ask for.
+    @Test(arguments: [HKQuantityTypeIdentifier.restingHeartRate, .basalEnergyBurned])
+    func aRetiredTypeIsNeverAskedFor(_ retired: HKQuantityTypeIdentifier) {
+        #expect(!HealthKitService.readQuantityIdentifiers.contains(retired))
+        #expect(!HealthKitService.shareQuantityIdentifiers.contains(retired))
     }
 
     // MARK: - Writing a session, and what becomes of the workout

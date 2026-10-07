@@ -31,6 +31,10 @@ These fixes landed in the working tree on 2026-09-28 and 2026-09-29: all 6 P1s, 
 three schemes build, and `scripts/test-all.sh` runs every `scripts/test-*.sh` and passes. Nothing was UI-tested
 or device-tested. Treat the IDs below as done, and don't re-derive them.
 
+The Test column names the scripts that were the evidence at the time. Since then #6 has ported
+every one of them to the Swift Testing suites in `GymTrackTests/` and deleted them, with
+`test-all.sh` and the `Tests/` folder they compiled.
+
 | ID | Status | What changed | Test |
 |---|---|---|---|
 | DATA-01 | Fixed | Restore decides Health links by session `id`. For a session the device already has, the local link wins. Only workouts of local sessions that are absent from the file can be deleted. Restore now asks for confirmation before the picker opens. | `test-backup-service.sh` |

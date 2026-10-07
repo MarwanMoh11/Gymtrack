@@ -7,9 +7,7 @@ import Testing
 /// set leaves behind, what a delete takes with it, and the derived values the
 /// rest of the app reads off a session.
 ///
-/// Complements the swiftc-built `Tests/PlanRotationTests.swift` and the unlog
-/// checks beside it, which cannot open the real schema. Everything here runs
-/// against an in-memory store built from `AppSchema.models`.
+/// Everything here runs against an in-memory store built from `AppSchema.models`.
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct EntityPersistenceTests {

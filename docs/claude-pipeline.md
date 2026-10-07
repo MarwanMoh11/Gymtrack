@@ -62,7 +62,7 @@ that for one issue.
    How Claude writes it, and the part about you that you can edit, is in
    [`.github/claude-test-checklist.md`](../.github/claude-test-checklist.md).
 3. `PR Check` starts. The review comment arrives in about 2 minutes. `build-and-test`, the only
-   check that blocks merging, takes about 10 minutes; `ui-tests` and `script-tests` report later
+   check that blocks merging, runs every unit test in about 10 minutes; `ui-tests` reports later
    (see [timings](#7-timings-observed)).
 
 **Read the review.** The comment's first line is the verdict:
@@ -137,7 +137,6 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | Local notes | [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) | Building, phone installs and simulator quirks, kept out of `CLAUDE.md` because cloud runs can't use them | Specific |
 | Test targets | `GymTrackTests/`, `GymTrackWatchTests/`, `GymTrackUITests/` | Swift Testing unit tests and XCUITest flows. Every PR extends them | Specific |
 | Test host guard | [`GymTrackShared/LaunchMode.swift`](../GymTrackShared/LaunchMode.swift) | Unit-test host gets an in-memory store and no singletons; `-GTUITesting` gives UI tests a clean, quiet app | Specific (the idea is generic) |
-| Script tests | `Tests/` + [`scripts/test-all.sh`](../scripts/test-all.sh) | The older swiftc suite, also run by `build-and-test` | Specific |
 | Secret `CLAUDE_CODE_OAUTH_TOKEN` | Repo → Settings → Secrets → Actions | Claude subscription token from `claude setup-token` (valid one year) | Generic |
 | Claude GitHub App | github.com/apps/claude, installed on all of the owner's repos | Gives the action a token to push branches, comment and open PRs | Generic |
 | Repo settings | [`scripts/claude-pipeline/apply-repo-settings.sh`](../scripts/claude-pipeline/apply-repo-settings.sh) | Squash only, delete merged branches, auto-merge, update suggestions, read-only default token, approval for outside contributors' runs | Generic |
@@ -277,13 +276,15 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   minutes gathering a simulator report.
 - Building the GymTrack scheme also builds the watch app and the widgets, because both are
   embedded in the app.
-- **Only the unit tests gate merging.** `ui-tests` and `script-tests` run in parallel on their
-  own runners and show red on the PR when they fail, but the ruleset doesn't require them. With
-  everything in one job the gate took over 40 minutes: the script suite alone takes about 20.
+- **Every unit test gates merging; the UI tests don't.** `build-and-test` runs all of
+  `GymTrackTests` and `GymTrackWatchTests`, which hold every unit test the repo has. `ui-tests`
+  runs in parallel on its own runner and shows red on the PR when it fails, but the ruleset
+  doesn't require it: the flows add ten minutes of building and tapping, and with everything in
+  one job the gate once took over 40 minutes.
 - The review job saves the PR's diff to `pr.diff` (and a summary to `pr-stat.txt`) before Claude
   starts, from the merge commit and its base (`fetch-depth: 2`), so no API limit applies and Claude
   reads it in parts with Read and Grep. It must post within 25 of its 40 turns, then refine.
-- On failure, the `.xcresult` bundles and script logs are uploaded as an artifact for 7 days.
+- On failure, the checker's logs and the `.xcresult` bundles are uploaded as an artifact for 7 days.
 - The review job's `if:` skips PRs from forks. Forks get no secrets, so the job would fail anyway,
   and skipping it keeps a stranger's PR from ever reaching Claude.
 - `allowed_bots: "*"`: PRs opened by Claude have `claude[bot]` as the actor, which the action
@@ -407,11 +408,12 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 ## 5. Costs and limits
 
 - **GitHub minutes.** Free on public repos. On a private repo they come out of the plan's included
-  minutes, and macOS minutes count about 10 times a Linux minute. One PR here uses about 75 macOS
-  minutes across its three jobs (the script suite is most of it), plus the implementing run's own
-  Mac time: on a private repo, many hundreds of included minutes per PR.
-- **Concurrent Macs.** A free account runs at most 5 macOS jobs at once. A PR uses three, and an
-  implementing run one more, so a second PR's jobs may queue for a few minutes.
+  minutes, and macOS minutes count about 10 times a Linux minute. A PR's two Mac jobs,
+  `build-and-test` and `ui-tests`, take about 25 minutes together by the
+  [timings](#7-timings-observed), plus the implementing run's own Mac time: on a private repo,
+  hundreds of included minutes per PR.
+- **Concurrent Macs.** A free account runs at most 5 macOS jobs at once. A PR uses two, and an
+  implementing run one more, so a second PR's jobs may still queue for a few minutes.
 - **Claude usage.** Each implementing run is a long Opus session, and each review a short one,
   both counted against the subscription's usage limits like local Claude Code use. Building and
   testing inside the run adds turns (reading errors and fixing them) but saves the far larger cost
@@ -471,13 +473,11 @@ From the runs on the setup PR (`macos-26`, Xcode 26.6, October 2026):
 | Picking simulators | 7 seconds |
 | Before the split: iPhone build, then unit and UI tests, in one job | 16 minutes |
 | Watch build and unit tests | 2.6 minutes |
-| `script-tests` | 22.5 minutes for all 73 scripts (about 18 seconds each); one slower runner managed only 34 in 21 minutes |
 | Claude review | 1.5 minutes and 17 turns on a normal diff; 2.6 minutes on this PR's very large one |
 | `check.sh` on a warm build (a MacBook) | 36 seconds to rebuild all three targets; 22 seconds for one suite |
 
-The one-job layout passed the 40-minute limit in the script suite, which is why the gate now holds
-only the build and the unit tests. The implementing run's time depends on the issue; its summary
-page reports it.
+The one-job layout passed the 40-minute limit, which is why the gate holds only the build and the
+unit tests. The implementing run's time depends on the issue; its summary page reports it.
 
 ## 8. Porting to another repo
 
@@ -518,18 +518,18 @@ page reports it.
 
 ## 9. What was built here, and how it differs from the setup prompt
 
-- **Existing tests kept.** The repo already had a `swiftc`-based suite (`Tests/`, 73 scripts).
-  It runs as the `script-tests` check and gets no new tests; #6 retires it into Swift Testing in
-  parts (55 scripts are left after part 2, #22). New tests go to the Xcode targets.
+- **Existing tests ported.** The repo already had an older suite outside the Xcode targets. #6
+  ported every assertion in it to Swift Testing in ten parts and deleted it, so every test now
+  lives in the Xcode targets and runs in the gate.
 - **`CLAUDE.md` split.** The old 180-line file became a 60-line `CLAUDE.md` plus
   `docs/DEVELOPMENT.md`, which holds everything only a local session can use.
 - **`actions/checkout@v7`** rather than `@v6`, because v7 is current.
 - **`macos-26` pinned** rather than `macos-latest`. Its default Xcode, 26.6, builds the project,
   which uses no iOS 26 or 27 APIs.
 - **Only the unit tests gate merging.** The prompt allowed moving UI tests out once the gate passed
-  about 15 minutes; with everything in one job it passed 40, mostly the script suite. So the gate
-  builds all three targets and runs the iPhone and watch unit tests, while `ui-tests` and
-  `script-tests` run in parallel as checks that aren't required. Failed jobs upload their logs.
+  about 15 minutes; with everything in one job it passed 40. So the gate builds all three targets
+  and runs every iPhone and watch unit test, while `ui-tests` runs in parallel as a check that
+  isn't required. Failed jobs upload their logs.
 - **The implementing run is on a Mac and builds and tests its own change** with
   `scripts/claude-pipeline/check.sh`. The prompt had it on Linux with CI as the only compiler.
 - **Claude opens its PR with `gh pr create`.** The action's create-PR tool runs in Docker, which

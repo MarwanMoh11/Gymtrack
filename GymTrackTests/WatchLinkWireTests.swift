@@ -1,7 +1,16 @@
 import Foundation
+import Observation
 import SwiftData
 import Testing
 @testable import GymTrack
+
+/// Counts what an observation scope heard, and whether one is still waiting.
+/// A class because the `onChange` closure is `@Sendable` and cannot mutate a
+/// captured local.
+private final class RedrawCounter: @unchecked Sendable {
+    var count = 0
+    var watching = false
+}
 
 /// What the phone and the watch say to each other has to survive the wire, and
 /// has to fail quietly when it does not. A command that decodes to something it
@@ -16,6 +25,9 @@ import Testing
 /// the session when it was tapped, and a live reading never writes over a
 /// finished session's totals. The tombstone the wrist keeps for a session it ended, and
 /// the rule that decides which Health workout a session links, are here too.
+///
+/// A live reading that changes nothing must not redraw whatever reads it, which
+/// is checked on the real `WatchBridge`; that test puts the bridge back.
 @MainActor @Suite(.serialized)
 struct WatchLinkWireTests {
 
@@ -623,6 +635,65 @@ struct WatchLinkWireTests {
         #expect(!session.applyWatchFinish(batch), "a repeated Finish cannot alter a closed session")
         #expect(try context.fetchCount(FetchDescriptor<SetLog>()) == 1,
                 "a late copy of the batch must not bring back a row the close removed")
+    }
+
+    // MARK: - A live reading on the phone
+
+    /// The wrist resends a reading that has not changed, and assigning to an
+    /// observable property notifies its readers whether or not the value
+    /// moved, so every resend redrew the logger's header to show the same
+    /// number. Run through the real bridge, so it is the bridge's own
+    /// assignment that is held to "only on a change".
+    @Test func aLiveReadingRedrawsItsReadersOnlyWhenItChangesWhatThePhoneHolds() {
+        let bridge = WatchBridge.shared
+        let savedHandler = bridge.commandHandler
+        let id = UUID()
+        bridge.commandHandler = nil
+        bridge.clearMetrics()
+        bridge.update(session: WatchSessionSnapshot(
+            sessionID: id, title: "Push", planName: "", startedAt: Self.t0, exercises: [],
+            restTotalSeconds: 0, restAutoStart: true, volumeKg: 0, unit: .kg, effortEnabled: true))
+        defer {
+            bridge.update(session: nil, ended: nil)
+            bridge.commandHandler = savedHandler
+        }
+
+        let redraws = RedrawCounter()
+        // One observation at a time: `withObservationTracking` fires once, and a
+        // registration left waiting by a reading that changed nothing would
+        // otherwise be counted again by the next one.
+        func receive(_ metrics: WatchWorkoutMetrics) {
+            if !redraws.watching {
+                redraws.watching = true
+                withObservationTracking { _ = bridge.liveMetrics } onChange: {
+                    redraws.count += 1
+                    redraws.watching = false
+                }
+            }
+            bridge.handle(WatchCommand.metrics(metrics).watchPayload(key: WatchLink.commandKey))
+        }
+
+        receive(WatchWorkoutMetrics(sessionID: id, currentHeartRate: 120))
+        #expect(redraws.count == 1 && bridge.liveMetrics?.currentHeartRate == 120, "the first reading is a change")
+        receive(WatchWorkoutMetrics(sessionID: id, currentHeartRate: 120))
+        #expect(redraws.count == 1, "the same reading again must not redraw anything")
+        receive(WatchWorkoutMetrics(sessionID: id, currentHeartRate: 121))
+        #expect(redraws.count == 2 && bridge.liveMetrics?.currentHeartRate == 121)
+        receive(WatchWorkoutMetrics(sessionID: id, maxHeartRate: 140))
+        #expect(redraws.count == 3 && bridge.liveMetrics?.maxHeartRate == 140, "a first max is a change")
+        receive(WatchWorkoutMetrics(sessionID: id, maxHeartRate: 100))
+        #expect(redraws.count == 3, "a lower max folds into nothing new")
+        receive(WatchWorkoutMetrics(sessionID: id, maxHeartRate: 150))
+        #expect(redraws.count == 4 && bridge.liveMetrics?.maxHeartRate == 150)
+
+        let held = bridge.liveMetrics
+        #expect(WatchWorkoutMetrics.merged(WatchWorkoutMetrics(sessionID: UUID()), into: held) != nil,
+                "a payload for another session replaces what is held")
+        // The phone reads the metrics being there at all as "the watch is recording".
+        #expect(WatchWorkoutMetrics.merged(WatchWorkoutMetrics(sessionID: id), into: nil) != nil,
+                "the first payload of a session is a change even when empty")
+        #expect(WatchWorkoutMetrics.merged(WatchWorkoutMetrics(), into: held) == nil,
+                "a payload with no session folds into nothing")
     }
 
     // MARK: - The tombstone, across a relaunch
