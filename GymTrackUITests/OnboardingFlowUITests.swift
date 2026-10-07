@@ -6,10 +6,7 @@ import XCTest
 /// the screens are paged by a swipe-style `TabView`, which is exactly the kind
 /// of control that breaks quietly when its footer button stops advancing. The
 /// tests walk it with taps only. Nothing here is typed, so a runner's keyboard
-/// settings cannot change the result.
-///
-/// There is no legacy `Tests/*.swift` counterpart; unit tests cannot see a
-/// screen.
+/// settings cannot change the result. Unit tests cannot see a screen.
 final class OnboardingFlowUITests: GymTrackUITestCase {
 
     /// The default path with a template chosen: the routine that comes out of

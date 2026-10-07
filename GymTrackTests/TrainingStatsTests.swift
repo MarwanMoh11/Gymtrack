@@ -1071,6 +1071,47 @@ struct TrainingStatsTests {
         #expect(TrainingStats.SummaryRecordsKey(today) == before)
     }
 
+    /// The summary fetches only the completed sets of the session's own
+    /// exercises rather than walking every session, and has to name the same
+    /// record rows the walk does: through a merged ID, against a running
+    /// session, and without a set that belongs to no session.
+    @Test func theSummarysScopedFetchNamesTheSameRecordsAsTheWholeHistoryWalk() throws {
+        let rig = try Rig()
+        func day(_ n: Int) -> Date { TestClock.at("2026-03-02T09:00:00").addingTimeInterval(Double(n) * 86_400) }
+        rig.session(day(0), [
+            Work(id: "bench-x", kg: 60, reps: 8), Work(id: "plank-x", seconds: 50, tracking: .duration),
+            Work(id: "scaption-dumbbell", kg: 5, reps: 10), Work(id: "bench-x", kg: 100, reps: 5, drop: true),
+        ])
+        rig.session(day(1), [Work(id: "row-x", kg: 80, reps: 8)])
+        rig.session(day(2), finished: false, [Work(id: "bench-x", kg: 200, reps: 1)])
+        let orphan = SetLog(catalogID: "plank-x", exerciseName: "plank-x", exerciseOrder: 0, setIndex: 0,
+                            seconds: 999, tracking: .duration)
+        orphan.isCompleted = true
+        orphan.completedAt = day(0)
+        rig.context.insert(orphan)
+        let today = rig.session(day(3), [
+            Work(id: "bench-x", kg: 70, reps: 8), Work(id: "plank-x", seconds: 60, tracking: .duration),
+            Work(id: "plank-x", seconds: 75, tracking: .duration), Work(id: "scaption", kg: 8, reps: 10),
+            Work(id: "squat-x", kg: 90, reps: 5),
+        ])
+        try rig.context.save()
+
+        let history = try rig.context.fetch(FetchDescriptor<WorkoutSession>())
+        let whole = TrainingStats.summaryRecords(from: TrainingStats.recordSets(in: today, history: history)).map(\.id)
+        let scoped = try SummaryRecords.sets(for: today, in: rig.context).map(\.id)
+        #expect(!whole.isEmpty, "the fixture must produce records, or the comparison proves nothing")
+        #expect(scoped == whole)
+        // The longer plank and the merged scaption. Bench is out-lifted by the
+        // running session, and the orphan's 999 s is nobody's history.
+        let ids = logged(today).map(\.id)
+        #expect(Set(whole) == [ids[2], ids[3]])
+
+        let empty = rig.session(day(4), [])
+        #expect(try SummaryRecords.sets(for: empty, in: rig.context).isEmpty)
+        #expect(SummaryRecords.spellings(of: ["scaption"]).contains("scaption-dumbbell"),
+                "a merged spelling is searched under its survivor")
+    }
+
     // MARK: - Exercise history
 
     @Test func lastPerformanceIsTheNewestFinishedSessionsOwnSetsAndHistoryKeepsTheDrops() throws {

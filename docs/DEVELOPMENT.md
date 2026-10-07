@@ -77,14 +77,11 @@ xcodebuild test -project GymTrack.xcodeproj -scheme GymTrack \
 xcodebuild test -project GymTrack.xcodeproj -scheme GymTrackWatch \
   -destination 'platform=watchOS Simulator,name=Apple Watch Series 11 (46mm)' \
   -derivedDataPath build/watch -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
-sh scripts/test-all.sh
 ```
 
 The first runs `GymTrackTests` and `GymTrackUITests`, the second
-`GymTrackWatchTests`, the third the older `Tests/` suite (about seven minutes;
-`sh scripts/test-all.sh watch` runs only the scripts with "watch" in their
-name). Add `-only-testing:GymTrackTests/SuiteName` to run one suite. CI runs
-all three on every pull request; see `docs/claude-pipeline.md`.
+`GymTrackWatchTests`. Add `-only-testing:GymTrackTests/SuiteName` to run one
+suite. CI runs both on every pull request; see `docs/claude-pipeline.md`.
 
 ## Checking your own work
 

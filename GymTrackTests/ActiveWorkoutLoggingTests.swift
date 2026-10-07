@@ -2034,6 +2034,17 @@ struct ActiveWorkoutLoggingTests {
         #expect(!RestChimeRules.chimesOnExpiry(endsAt: end, now: end.addingTimeInterval(2.01)))
     }
 
+    /// In view, the end timer is at most a quarter second late, and a brief
+    /// stall in the foreground is still a rest the lifter watched. The review's
+    /// own case is a 30 s rest with the phone locked for 60: the notification
+    /// announced the end 30 s earlier, and a chime then lands mid-set.
+    @Test(arguments: [(0.0, true), (0.3, true), (1.5, true),
+                      (RestChimeRules.lateTolerance + 0.5, false), (30, false), (600, false)])
+    func aRestChimesOnlyWhenItsEndIsFoundInView(lateBy seconds: TimeInterval, chimes: Bool) {
+        let end = WorkoutBench.t0
+        #expect(RestChimeRules.chimesOnExpiry(endsAt: end, now: end.addingTimeInterval(seconds)) == chimes)
+    }
+
     @Test func aRunningRestChangesNothingAViewCouldSeeUntilItsEndWhichItAnnouncesOnce() throws {
         let idle = RestTimer(notifier: SpyNotifier())
         #expect(idle.progress(at: WorkoutBench.t0) == 0)

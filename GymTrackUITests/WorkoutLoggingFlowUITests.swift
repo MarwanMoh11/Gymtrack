@@ -10,8 +10,7 @@ import XCTest
 ///
 /// The freestyle flows start from a launch with no plan, so they pass on any
 /// weekday. The planned-day flow offers a session by whichever Today card the
-/// weekday produces, for the same reason. There is no legacy `Tests/*.swift`
-/// counterpart.
+/// weekday produces, for the same reason.
 final class WorkoutLoggingFlowUITests: GymTrackUITestCase {
 
     private let benchPress = "Barbell Bench Press"

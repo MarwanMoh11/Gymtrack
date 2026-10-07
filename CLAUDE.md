@@ -11,7 +11,6 @@ before building or touching a simulator, and confirms all three schemes build be
 | `GymTrackWatch/` / `GymTrackWidgets/` | watchOS app / Home Screen widgets and the Live Activity |
 | `GymTrackShared/` | Compiled into each target that needs it (not a module): `Theme`, `WatchLink`, `LoadScale`, `SetFeel`, `LaunchMode` |
 | `GymTrackTests/`, `GymTrackWatchTests/`, `GymTrackUITests/` | Swift Testing unit tests (helpers in `Support/`) and XCUITest flows |
-| `Tests/` + `scripts/test-*.sh` | Older suite: app slices compiled with `swiftc` against stubs |
 
 Synchronised folders: a new file joins its folder's target. Never edit `project.pbxproj` to add one.
 
@@ -40,8 +39,7 @@ The backup's `version` stays 2; every field added since is optional.
 
 ## Tests
 - Every behavior change adds or updates tests in the matching `*Tests.swift` in `GymTrackTests/`,
-  `GymTrackWatchTests/` or `GymTrackUITests/`. Never add tests to `Tests/`; fix one there only when
-  your change breaks it.
+  `GymTrackWatchTests/` or `GymTrackUITests/`.
 - `@MainActor @Suite(.serialized)`, `@Test`, `#expect`, `@Test(arguments:)` for edge cases. Dates from
   `TestClock`; `Date.now` only where the code checks its own clock; no sleeps; restore singletons in `defer`.
 - A test exposing a real bug stays, in `withKnownIssue`; never weaken an assertion. UI tests find

@@ -7,7 +7,7 @@ import XCTest
 /// field that stops filtering is easy to ship without noticing. The tests
 /// start from an onboarded, empty install, so they hold on any weekday. Settings
 /// is only opened, never exported from: the share sheet belongs to the system
-/// and is not stable to drive. There is no legacy `Tests/*.swift` counterpart.
+/// and is not stable to drive.
 final class NavigationUITests: GymTrackUITestCase {
 
     private let exerciseCount = NSPredicate(format: "label MATCHES %@", "^[0-9]+ exercises?$")
