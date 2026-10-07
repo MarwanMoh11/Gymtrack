@@ -123,16 +123,17 @@ final class HealthKitService {
     /// use, and resting heart rate is recovery data, which the product has
     /// rejected. A permission nothing needs is also one a later change can
     /// start using without anyone noticing. Adding a type here means adding the
-    /// code that reads it in the same change; `HealthPermissionSetTests`
-    /// compares the two.
-    private static let readQuantityIdentifiers: [HKQuantityTypeIdentifier] = [
+    /// code that reads it in the same change, and changing
+    /// `HealthKitServiceTests`, which holds this list to exactly what is read.
+    /// Internal rather than private so that test can see it.
+    static let readQuantityIdentifiers: [HKQuantityTypeIdentifier] = [
         .heartRate, .activeEnergyBurned, .bodyMass,
     ]
 
     /// Quantities the phone writes. Only body weight: the workout builder adds
     /// no energy samples of its own, so share access to active energy was never
-    /// exercised.
-    private static let shareQuantityIdentifiers: [HKQuantityTypeIdentifier] = [.bodyMass]
+    /// exercised. Internal for the same test.
+    static let shareQuantityIdentifiers: [HKQuantityTypeIdentifier] = [.bodyMass]
 
     private var shareTypes: Set<HKSampleType> {
         var types: Set<HKSampleType> = [HKObjectType.workoutType()]

@@ -11,7 +11,7 @@ import SwiftUI
 /// one before settling. Undoing the only logged set sends the count from one to
 /// none, the spring dipped just below zero, and the tick loop trapped on a range
 /// with a negative end (#2). These render the bar rather than read a property,
-/// because the trap was in the drawing. No legacy `Tests/*.swift` counterpart.
+/// because the trap was in the drawing.
 @MainActor @Suite(.serialized)
 struct PhaseProgressBarTests {
 

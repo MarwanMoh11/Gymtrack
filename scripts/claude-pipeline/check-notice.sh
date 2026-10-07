@@ -51,7 +51,8 @@ EOF
 [ -n "$checks" ] || exit 0
 
 # The checker prints only the errors and failing tests (check.sh). Anything
-# else, such as the script suite, gets the last lines of its failed step.
+# else, such as a step that fails before the checker runs, gets the last lines
+# of its failed step.
 # Backticks go, so a line can't close the code block it is quoted in.
 log=$(gh run view "$RUN_ID" -R "$REPO" --attempt "$ATTEMPT" --log-failed 2> /dev/null |
     awk -F '\t' '$1 != "review"' | cut -f 3- | sed 's/^[^ ]* //' | tr -d '\033`' |

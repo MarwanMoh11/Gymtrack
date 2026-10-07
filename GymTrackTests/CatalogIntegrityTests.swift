@@ -8,7 +8,12 @@ import SwiftData
 /// vanishes, repeats or means something else strands somebody's history.
 ///
 /// Reads the real `exercises.json` from the app bundle, which is what a hosted
-/// run loads. The native counterpart of the legacy `Tests/LibraryDataTests.swift`.
+/// run loads. Also covers what a custom exercise's edits do to the plan slots
+/// that use it.
+///
+/// The catalog is process-wide. A test that gives it custom or hidden
+/// exercises does so in its own synchronous body and empties both again in
+/// `defer`, so no other suite's search or lookup sees what one test registered.
 @MainActor @Suite(.serialized)
 struct CatalogIntegrityTests {
 
@@ -171,5 +176,77 @@ struct CatalogIntegrityTests {
         #expect(first.isActive)
         #expect(!second.isActive)
         #expect(try context.fetch(FetchDescriptor<Plan>()).filter(\.isActive).count == 1)
+    }
+
+    // MARK: - The lifter's own exercises
+
+    private func slot(_ catalogID: String, _ name: String, in context: ModelContext) -> PlanItem {
+        let item = PlanItem(catalogID: catalogID, name: name, order: 0)
+        context.insert(item)
+        return item
+    }
+
+    /// `ExerciseEditorView.save()` carries a rename onto the plan, so a session
+    /// started tomorrow shows the new name. A logged set keeps the name it was
+    /// lifted under: rewriting it would present a name nobody typed that day.
+    @Test func aRenameReachesOnlyTheExercisesOwnSlotsAndNeverALoggedSet() throws {
+        let context = try TestStore.context()
+        let mine = slot("custom-aaaa", "Old name", in: context)
+        let again = slot("custom-aaaa", "Old name", in: context)
+        let other = slot("custom-bbbb", "Other", in: context)
+        let bundled = slot("barbell-bench-press", "Bench Press", in: context)
+        let past = SetLog(catalogID: "custom-aaaa", exerciseName: "Old name", exerciseOrder: 0, setIndex: 0,
+                          weightKg: 20, reps: 8, tracking: .weightReps)
+        past.isCompleted = true
+        context.insert(past)
+        try context.save()
+
+        #expect(try context.renamePlanSlots(of: "custom-aaaa", to: "New name") == 2)
+        #expect(mine.name == "New name" && again.name == "New name")
+        #expect(other.name == "Other" && bundled.name == "Bench Press", "another exercise's slots are left alone")
+        #expect(past.exerciseName == "Old name", "a logged set keeps the name it was performed under")
+
+        #expect(try context.renamePlanSlots(of: "custom-aaaa", to: "New name") == 0,
+                "renaming to the name already held changes nothing")
+        // A slot named "" would open a workout with an unlabelled exercise.
+        #expect(try context.renamePlanSlots(of: "custom-aaaa", to: "  \n") == 0)
+        #expect(mine.name == "New name")
+    }
+
+    /// `RootView.syncCustomExercises` stamps each custom slot with how its
+    /// exercise is measured, so a slot whose exercise is later deleted, or
+    /// never restored, still reads a hold as a hold instead of opening a
+    /// workout at 0 kg for some reps.
+    @Test func aCustomSlotKeepsItsTrackingOnceItsExerciseIsGone() throws {
+        catalog.setCustom([])
+        catalog.setHidden([])
+        defer {
+            catalog.setCustom([])
+            catalog.setHidden([])
+        }
+        let context = try TestStore.context()
+        let hold = CustomExerciseRecord(name: "Dead Hang", muscles: [], equipment: [], tracking: .duration)
+        context.insert(hold)
+        let plain = slot(hold.id, "Dead Hang", in: context)
+        let stamped = slot(hold.id, "Dead Hang", in: context)
+        stamped.trackingRaw = TrackingMode.duration.rawValue
+        let bundled = slot("barbell-bench-press", "Bench Press", in: context)
+        let elsewhere = slot("custom-gone", "Unknown", in: context)
+        try context.save()
+
+        catalog.setCustom([hold.asCatalogExercise])
+        #expect(try context.snapshotCustomSlotTracking(of: [hold.asCatalogExercise]) == 1,
+                "only the slot without a record is stamped")
+        #expect(plain.trackingRaw == TrackingMode.duration.rawValue)
+        // No data, no key: a bundled exercise always resolves, and a slot whose
+        // exercise is not in the list is not guessed at.
+        #expect(bundled.trackingRaw == nil)
+        #expect(elsewhere.trackingRaw == nil)
+        #expect(try context.snapshotCustomSlotTracking(of: [hold.asCatalogExercise]) == 0, "a second pass stamps nothing")
+        #expect(try context.snapshotCustomSlotTracking(of: []) == 0)
+
+        catalog.setCustom([])
+        #expect(catalog.exercise(id: hold.id) == nil)
+        #expect(plain.tracking == .duration, "a slot outlives its exercise measuring what it measured")
     }
 }
