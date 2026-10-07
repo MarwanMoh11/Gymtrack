@@ -206,15 +206,19 @@ final class RestTimer {
     /// land after an `add` has moved the end further out, and because a timer
     /// can fire a hair before its date, which would otherwise leave a rest
     /// running with nothing left to end it.
-    private func expireIfDue() {
+    ///
+    /// Not private, and told the moment, so a test can fire the end at a time
+    /// of its choosing: otherwise it could only see the end by spinning the
+    /// run loop for the length of a rest.
+    func expireIfDue(now: Date = .now) {
         guard let endsAt else { return }
-        guard endsAt <= .now else { return arm() }
-        finish(endedAt: endsAt)
+        guard endsAt <= now else { return arm() }
+        finish(endedAt: endsAt, now: now)
     }
 
-    private func finish(endedAt end: Date) {
+    private func finish(endedAt end: Date, now: Date) {
         stop()
-        guard RestChimeRules.chimesOnExpiry(endsAt: end, now: .now) else { return }
+        guard RestChimeRules.chimesOnExpiry(endsAt: end, now: now) else { return }
         Haptics.success()
         AudioServicesPlaySystemSound(1057)   // short, non-intrusive alert
     }

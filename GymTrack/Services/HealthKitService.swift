@@ -62,6 +62,13 @@ final class HealthKitService {
     private static let cleanupAttemptsKey = "health.cleanupAttempts"
     @ObservationIgnored private var protectedDataObserver: NSObjectProtocol?
 
+    /// Told the workout IDs at the start of every path that asks Health to
+    /// remove a workout, before any permission check. Nil in the app. A test
+    /// sets it to prove that a path never asked: a restore takes no Health
+    /// parameter, and without write access the real service leaves no trace
+    /// to read afterwards.
+    @ObservationIgnored var onDeletionRequest: (([UUID]) -> Void)?
+
     private init() {
         hasRequestedAuthorization = defaults.bool(forKey: SettingsKey.healthRequested)
         givenUpCleanupCount = loadAttemptLedger().givenUp.count
@@ -523,6 +530,7 @@ final class HealthKitService {
     }
 
     private func enqueueCleanup(workoutID: UUID, sessionID: UUID, preferredWorkoutID: UUID?) {
+        onDeletionRequest?([workoutID])
         savePendingWorkouts(HealthCleanupQueue.enqueue(
             PendingWorkoutCleanup(workoutID: workoutID, sessionID: sessionID,
                                   preferredWorkoutID: preferredWorkoutID),
@@ -590,6 +598,7 @@ final class HealthKitService {
     /// `deleteWorkout`, keeping apart a refusal from a phone that is only
     /// locked, which the cleanup list must not hold against the workout.
     private func deleteOutcome(id: UUID) async -> CleanupAttemptLedger.Outcome {
+        onDeletionRequest?([id])
         guard isAvailable else { return .refused }
         guard canWriteWorkouts else {
             log.info("Health write access is off; the workout will be removed once it is back")
@@ -636,6 +645,7 @@ final class HealthKitService {
     /// a source named after this app's, so both count as ours. If the batch
     /// itself is refused, nothing was removed and every found ID is returned.
     func deleteWorkouts(ids: [UUID]) async -> [UUID] {
+        onDeletionRequest?(ids)
         let wanted = WorkoutDeletionPlan.unique(ids)
         guard !wanted.isEmpty else { return [] }
         guard isAvailable else { return wanted }

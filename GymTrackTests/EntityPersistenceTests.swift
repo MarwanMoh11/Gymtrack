@@ -7,10 +7,10 @@ import Testing
 /// set leaves behind, what a delete takes with it, and the derived values the
 /// rest of the app reads off a session.
 ///
-/// Complements the swiftc-built `Tests/SessionRulesTests.swift` and the unlog
-/// and session-model checks beside it, which cannot open the real schema, and
-/// `PlanEditingTests`, which covers the rotation and editing a routine.
-/// Everything here runs against an in-memory store built from `AppSchema.models`.
+/// Complements `ActiveWorkoutLoggingTests`, which checks that a taken-back set
+/// leaves nothing behind, and `PlanEditingTests`, which covers the rotation and
+/// editing a routine. Everything here runs against an in-memory store built
+/// from `AppSchema.models`.
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct EntityPersistenceTests {
@@ -375,6 +375,134 @@ struct EntityPersistenceTests {
         #expect(titles == ["Fresh", "Trained"])
         #expect(trained.endedAt == lastSet)
         #expect(fresh.isActive)
+    }
+
+    /// The twelve-hour rule every path shares, asked the way the app asks it:
+    /// of the wall clock, so these sessions are placed by offsets from it.
+    /// Thirteen hours is yesterday's session; eleven is still somebody's workout.
+    @Test func aStaleSessionIsClosedWithoutItsUnliftedRowsAndAnElevenHourOneIsLeftAlone() throws {
+        DroppedSetMemory.shared.replaceStore(with: TestClock.freshDefaults())
+        defer { DroppedSetMemory.shared.replaceStore(with: .standard) }
+        let context = try TestStore.context()
+        let now = Date.now
+        func session(_ title: String, startedHoursAgo hours: Double, loggedAfterMinutes minutes: Double?) -> WorkoutSession {
+            let session = PersistenceFixtures.session(title, startedAt: now.addingTimeInterval(-hours * 3600), in: context)
+            if let minutes {
+                let lifted = PersistenceFixtures.set(setIndex: 0, completedAt: session.startedAt.addingTimeInterval(minutes * 60))
+                PersistenceFixtures.add(lifted, to: session, in: context)
+            }
+            PersistenceFixtures.add(PersistenceFixtures.set(setIndex: 1), to: session, in: context)
+            return session
+        }
+        let lifted = session("Lifted", startedHoursAgo: 13, loggedAfterMinutes: 40)
+        let empty = session("Empty", startedHoursAgo: 13, loggedAfterMinutes: nil)
+        let recent = session("Recent", startedHoursAgo: 11, loggedAfterMinutes: 40)
+        try context.save()
+        let lastSet = lifted.startedAt.addingTimeInterval(40 * 60)
+
+        #expect(lifted.isStale() && empty.isStale())
+        #expect(!recent.isStale())
+        #expect(lifted.closeIfStale(in: context))
+        #expect(empty.closeIfStale(in: context))
+        #expect(!recent.closeIfStale(in: context))
+        try context.save()
+
+        #expect(lifted.endedAt == lastSet, "a stale session ends at its last set, not when the app noticed")
+        #expect(lifted.sets.count == 1 && lifted.sets.first?.isCompleted == true)
+        let titles = try context.fetch(FetchDescriptor<WorkoutSession>()).map(\.title).sorted()
+        #expect(titles == ["Lifted", "Recent"], "a stale session with nothing logged is deleted")
+        #expect(recent.isActive && recent.sets.count == 2)
+
+        // A Finish on a session left open overnight goes through `close`, which
+        // every Finish does, and is held to the same rule.
+        let overnight = session("Overnight", startedHoursAgo: 20, loggedAfterMinutes: 55)
+        try context.save()
+        overnight.close(in: context)
+        #expect(overnight.endedAt == overnight.startedAt.addingTimeInterval(55 * 60))
+    }
+
+    // MARK: - One home for each session rule
+
+    /// The widgets and the app each deciding when a session is abandoned would
+    /// let the Home Screen drop a workout the logger still offers to resume.
+    @Test func theModelReadsItsStaleBoundFromTheWidgetSnapshot() {
+        #expect(WorkoutSession.staleAfter == GymTrackSnapshot.Running.staleAfter)
+        #expect(WorkoutSession.staleAfter == 12 * 3600)
+    }
+
+    @Test func aStartIsBelievedOnlyAsLongAsTheSetCouldHaveTakenAndIsDroppedNotShortened() throws {
+        let context = try TestStore.context()
+        let session = PersistenceFixtures.session(startedAt: start, in: context)
+        let set = PersistenceFixtures.set(setIndex: 0, kg: 60, reps: 8)
+        PersistenceFixtures.add(set, to: session, in: context)
+        set.startedAt = start
+
+        // Eight reps come to less than the three-minute floor.
+        #expect(set.longestPlausibleLength == 180)
+        #expect(set.startStillDescribes(loggedAt: start.addingTimeInterval(180)))
+        #expect(!set.startStillDescribes(loggedAt: start.addingTimeInterval(181)))
+
+        session.settleStarts(afterLogging: set, at: start.addingTimeInterval(200))
+        #expect(set.startedAt == nil)
+    }
+
+    @Test func loggingASetKeepsItsOwnStartDropsOneItOvertookAndLeavesOneStillAhead() throws {
+        let context = try TestStore.context()
+        let session = PersistenceFixtures.session(startedAt: start, in: context)
+        let sets = (0..<3).map { PersistenceFixtures.set(setIndex: $0, kg: 60, reps: 8) }
+        for set in sets { PersistenceFixtures.add(set, to: session, in: context) }
+        sets[0].startedAt = start
+        sets[1].startedAt = start.addingTimeInterval(-30)
+        sets[2].startedAt = start.addingTimeInterval(150)
+
+        session.settleStarts(afterLogging: sets[0], at: start.addingTimeInterval(100))
+
+        #expect(sets[0].startedAt == start)
+        // Nobody lifts two sets at once: an unlogged start before the log was abandoned.
+        #expect(sets[1].startedAt == nil)
+        #expect(sets[2].startedAt == start.addingTimeInterval(150))
+    }
+
+    /// `DroppedSetMemory.shared` is one object for the life of the process, so
+    /// a test points it at a store of its own rather than replacing it.
+    @Test func pointingTheDroppedSetMemoryAtAnotherStoreKeepsTheObjectAndNoneOfTheEntries() {
+        let memory = DroppedSetMemory.shared
+        let suites = ["droppedSetMemoryFirst", "droppedSetMemorySecond"]
+        let stores = suites.map { TestClock.freshDefaults($0) }
+        defer {
+            memory.replaceStore(with: .standard)
+            for suite in suites { UserDefaults().removePersistentDomain(forName: "GymTrackTests." + suite) }
+        }
+        memory.replaceStore(with: stores[0])
+        let setID = UUID()
+        memory.rememberTakenBack(setID, completedAt: start, now: start)
+        #expect(memory.wasTakenBack(setID, loggedAt: start, now: start))
+
+        memory.replaceStore(with: stores[1])
+
+        #expect(DroppedSetMemory.shared === memory)
+        #expect(!memory.wasTakenBack(setID, loggedAt: start, now: start))
+    }
+
+    /// Which sessions the wrist's own Finish settled is held in memory, beside
+    /// the store; a test's store change must not carry one over.
+    @Test func pointingTheDroppedSetMemoryAtAStoreForgetsWhichSessionsTheWristSettled() throws {
+        let memory = DroppedSetMemory.shared
+        let suite = "droppedSetMemorySettled"
+        defer {
+            memory.replaceStore(with: .standard)
+            UserDefaults().removePersistentDomain(forName: "GymTrackTests." + suite)
+        }
+        let context = try TestStore.context()
+        let closing = PersistenceFixtures.session("Closing", startedAt: start, in: context)
+        let dropped = PersistenceFixtures.set(PersistenceFixtures.squat, setIndex: 0, kg: 60, reps: 8)
+        PersistenceFixtures.add(dropped, to: closing, in: context)
+
+        memory.settle(closing.id)
+        memory.replaceStore(with: TestClock.freshDefaults(suite))
+        memory.remember([DroppedSetRow(dropped, in: closing, at: start)], closing: closing.id, now: start)
+
+        #expect(memory.row(for: dropped.id, now: start) != nil)
     }
 
     // MARK: - Plans

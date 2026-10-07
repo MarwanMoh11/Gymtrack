@@ -33,6 +33,14 @@ final class WatchRestTimer {
     /// end date until it notices the rest is over, and a mirror arriving after
     /// the wrist had already tapped for it played the tap a second time.
     @ObservationIgnored private var lastExpiredAt: Date?
+    /// What a rest running out here plays on the wrist. Handed in so a test can
+    /// count it: whether the same end taps twice rests on `lastExpiredAt`, and
+    /// the tap is the only thing that shows it.
+    @ObservationIgnored private let restOver: () -> Void
+
+    init(restOver: @escaping () -> Void = WatchHaptics.restOver) {
+        self.restOver = restOver
+    }
 
     var isRunning: Bool { endsAt != nil }
 
@@ -139,10 +147,12 @@ final class WatchRestTimer {
     }
 
     /// The timer's own call. Guarded because the timer's hop onto the main
-    /// actor can land after an `add` has moved the end further out.
-    private func expireIfDue() {
-        guard let endsAt, endsAt <= .now else { return }
-        expire(now: .now)
+    /// actor can land after an `add` has moved the end further out. Internal,
+    /// with the moment passed in, so a test can run the expiry the timer runs
+    /// without waiting for a real one to fire.
+    func expireIfDue(now: Date = .now) {
+        guard let endsAt, endsAt <= now else { return }
+        expire(now: now)
     }
 
     /// The rest has run out. The tap is only for a rest that ends while it is
@@ -155,6 +165,6 @@ final class WatchRestTimer {
         let buzzes = WatchRestRules.buzzesOnExpiry(endsAt: endsAt, now: now)
         lastExpiredAt = endsAt
         clear()
-        if buzzes { WatchHaptics.restOver() }
+        if buzzes { restOver() }
     }
 }
