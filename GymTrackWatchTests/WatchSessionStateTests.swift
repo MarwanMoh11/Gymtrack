@@ -5,13 +5,14 @@ import Testing
 /// What the wrist believes about the session, and how it gives that belief up:
 /// mirrors that arrive late or out of order, an undo taken on the wrist before
 /// the phone has heard it, ratings still in flight, an empty session, and the
-/// tombstone that keeps a session the wrist ended from coming back.
+/// tombstone that keeps a session the wrist ended from coming back. Beside the
+/// main scenarios they pin the edges those skim past: a re-log a millisecond
+/// apart, a refused undo that must not hide a start, a stamp that was never
+/// sent, and a session that is exactly twelve hours old.
 ///
-/// Complements the script-style `Tests/WatchMirrorReconciliationTests.swift`,
-/// `Tests/WatchSessionTombstoneTests.swift` and `Tests/WatchSetRatingTests.swift`.
-/// Those walk the main scenarios; these pin the edges the scenarios skim past:
-/// a re-log a millisecond apart, a refused undo that must not hide a start, a
-/// stamp that was never sent, and a session that is exactly twelve hours old.
+/// The tombstone across a relaunch, through `UserDefaults` and the wire, is in
+/// the iPhone suite's `WatchLinkWireTests`; the answers themselves are in
+/// `WatchRatingTests`.
 ///
 /// Everything here is a value type. `WatchConnector` is a singleton over
 /// `UserDefaults.standard` and is deliberately not touched; `WristState` below
@@ -103,6 +104,58 @@ struct WatchSessionStateTests {
         wrist.receive(before)
         #expect(wrist.held.session?.allSets.first { $0.id == a }?.isCompleted == true)
         #expect(wrist.pending.logs.isEmpty)
+    }
+
+    @Test func everythingThePhoneHasNotShownYetIsKeptForTheSessionItBelongsTo() {
+        let a = UUID(), b = UUID()
+        let session = watchSession(sets: [watchSet(a), watchSet(b)])
+        var pending = WatchPendingActions()
+        pending.adopt(session.sessionID)
+        pending.logs[a] = watchLog(a, at: t0.addingTimeInterval(10))
+        pending.starts[b] = t0.addingTimeInterval(20)
+        pending.focus = "squat"
+
+        let out = WatchMirrorReconciliation.reconcile(pending: pending, ratings: WatchRatingOutbox(), with: session).pending
+        #expect(out.logs[a] != nil, "a log the phone has not shown yet is the only copy the screen has")
+        #expect(out.starts[b] != nil)
+        #expect(out.focus == "squat", "the phone names no exercise, so the pick is not its answer yet")
+        #expect(out.sessionID == session.sessionID)
+    }
+
+    /// One mirror that settles some of the wrist's work and not the rest:
+    /// each piece goes exactly when the phone shows it, and not before.
+    @Test func aMirrorThatShowsSomeOfTheWristsWorkRetiresExactlyThatWork() {
+        let a = UUID(), b = UUID(), c = UUID(), gone = UUID()
+        let done = t0.addingTimeInterval(10)
+        let session = watchSession(exercises: [watchExercise(sets: [
+            watchSet(a, completedAt: done), watchSet(b, completedAt: done), watchSet(c)
+        ])], preferred: "squat")
+        var pending = WatchPendingActions()
+        pending.adopt(session.sessionID)
+        pending.logs[a] = watchLog(a, at: done)
+        pending.logs[b] = watchLog(b, at: done.addingTimeInterval(30))
+        pending.logs[gone] = watchLog(gone, at: done)
+        // Undos with no stamp, as a build from before stamps saved them.
+        pending.undos = [a, gone]
+        pending.starts[c] = t0
+        pending.starts[b] = t0
+        pending.cancels = [c]
+        pending.focus = "squat"
+
+        let out = WatchMirrorReconciliation.reconcile(pending: pending, ratings: WatchRatingOutbox(), with: session).pending
+        #expect(out.logs[a] == nil, "the phone shows this completion")
+        #expect(out.logs[b] != nil, "a row shown completed at another moment has not shown this log")
+        #expect(out.logs[gone] == nil, "a row the phone no longer has is dropped")
+        #expect(out.undos == [a], "an undo waits until its set shows completed, and only for a set that exists")
+        #expect(out.starts[c] != nil, "the phone has not shown this start yet")
+        #expect(out.starts[b] == nil, "a start on a set shown done is never coming")
+        #expect(out.cancels.isEmpty, "nothing to cancel once the phone shows no start")
+        #expect(out.focus == nil, "the phone names the same exercise")
+
+        var deleted = session
+        deleted.exercises[0].id = "bench"
+        let refused = WatchMirrorReconciliation.reconcile(pending: pending, ratings: WatchRatingOutbox(), with: deleted)
+        #expect(refused.pending.focus == nil, "an exercise gone from the session is the phone turning the pick down")
     }
 
     @Test func aLogIsAcknowledgedOnlyByTheCompletionItMadeNotByAnEarlierOneOfTheSameRow() {
@@ -204,6 +257,49 @@ struct WatchSessionStateTests {
         let empty = pending.finishBatch(for: other, ratings: [mine, WatchSetRating(sessionID: other, setID: UUID(), completedAt: t0, rpe: nil)])
         #expect(empty.logs.isEmpty && empty.undos.isEmpty && empty.starts.isEmpty && empty.cancels.isEmpty)
         #expect(empty.ratings.count == 1 && empty.ratings.first?.sessionID == other)
+    }
+
+    /// The harm a refused undo did while it stayed pending: Finish carried it,
+    /// and the phone applied it over the re-log it had just protected.
+    @Test func aFinishAfterThePhoneRefusedAnUndoNoLongerCarriesIt() {
+        let a = UUID()
+        let session = watchSession(sets: [watchSet(a, completedAt: t0.addingTimeInterval(90))])
+        var pending = WatchPendingActions()
+        pending.adopt(session.sessionID)
+        pending.recordUndo(of: a, completedAt: t0.addingTimeInterval(10))
+        #expect(pending.finishBatch(for: session.sessionID, ratings: []).undos == [a])
+
+        let settled = WatchMirrorReconciliation.reconcile(pending: pending, ratings: WatchRatingOutbox(), with: session).pending
+        #expect(settled.finishBatch(for: session.sessionID, ratings: []).undos.isEmpty)
+    }
+
+    @Test func anUndoOfASetNoLongerThereIsSettledAndSoIsEveryUndoOnceThereIsNoSession() {
+        let a = UUID(), b = UUID()
+        let done = t0.addingTimeInterval(10)
+        let session = watchSession(sets: [watchSet(a), watchSet(b, completedAt: done)])
+        var pending = WatchPendingActions()
+        pending.adopt(session.sessionID)
+        pending.recordUndo(of: a, completedAt: done)
+        pending.recordUndo(of: UUID(), completedAt: done)
+
+        let shown = WatchMirrorReconciliation.reconcile(pending: pending, ratings: WatchRatingOutbox(), with: session).pending
+        #expect(shown.undos.isEmpty, "unlogged, or no longer in the session: settled either way")
+        #expect(shown.undoStamps.isEmpty)
+        let none = WatchMirrorReconciliation.reconcile(pending: pending, ratings: WatchRatingOutbox(), with: nil).pending
+        #expect(none.undos.isEmpty && none.undoStamps.isEmpty)
+    }
+
+    @Test func forgettingAnUndoTakesItsStampWithIt() {
+        let stamped = UUID(), blind = UUID()
+        var pending = WatchPendingActions()
+        pending.adopt(UUID())
+        pending.recordUndo(of: stamped, completedAt: t0)
+        pending.recordUndo(of: blind, completedAt: nil)
+        #expect(Set(pending.undoStamps.keys) == [stamped], "an undo with no stamp stores no stamp, not a placeholder")
+
+        pending.forgetUndo(of: stamped)
+        pending.forgetUndo(of: blind)
+        #expect(pending.undos.isEmpty && pending.undoStamps.isEmpty)
     }
 
     // MARK: - Starts, picks, other sessions, and nothing at all
@@ -399,6 +495,37 @@ struct WatchSessionStateTests {
         #expect(WatchSessionTombstone(defaults: defaults).sessionID == nil)
     }
 
+    /// `WatchPendingActions` as a build from before undo stamps writes and reads it.
+    private struct LegacyPending: Codable {
+        var sessionID: UUID?
+        var logs: [UUID: WatchPendingLog]
+        var undos: Set<UUID>
+        var starts: [UUID: Date]
+        var cancels: Set<UUID>
+        var focus: String?
+    }
+
+    /// A watch that updated mid-workout reads what the old build saved, and a
+    /// build that has never heard of stamps still reads what this one saves.
+    @Test func theOverlayIsReadAcrossTheBuildThatAddedUndoStampsInBothDirections() throws {
+        let a = UUID(), session = UUID()
+        let stamp = t0.addingTimeInterval(10)
+
+        let old = LegacyPending(sessionID: session, logs: [:], undos: [a], starts: [:], cancels: [a], focus: "squat")
+        let revived = try JSONDecoder().decode(WatchPendingActions.self, from: JSONEncoder().encode(old))
+        #expect(revived.sessionID == session && revived.undos == [a] && revived.cancels == [a])
+        #expect(revived.focus == "squat" && revived.undoStamps.isEmpty)
+
+        var current = WatchPendingActions()
+        current.adopt(session)
+        current.recordUndo(of: a, completedAt: stamp)
+        let written = try JSONEncoder().encode(current)
+        let again = try JSONDecoder().decode(WatchPendingActions.self, from: written)
+        #expect(again.undos == [a] && again.undoStamps[a] == stamp)
+        let downgraded = try JSONDecoder().decode(LegacyPending.self, from: written)
+        #expect(downgraded.undos == [a] && downgraded.sessionID == session)
+    }
+
     // MARK: - The tombstone
 
     @Test func aSessionTheWristEndedIsNotResurrectedByAStaleOrCachedMirror() {
@@ -429,6 +556,33 @@ struct WatchSessionStateTests {
         #expect(tombstone.liveSession(in: watchMirror(nil, at: now), awaitingFreshMirror: false, now: now) == nil)
         let empty = watchSession(startedAt: t0, exercises: [])
         #expect(tombstone.liveSession(in: watchMirror(empty, at: now), awaitingFreshMirror: false, now: now) == empty)
+    }
+
+    /// Finish tapped on the wrist with the phone out of range, and the reply to
+    /// `requestMirror` overtaking the queued Finish. Asked at the reply's own
+    /// moment, so the twelve-hour rule cannot be what refuses the session: an
+    /// unmarked tombstone shows the same reply as live.
+    @Test func aReplyThatOvertookAWristFinishNeitherRevivesTheSessionNorDropsItsLogs() {
+        let a = UUID()
+        let session = watchSession(startedAt: t0, sets: [watchSet(a)])
+        var pending = WatchPendingActions()
+        pending.adopt(session.sessionID)
+        pending.logs[a] = watchLog(a, at: t0)
+        var tombstone = WatchSessionTombstone()
+        tombstone.mark(session.sessionID)
+
+        let replyAt = t0.addingTimeInterval(5)
+        let reply = watchMirror(session, at: replyAt)
+        #expect(WatchMirrorReconciliation.accepts(reply, over: .placeholder))
+        tombstone.settle(with: reply, fromCache: false)
+        #expect(tombstone.liveSession(in: reply, awaitingFreshMirror: false, now: replyAt) == nil)
+        #expect(WatchSessionTombstone().liveSession(in: reply, awaitingFreshMirror: false, now: replyAt) == session)
+        #expect(!tombstone.admits(session.sessionID), "and it must not start a second recording")
+
+        // The wrist's own logs are still the phone's to hear, so a mirror that
+        // names the session leaves them where they are.
+        let out = WatchMirrorReconciliation.reconcile(pending: pending, ratings: WatchRatingOutbox(), with: session)
+        #expect(out.pending.logs[a] != nil)
     }
 
     /// The phone closes a session left open past twelve hours on its next

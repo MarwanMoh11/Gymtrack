@@ -4,10 +4,10 @@ import Foundation
 ///
 /// `GymTrackSnapshot.asOf` is what lets a widget reloading after midnight, with
 /// no app run in between, stop offering yesterday's session and yesterday's
-/// week. TodayMirrorTests pins the streak across Cairo's spring-forward and the
-/// rotation flag; this holds the rest: the schedule lookup, the week rollover,
-/// the finished-today card, a session gone stale, and the cases that must
-/// leave the snapshot exactly as the app wrote it.
+/// week. `GymTrackTests/WidgetSnapshotTests.swift` pins the streak across
+/// Cairo's spring-forward and the rotation flag; this holds the rest: the
+/// schedule lookup, the week rollover, the finished-today card, a session gone
+/// stale, and the cases that must leave the snapshot exactly as the app wrote it.
 @main
 struct SnapshotAsOfTests {
     static var failures = 0
