@@ -6,7 +6,8 @@ import XCTest
 /// in-memory store, wipes its own defaults and skips the notification prompt
 /// that would otherwise sit on top of the logger and swallow taps. Language and
 /// locale are pinned so that a runner set to another region still reads
-/// "Pounds" and "0/3 sets" the same way.
+/// "Pounds" and "0/3 sets" the same way, and the time zone so that no flow
+/// crosses midnight.
 ///
 /// Every wait here has a timeout and no test sleeps: a flow that is slow on a
 /// loaded CI runner gets ten seconds per step, and a flow that is broken fails
@@ -33,8 +34,27 @@ func launchApp(onboarded: Bool, extra: [String] = []) -> XCUIApplication {
         arguments += ["-settings.hasOnboarded", "YES"]
     }
     app.launchArguments = arguments + extra
+    app.launchEnvironment["TZ"] = earlyAfternoonTimeZone()
     app.launch()
     return app
+}
+
+/// A time zone in which it is now between one and two in the afternoon.
+///
+/// CI's simulators run in UTC, and a run that crossed midnight failed: a
+/// session started at 23:59 and finished at 00:00 belongs to yesterday, so
+/// Today rightly stopped offering to view it. In this zone midnight is ten
+/// hours away whenever the run starts. `Etc/GMT` names count hours west of
+/// Greenwich, so `Etc/GMT-13` is thirteen hours ahead of UTC.
+private func earlyAfternoonTimeZone(now: Date = .now) -> String {
+    var utc = Calendar(identifier: .gregorian)
+    utc.timeZone = .gmt
+    let hoursAhead = 13 - utc.component(.hour, from: now)
+    switch hoursAhead {
+    case 0: return "Etc/GMT"
+    case 1...: return "Etc/GMT-\(hoursAhead)"
+    default: return "Etc/GMT+\(-hoursAhead)"
+    }
 }
 
 /// Base class: stops a test at its first failed step, because every later step
