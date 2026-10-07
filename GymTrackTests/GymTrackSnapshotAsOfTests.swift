@@ -7,9 +7,9 @@ import Testing
 /// yesterday's week.
 ///
 /// The streak across Cairo's spring-forward and the rotation flag are pinned by
-/// `Tests/TodayMirrorTests.swift`; this holds the rest: the schedule lookup, the
-/// week rollover, the finished-today card, a session gone stale, and the cases
-/// that must leave the snapshot exactly as the app wrote it.
+/// `WidgetSnapshotTests`; this holds the rest: the schedule lookup, the week
+/// rollover, the finished-today card, a session gone stale, and the cases that
+/// must leave the snapshot exactly as the app wrote it.
 @MainActor
 @Suite(.serialized)
 struct GymTrackSnapshotAsOfTests {

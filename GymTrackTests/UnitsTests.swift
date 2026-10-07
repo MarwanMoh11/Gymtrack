@@ -6,9 +6,8 @@ import Foundation
 /// that turn numbers into the words on screen: `WeightUnit`, the duration and
 /// volume labels, and `SetFeel`, the four effort answers.
 ///
-/// The native counterpart of the arithmetic half of the legacy
-/// `Tests/PoundLoadTests.swift`; the per-machine ladder lives in
-/// `LoadScaleTests`.
+/// The per-machine ladder lives in `LoadScaleTests`, and the progression in
+/// pounds in `ProgressionSuggestionTests`.
 @MainActor @Suite(.serialized)
 struct UnitsTests {
 
@@ -51,13 +50,13 @@ struct UnitsTests {
     // MARK: - snap
 
     @Test(arguments: [
-        (60.24, 60.0), (60.25, 60.5), (60.74, 60.5), (60.75, 61.0), (0.0, 0.0), (0.2, 0.0),
+        (60.24, 60.0), (60.25, 60.5), (60.3, 60.5), (60.74, 60.5), (60.75, 61.0), (0.0, 0.0), (0.2, 0.0),
     ])
     func kilogramsSnapToHalves(input: Double, expected: Double) {
         #expect(WeightUnit.kg.snap(input) == expected)
     }
 
-    @Test(arguments: [(135.4, 135.0), (135.5, 136.0), (0.4, 0.0), (0.5, 1.0), (1_000.0, 1_000.0)])
+    @Test(arguments: [(135.4, 135.0), (135.5, 136.0), (132.6, 133.0), (0.4, 0.0), (0.5, 1.0), (1_000.0, 1_000.0)])
     func poundsSnapToWholes(input: Double, expected: Double) {
         #expect(WeightUnit.lb.snap(input) == expected)
     }

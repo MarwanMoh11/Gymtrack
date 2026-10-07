@@ -377,6 +377,50 @@ struct EntityPersistenceTests {
         #expect(fresh.isActive)
     }
 
+    /// The twelve-hour rule every path shares, asked the way the app asks it:
+    /// of the wall clock, so these sessions are placed by offsets from it.
+    /// Thirteen hours is yesterday's session; eleven is still somebody's workout.
+    @Test func aStaleSessionIsClosedWithoutItsUnliftedRowsAndAnElevenHourOneIsLeftAlone() throws {
+        DroppedSetMemory.shared.replaceStore(with: TestClock.freshDefaults())
+        defer { DroppedSetMemory.shared.replaceStore(with: .standard) }
+        let context = try TestStore.context()
+        let now = Date.now
+        func session(_ title: String, startedHoursAgo hours: Double, loggedAfterMinutes minutes: Double?) -> WorkoutSession {
+            let session = PersistenceFixtures.session(title, startedAt: now.addingTimeInterval(-hours * 3600), in: context)
+            if let minutes {
+                let lifted = PersistenceFixtures.set(setIndex: 0, completedAt: session.startedAt.addingTimeInterval(minutes * 60))
+                PersistenceFixtures.add(lifted, to: session, in: context)
+            }
+            PersistenceFixtures.add(PersistenceFixtures.set(setIndex: 1), to: session, in: context)
+            return session
+        }
+        let lifted = session("Lifted", startedHoursAgo: 13, loggedAfterMinutes: 40)
+        let empty = session("Empty", startedHoursAgo: 13, loggedAfterMinutes: nil)
+        let recent = session("Recent", startedHoursAgo: 11, loggedAfterMinutes: 40)
+        try context.save()
+        let lastSet = lifted.startedAt.addingTimeInterval(40 * 60)
+
+        #expect(lifted.isStale() && empty.isStale())
+        #expect(!recent.isStale())
+        #expect(lifted.closeIfStale(in: context))
+        #expect(empty.closeIfStale(in: context))
+        #expect(!recent.closeIfStale(in: context))
+        try context.save()
+
+        #expect(lifted.endedAt == lastSet, "a stale session ends at its last set, not when the app noticed")
+        #expect(lifted.sets.count == 1 && lifted.sets.first?.isCompleted == true)
+        let titles = try context.fetch(FetchDescriptor<WorkoutSession>()).map(\.title).sorted()
+        #expect(titles == ["Lifted", "Recent"], "a stale session with nothing logged is deleted")
+        #expect(recent.isActive && recent.sets.count == 2)
+
+        // A Finish on a session left open overnight goes through `close`, which
+        // every Finish does, and is held to the same rule.
+        let overnight = session("Overnight", startedHoursAgo: 20, loggedAfterMinutes: 55)
+        try context.save()
+        overnight.close(in: context)
+        #expect(overnight.endedAt == overnight.startedAt.addingTimeInterval(55 * 60))
+    }
+
     // MARK: - Plans
 
     @Test(arguments: 1...7)
