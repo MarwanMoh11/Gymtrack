@@ -6,8 +6,9 @@ import Foundation
 /// that turn numbers into the words on screen: `WeightUnit`, the duration and
 /// volume labels, and `SetFeel`, the four effort answers.
 ///
-/// The per-machine ladder lives in `LoadScaleTests`, and the progression in
-/// pounds in `ProgressionSuggestionTests`.
+/// The per-machine ladder lives in `LoadScaleTests`, the progression in pounds
+/// in `ProgressionSuggestionTests`, and the way back, what a typed number may
+/// become, in `StepperEntryTests`.
 @MainActor @Suite(.serialized)
 struct UnitsTests {
 

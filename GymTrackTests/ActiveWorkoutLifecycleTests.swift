@@ -277,6 +277,120 @@ struct ActiveWorkoutLifecycleTests {
         }
     }
 
+    // MARK: Opening reps
+
+    /// Last time, a day before `t0`: each exercise's sets as given, logged
+    /// against 8 to 12.
+    private func lastTime(_ bench: WorkoutBench,
+                          _ work: [(catalogID: String, lifts: [(kg: Double, reps: Int)])]) -> WorkoutSession {
+        let past = WorkoutSession(title: "Last", startedAt: WorkoutBench.t0.addingTimeInterval(-86_400))
+        past.endedAt = past.startedAt.addingTimeInterval(3_600)
+        bench.context.insert(past)
+        for (catalogID, lifts) in work {
+            for (index, lift) in lifts.enumerated() {
+                let set = SetLog(catalogID: catalogID, exerciseName: catalogID, exerciseOrder: 0, setIndex: index,
+                                 weightKg: lift.kg, reps: lift.reps, targetRepsLow: 8, targetRepsHigh: 12,
+                                 tracking: .weightReps)
+                set.isCompleted = true
+                set.session = past
+                bench.context.insert(set)
+            }
+        }
+        return past
+    }
+
+    /// One plain, unrepeated slot of 8 to 12: the rows a new session opens
+    /// with after `lifts`, and what the progression made of them.
+    private func opening(_ bench: WorkoutBench, after lifts: [(kg: Double, reps: Int)], targetSets: Int = 3) throws
+        -> (rows: [SetLog], action: TrainingStats.OverloadSuggestion.Action) {
+        let id = "plain-slot-test"
+        let (plan, day) = bench.planDay(named: "Day", planName: "Plain",
+                                        slots: [.init(catalogID: id, sets: targetSets, low: 8, high: 12)])
+        let past = lastTime(bench, [(id, lifts)])
+        let session = SessionFactory.build(day: day, plan: plan, context: bench.context, history: [past])
+        let rows = try #require(session.exerciseGroups.first).sets
+        let item = try #require(day.orderedItems.first)
+        let action = TrainingStats.suggestion(for: item, lastSets: past.sets.sorted { $0.setIndex < $1.setIndex }).action
+        return (rows, action)
+    }
+
+    private func shape(_ rows: [SetLog]) -> [String] { rows.map { "\($0.weightKg)x\($0.reps)" } }
+
+    /// The new rung opens at the bottom of the range, not at the 12 that
+    /// belonged to the old load.
+    @Test func aClimbOnAPlainSlotOpensEverySetAtTheBottomOfTheRange() throws {
+        try WorkoutBench.run { bench in
+            let cleared = try opening(bench, after: Array(repeating: (kg: 60, reps: 12), count: 3))
+            #expect(cleared.action == .increaseWeight)
+            #expect(cleared.rows.count == 3)
+            #expect(cleared.rows.allSatisfy { $0.weightKg > 60 && $0.reps == 8 }, "\(shape(cleared.rows))")
+        }
+    }
+
+    /// A fourth set asked of a three-set session is not clearing the
+    /// prescription, so the load is held, and every row opens at the
+    /// prescription, the one with no set of last time to copy included.
+    /// `WorkoutBench` pins the unit to kilograms, which the held 60 depends on.
+    @Test func aHeldLoadOpensEveryRowAtThePrescriptionIncludingOnePastLastTimesCount() throws {
+        try WorkoutBench.run { bench in
+            let longer = try opening(bench, after: Array(repeating: (kg: 60, reps: 12), count: 3), targetSets: 4)
+            #expect(longer.action == .repeatLoad)
+            #expect(longer.rows.count == 4)
+            #expect(longer.rows.allSatisfy { $0.reps == 8 && $0.weightKg == 60 }, "\(shape(longer.rows))")
+        }
+    }
+
+    /// Earning reps, not load: those reps belong to the load being kept, so
+    /// each set opens at its own count from last time.
+    @Test func buildingRepsOpensEachSetAtLastTimesCount() throws {
+        try WorkoutBench.run { bench in
+            let building = try opening(bench, after: [(kg: 60, reps: 10), (kg: 60, reps: 10), (kg: 60, reps: 9)])
+            #expect(building.action == .addReps)
+            #expect(building.rows.map(\.reps) == [10, 10, 9])
+            #expect(building.rows.allSatisfy { $0.weightKg == 60 }, "\(shape(building.rows))")
+        }
+    }
+
+    @Test func aPlainSlotBesideARepeatedPairStillResetsItsRepsAfterAClimb() throws {
+        try WorkoutBench.run { bench in
+            let (plan, day) = bench.planDay(named: "Day", planName: "Mixed", slots: [
+                .init(catalogID: "mixed-plain", sets: 3, low: 8, high: 12),
+                .init(catalogID: "mixed-pair", sets: 2, low: 8, high: 12),
+                .init(catalogID: "mixed-pair", sets: 2, low: 8, high: 12),
+            ])
+            let past = lastTime(bench, [
+                ("mixed-plain", Array(repeating: (kg: 60, reps: 12), count: 3)),
+                ("mixed-pair", Array(repeating: (kg: 40, reps: 12), count: 4)),
+            ])
+            let session = SessionFactory.build(day: day, plan: plan, context: bench.context, history: [past])
+
+            let plain = session.sets.filter { $0.catalogID == "mixed-plain" }
+            #expect(!plain.isEmpty)
+            #expect(plain.allSatisfy { $0.weightKg > 60 && $0.reps == 8 }, "\(shape(plain))")
+        }
+    }
+
+    /// A machine corrected to a stack in fives: a clean session at 130 lb,
+    /// stored as kilograms, opens the next at 135 lb, a rung of that stack.
+    @Test func aCleanSessionOnAPoundStackOpensAtItsNextRung() throws {
+        try WorkoutBench.run { bench in
+            let id = "lb-machine-test"
+            let fives = LoadScale(unit: .lb, increment: 5)
+            LoadScaleBook.shared.set(fives, for: id)
+            defer { LoadScaleBook.shared.clearAll() }
+
+            let (plan, day) = bench.planDay(named: "Day", planName: "Pounds",
+                                            slots: [.init(catalogID: id, sets: 3, low: 8, high: 12)])
+            let past = lastTime(bench, [(id, Array(repeating: (kg: fives.kilograms(130), reps: 12), count: 3))])
+            let session = SessionFactory.build(day: day, plan: plan, context: bench.context, history: [past])
+
+            let opened = try #require(session.exerciseGroups.first).sets.map { fives.display($0.weightKg) }
+            #expect(opened.count == 3)
+            #expect(opened.allSatisfy { abs($0 - 135) < 1e-9 && $0.truncatingRemainder(dividingBy: 5) == 0 },
+                    "\(opened)")
+        }
+    }
+
     @Test func startFreestyleOpensAnEmptySessionAndAddExerciseNumbersItsRows() throws {
         try WorkoutBench.run { bench in
             let workout = bench.startFreestyle()

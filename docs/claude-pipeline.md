@@ -274,6 +274,12 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   singletons and parallel runs would clone simulators on a 3-core runner; and
   `-collect-test-diagnostics never`, because by default a failing test makes `xcodebuild` spend
   minutes gathering a simulator report.
+- A test step whose log says `Failed to install or launch the test runner` runs once more, and
+  the first log is kept as `*-first-try.log`. On PR #44 the watch simulator refused to launch the
+  watch app it had just installed ("Unknown application display identifier"). No test ran, the
+  same commit's watch tests passed on another Mac, and `build-and-test` still went red. Nothing
+  else is retried, so a failing test still fails on its first run, and a launch the change itself
+  breaks fails both times.
 - Building the GymTrack scheme also builds the watch app and the widgets, because both are
   embedded in the app.
 - **Every unit test gates merging; the UI tests don't.** `build-and-test` runs all of

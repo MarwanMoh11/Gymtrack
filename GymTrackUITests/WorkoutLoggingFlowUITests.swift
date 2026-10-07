@@ -22,6 +22,12 @@ final class WorkoutLoggingFlowUITests: GymTrackUITestCase {
     func testFreestyleSetsCanBeLoggedUndoneAndTheWorkoutFinished() throws {
         app = launchApp(onboarded: true)
 
+        // Today offers only a session that started today, so this flow must
+        // not cross midnight. The launcher pins a zone where it is early
+        // afternoon, and the greeting is where that shows: a zone the app
+        // ignored fails here, not at midnight.
+        require(app.staticTexts["Good afternoon"], "the afternoon greeting in the pinned time zone")
+
         tap(app.buttons["Start a freestyle session"], "Start a freestyle session")
         addExercise(named: benchPress)
 

@@ -37,6 +37,29 @@ struct StepperEntryTests {
         #expect(StepperEntry.parse("-0", maximum: Self.weight).map(\.sign) == .plus)
     }
 
+    /// The keypad types whatever the phone's region uses, so the weight and
+    /// rep fields read Arabic-Indic and extended Arabic-Indic digits, the
+    /// Arabic decimal separator and the decimal comma.
+    @Test(arguments: [
+        ("٦٠٫٥", 500.0, 60.5), ("۶۰٫۵", 500, 60.5), ("٦٠", 500, 60), ("60,5", 500, 60.5),
+        ("60.5", 500, 60.5), ("١٢", 100, 12),
+    ])
+    func aTypedNumberIsReadInTheDigitsTheKeypadTypes(text: String, maximum: Double, value: Double) {
+        #expect(StepperEntry.parse(text, maximum: maximum) == value)
+    }
+
+    /// Everything else is refused rather than guessed at: the Arabic thousands
+    /// mark, fullwidth and Devanagari digits nobody's keypad offers, a space
+    /// inside the number, hex, an exponent, mixed text, a second point, a
+    /// negative, and a number past the field's ceiling.
+    @Test(arguments: [
+        ("1٬000", 5_000.0), ("６０", 500), ("६०", 500), ("6 0", 500), ("0x10", 500), ("1e2", 500),
+        ("6٠a", 500), ("60.5.5", 500), ("-5", 500), ("٦٠٠", 500),
+    ])
+    func anythingElseTypedIsRefused(text: String, maximum: Double) {
+        #expect(StepperEntry.parse(text, maximum: maximum) == nil)
+    }
+
     // MARK: Whole counts
 
     @Test(arguments: [
