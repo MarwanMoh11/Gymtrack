@@ -176,6 +176,12 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   is needed, and the squash merge flattens the merge commit anyway. The merge is limited to
   `main`. `git diff` and `git log` stay out: their `--output` option writes any file, the
   checker's copy included.
+- `persist-credentials: false` on the checkout, so Claude's pushes use the token the action
+  writes into the remote URL and arrive as Claude's app. checkout v7 keeps its credential in a
+  separate file pulled in by `includeIf`, which the action doesn't remove, and git sent that
+  header instead: every push after a PR comment came from `github-actions[bot]`, and GitHub held
+  the PR Check it started for the owner's approval. Opening a PR wasn't affected, since `gh pr
+  create` already used the app's token. The saver builds its own URL, so it needs nothing saved.
 - `runs-on: macos-26`, so the run has Xcode and can build its own change before pushing it. Free
   on a public repo. The limit is 180 minutes, a ceiling for hard bugs that need many build rounds;
   a normal run takes 10 to 30. A run that needs more is usually an issue worth splitting.
@@ -377,10 +383,11 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   write access can start a run. An issue a run creates can't start another: the action refuses bot
   actors, and the planning instructions keep the mention out of what it writes.
 - **What the checker can't hide.** An empty environment keeps the Claude token out of a build,
-  but the checkout's git credentials sit in `.git/config`, where a build phase Claude added could
-  read them. `persist-credentials: false` wouldn't help: the action deletes the checkout's
-  credential and writes its own token into the remote URL. Those tokens can do no more than the run already can (push a branch, open a PR, never
-  touch `main`) and expire with the job, so the risk is accepted rather than sandboxed away.
+  but the action writes that token into the remote URL in `.git/config`, where a build phase Claude
+  added could read it. The token can do no more than the run already can (push a branch, open a
+  PR, never touch `main`) and expires with the job, so the risk is accepted rather than sandboxed
+  away. The checkout saves no credential of its own (`persist-credentials: false`), so the
+  workflow's token is never on disk while Claude works.
 - **The saver holds the workflow's token after Claude has had the checkout.** It runs the copy
   taken before Claude started, and git runs with hooks, `fsmonitor` and credential helpers off, so
   none Claude planted can run with the token. What remains is the same class of risk as above:
@@ -437,6 +444,7 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | The review comment is missing | A fork PR (by design), a draft PR, a missing secret, or the PR changes `pr-check.yml` itself | For a PR that edits `pr-check.yml`, the action refuses to run a workflow that differs from `main`'s copy ("Workflow validation failed"). That's expected: merge it, and later PRs get reviews |
 | The build is red | A compile error or failing test, or a UI test that failed by chance on a slow simulator | The check-notice comment quotes the failures. If they're in something the PR doesn't touch, re-run the failed jobs. Otherwise comment `@claude fix the build`. Full logs are in the `*-logs-N` artifact |
 | A check is red on Claude's PR and no comment says so | The run was on an older commit, the branch isn't `claude/...`, or `claude-check-notice.yml` isn't on `main` | Open the check's log. The notice's own run (named "Check notice for ...") says why it skipped |
+| PR Check on Claude's PR waits for you to approve it | The push came from `github-actions[bot]`, not Claude's app: the checkout saved its own credential again | Approve it this time. Keep `persist-credentials: false` on the checkout in `claude.yml`; the run's "Run actions/checkout" log should show no `extraheader` being written |
 | A comment says Claude couldn't start | The job failed before Claude ran, for example a failed checkout | Re-run the job from the linked run, or post the `@claude` comment again |
 | The review fails after posting its comment, or never posts | It ran out of turns. Past `--max-turns` the action marks even a posted review failed, and on a large PR the turns can run out before it posts | The prompt asks for the comment within 25 of the 40 turns, and the diff is saved to `pr.diff` so it can be read in parts. If it still happens, raise `--max-turns` in `pr-check.yml`, on `main` too |
 | A step hangs for minutes after a test fails | `xcodebuild` collecting simulator diagnostics | `check.sh` passes `-collect-test-diagnostics never`; keep it if you replace the checker |

@@ -43,14 +43,17 @@ jobs:
       # Write, so a new run can cancel a wait for the usage limit on the same issue.
       actions: write
     steps:
-      # persist-credentials: false would change nothing here: the action removes the
-      # checkout's credential and puts its own token in the remote URL. Why that
-      # risk is accepted is in docs/claude-pipeline.md (Security).
+      # No saved credential, so Claude's pushes use the token the action writes into
+      # the remote URL and arrive as Claude's app. checkout v7 keeps its credential in
+      # a separate file the action never removes, and git sent that one instead: every
+      # push after a PR comment came from github-actions[bot], and GitHub held the PR
+      # Check it started until the owner approved it. The saver builds its own URL.
       # Full history, so a run can merge main into a pull request to fix conflicts:
       # a shallow clone has no common ancestor to merge from. The repo is a few MB.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       # The checker and the saver are copied out of the repo before Claude starts.
       # Claude may edit any file in the checkout, and a copy it can edit would let it
       # run anything.
