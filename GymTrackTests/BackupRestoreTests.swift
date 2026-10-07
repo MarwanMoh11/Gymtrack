@@ -9,10 +9,9 @@ import Testing
 ///
 /// Decoding of older and malformed files is in `BackupDecodingTests`, the
 /// file's order and provenance in `BackupExportFidelityTests`, and the sliced
-/// export and restore in `BackupPacingTests`. That restore never asks Health
-/// to delete anything is still checked by `scripts/test-backup-service.sh`:
-/// `restore` takes no Health seam, so only a stubbed `HealthKitService` can
-/// see that no call was made.
+/// export and restore in `BackupPacingTests`. `restore` takes no Health
+/// parameter, so the tests that prove it never asks Health to delete anything
+/// watch `HealthKitService.onDeletionRequest` through `HealthDeletionRecorder`.
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct BackupRestoreTests {
@@ -425,9 +424,13 @@ struct BackupRestoreTests {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
         try data.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
+        let health = HealthDeletionRecorder()
+        defer { health.stop() }
 
         try BackupService.restore(from: url, context: context)
 
+        // Neither this phone's workout nor the one the file names is touched.
+        #expect(health.requests.isEmpty)
         let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
         #expect(sessions.map(\.title) == ["Replacement"])
         #expect(sessions.first?.healthWorkoutID == linked.workout)
@@ -447,9 +450,15 @@ struct BackupRestoreTests {
                                                 endedAt: linked.start.addingTimeInterval(86_460), in: context)
         later.healthWorkoutID = PersistenceFixtures.uuid(0xB2)
         try context.save()
+        let health = HealthDeletionRecorder()
+        defer { health.stop() }
 
         try BackupService.restore(data: BackupService.encoded(file), context: context)
 
+        // The session that left keeps its workout in Health. Restore used to
+        // delete it, and a deletion there reaches every device on the account
+        // with no way back.
+        #expect(health.requests.isEmpty)
         let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
         #expect(sessions.map(\.title) == ["Original"])
         #expect(sessions.first?.healthWorkoutID == linked.workout)
@@ -654,10 +663,13 @@ struct BackupRestoreTests {
         let context = try TestStore.context()
         _ = try linkedStore(context)
         #expect(BackupService.linkedHealthWorkoutCount(context: context) == 1)
+        let health = HealthDeletionRecorder()
+        defer { health.stop() }
 
         let result = try await BackupService.wipe(context: context)
 
         #expect(result == nil)
+        #expect(health.requests.isEmpty)
         #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
         #expect(BackupService.linkedHealthWorkoutCount(context: context) == 0)
     }
@@ -686,10 +698,7 @@ struct BackupRestoreTests {
         #expect(try single.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
     }
 
-    @Test(.enabled("Needs a host without Health write access, which the unit-test host is", {
-        await MainActor.run { !HealthKitService.shared.canWriteWorkouts }
-    }))
-    func theDefaultEraseHandsTheHealthServiceEveryLinkedWorkoutOnce() async throws {
+    @Test func theDefaultEraseHandsTheHealthServiceEveryLinkedWorkoutOnce() async throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }
         let context = try TestStore.context()
@@ -699,14 +708,22 @@ struct BackupRestoreTests {
         second.healthWorkoutID = PersistenceFixtures.uuid(0xB2)
         try context.save()
         #expect(BackupService.linkedHealthWorkoutCount(context: context) == 2)
+        let health = HealthDeletionRecorder()
+        defer { health.stop() }
 
         let result = try await BackupService.wipe(context: context, removingHealthWorkouts: true)
 
-        // Without write access the real service removes nothing and hands back
-        // every ID it was given, so what it reports is what it was asked: both
-        // workouts, once each, in the batch's order.
+        // One request to the real service: both workouts, once each, in the
+        // batch's order.
         let asked = [linked.workout, PersistenceFixtures.uuid(0xB2)].sorted { $0.uuidString < $1.uuidString }
-        #expect(result?.failedIDs == asked)
+        #expect(health.requests == [asked])
+        #expect(result != nil)
+        // Without write access, as on the unit-test host, the service removes
+        // nothing and hands back every ID it was given. With it, Health finds
+        // neither made-up workout and counts both as gone, so this would not hold.
+        if !HealthKitService.shared.canWriteWorkouts {
+            #expect(result?.failedIDs == asked)
+        }
         #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
     }
 
@@ -1042,13 +1059,16 @@ struct BackupRestoreTests {
     }
 
     /// Restores a changed copy of `linkedStore` with a `beforeCommit` that
-    /// throws, and expects every part of the store and the settings unchanged.
+    /// throws, and expects every part of the store and the settings unchanged,
+    /// and Health never asked to delete anything.
     private func expectRollback(in context: ModelContext, withSlot: Bool) throws {
         try linkedStore(context, withSlot: withSlot)
         var file = try BackupService.decodedArchive(from: BackupService.exportData(context: context, stamp: stamp))
         file.sessions[0].title = "Replacement"
         file.settings.userName = "After restore"
         struct InjectedFailure: Error {}
+        let health = HealthDeletionRecorder()
+        defer { health.stop() }
 
         do {
             try BackupService.restore(data: BackupService.encoded(file), context: context,
@@ -1057,6 +1077,7 @@ struct BackupRestoreTests {
         } catch is InjectedFailure {
         }
 
+        #expect(health.requests.isEmpty)
         #expect(try context.fetch(FetchDescriptor<WorkoutSession>()).map(\.title) == ["Original"])
         let plans = try context.fetch(FetchDescriptor<Plan>())
         #expect(plans.count == 1 && plans.first?.orderedDays.count == 1)
@@ -1084,5 +1105,23 @@ struct BackupRestoreTests {
         }
         try context.save()
         return workouts
+    }
+}
+
+/// Every request `HealthKitService` gets to remove workouts, from creation until
+/// `stop()`, one entry per request. The unit-test host has no Health write
+/// access, so the real service leaves no other trace a test could read.
+@MainActor
+private final class HealthDeletionRecorder {
+    private(set) var requests: [[UUID]] = []
+    private let previous: (([UUID]) -> Void)?
+
+    init() {
+        previous = HealthKitService.shared.onDeletionRequest
+        HealthKitService.shared.onDeletionRequest = { [weak self] in self?.requests.append($0) }
+    }
+
+    func stop() {
+        HealthKitService.shared.onDeletionRequest = previous
     }
 }

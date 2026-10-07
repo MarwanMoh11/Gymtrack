@@ -36,6 +36,33 @@ final class WatchCommandCenter {
     /// this path ends. Tests hand it a suite of their own.
     var loggerMemory = LoggerMemoryStore.standard
 
+    /// What this path asks of Health, and of the watch about Health, once a
+    /// session ends here or a watch workout turns up with no session to own
+    /// it. Each is the real call unless a test hands over its own:
+    /// `HealthKitService` has a single instance and, in a test host, no Health
+    /// store and no container to look a session up in, so a test could not
+    /// otherwise see what was asked of it.
+    struct HealthCalls {
+        var saveWorkout: @MainActor (WorkoutSession) async -> UUID? = {
+            await HealthKitService.shared.saveWorkout(for: $0)
+        }
+        var backfillVitals: @MainActor (WorkoutSession) async -> Void = {
+            await HealthKitService.shared.backfillVitals(for: $0)
+        }
+        var discardOrphanWorkout: @MainActor (_ workoutID: UUID, _ sessionID: UUID) -> Void = {
+            _ = HealthKitService.shared.discardOrphanWorkout($0, sessionID: $1)
+        }
+        var notePhoneWorkout: @MainActor (_ workoutID: UUID, _ sessionID: UUID) -> Void = {
+            WatchBridge.shared.notePhoneHealthWorkout($0, for: $1)
+        }
+    }
+
+    var health = HealthCalls()
+
+    /// The Health write the last session ended here set off, so a test can
+    /// wait for it to settle rather than guess how long that takes.
+    private(set) var healthFollowUp: Task<Void, Never>?
+
     private init() {}
 
     /// Called once at launch, before the first watch message can arrive.
@@ -377,7 +404,7 @@ final class WatchCommandCenter {
     /// the session back.
     private func discardOrphanWorkout(of metrics: WatchWorkoutMetrics?, sessionID: UUID) {
         guard let workoutID = metrics?.healthWorkoutID else { return }
-        HealthKitService.shared.discardOrphanWorkout(workoutID, sessionID: sessionID)
+        health.discardOrphanWorkout(workoutID, sessionID)
     }
 
     /// A set command the running logger has no row for, arriving while the
@@ -562,9 +589,13 @@ final class WatchCommandCenter {
     /// is an orphan no later erase can find. The store is asked, not only the
     /// instance, because this context holds the session while the screen
     /// deletes through another, and that leaves this copy looking alive.
+    ///
+    /// The Health calls are taken when the session ends. Read after up to
+    /// twelve seconds of waiting, they could be ones a later test handed over.
     private func recordToHealth(_ session: WorkoutSession, context: ModelContext) {
         let sessionID = session.id
-        Task { @MainActor in
+        let health = self.health
+        healthFollowUp = Task { @MainActor in
             func isGone() -> Bool {
                 session.isGone(fromStore: FetchDescriptor<WorkoutSession>(
                     predicate: #Predicate { $0.id == sessionID }))
@@ -577,14 +608,14 @@ final class WatchCommandCenter {
                 }
             }
             guard !isGone() else { return }
-            let phoneWorkoutID = await HealthKitService.shared.saveWorkout(for: session)
+            let phoneWorkoutID = await health.saveWorkout(session)
             // A workout written for a session that went meanwhile has already
             // been queued for removal by `saveWorkout`.
             guard !isGone() else { return }
             if let phoneWorkoutID {
-                WatchBridge.shared.notePhoneHealthWorkout(phoneWorkoutID, for: sessionID)
+                health.notePhoneWorkout(phoneWorkoutID, sessionID)
             }
-            await HealthKitService.shared.backfillVitals(for: session)
+            await health.backfillVitals(session)
             guard !isGone() else { return }
             self.save(context)
         }

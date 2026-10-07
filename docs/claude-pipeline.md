@@ -512,7 +512,7 @@ page reports it.
 
 - **Existing tests kept.** The repo already had a `swiftc`-based suite (`Tests/`, 73 scripts).
   It runs as the `script-tests` check and gets no new tests; #6 retires it into Swift Testing in
-  parts (66 scripts are left after part 1, #15). New tests go to the Xcode targets.
+  parts (55 scripts are left after part 2, #22). New tests go to the Xcode targets.
 - **`CLAUDE.md` split.** The old 180-line file became a 60-line `CLAUDE.md` plus
   `docs/DEVELOPMENT.md`, which holds everything only a local session can use.
 - **`actions/checkout@v7`** rather than `@v6`, because v7 is current.
