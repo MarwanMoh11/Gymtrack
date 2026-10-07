@@ -244,7 +244,7 @@ struct ConsistencyGrid: View {
     private let cell: CGFloat = 13
     private let gap: CGFloat = 3.5
 
-    private var today: Date { calendar.startOfDay(for: .now) }
+    private var today: Date { TrainingDay.key(for: .now, calendar: calendar) }
 
     /// Every date in the grid is stepped with `TrainingStats.startOfDay`, so
     /// each cell is the same key the day's sessions are bucketed under. A

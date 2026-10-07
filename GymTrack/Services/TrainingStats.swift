@@ -12,9 +12,10 @@ enum TrainingStats {
         var longest: Int
     }
 
-    /// A streak counts consecutive *calendar days* with a trained session
-    /// (see `isTrained`). Today not being trained yet doesn't break the
-    /// streak — the streak only dies once yesterday is also missed.
+    /// A streak counts consecutive *training days* with a trained session
+    /// (see `isTrained` and `TrainingDay`). Today not being trained yet
+    /// doesn't break the streak — the streak only dies once yesterday is also
+    /// missed.
     ///
     /// Days are compared as keys from `startOfDay` and stepped with
     /// `startOfDay(_:from:calendar:)`, never by asking how many days apart two
@@ -36,7 +37,7 @@ enum TrainingStats {
         }
 
         // Walk backwards from today (or yesterday) while days are present.
-        let today = calendar.startOfDay(for: now)
+        let today = TrainingDay.key(for: now, calendar: calendar)
         var cursor = days.contains(today) ? today : startOfDay(-1, from: today, calendar: calendar)
         var current = 0
         while days.contains(cursor) {
@@ -84,9 +85,15 @@ enum TrainingStats {
     /// finished session in the history had its sets faulted in from the store,
     /// on every render of the Today tab, to answer a question only today's
     /// sessions can.
-    static func finishedToday(in sessions: [WorkoutSession], calendar: Calendar = .current) -> WorkoutSession? {
-        sessions
-            .filter { !$0.isActive && calendar.isDateInToday($0.endedAt ?? $0.startedAt) && !$0.completedSets.isEmpty }
+    static func finishedToday(in sessions: [WorkoutSession],
+                              calendar: Calendar = .current,
+                              now: Date = .now) -> WorkoutSession? {
+        let today = TrainingDay.key(for: now, calendar: calendar)
+        return sessions
+            .filter {
+                !$0.isActive && TrainingDay.key(for: $0.endedAt ?? $0.startedAt, calendar: calendar) == today
+                    && !$0.completedSets.isEmpty
+            }
             .max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
     }
 
@@ -100,24 +107,26 @@ enum TrainingStats {
     /// previous day.
     ///
     /// A session counts when it started today, like every other reader buckets
-    /// it, and it trained a day of the active plan. The scheduled day wins when
-    /// it was trained, but a deliberate swap counts too: a lifter who did Push
-    /// on Leg Day has trained today, and a card still offering Legs would ask
-    /// for a second workout. What was scheduled is asked of the history before
-    /// today, because a rotation moves on the moment its day is trained. With
-    /// nothing scheduled at all, a rest day or no plan, whatever was trained is
-    /// the day's workout.
+    /// it, and it trained a day of the active plan. "Today" is the training
+    /// day (see `TrainingDay`), so a session started at 00:30 is the night
+    /// before's, and does not call the day after it done. The scheduled day
+    /// wins when it was trained, but a deliberate swap counts too: a lifter who
+    /// did Push on Leg Day has trained today, and a card still offering Legs
+    /// would ask for a second workout. What was scheduled is asked of the
+    /// history before today, because a rotation moves on the moment its day is
+    /// trained. With nothing scheduled at all, a rest day or no plan, whatever
+    /// was trained is the day's workout.
     static func completedToday(in sessions: [WorkoutSession],
                                plan: Plan?,
                                calendar: Calendar = .current,
                                now: Date = .now) -> WorkoutSession? {
+        let today = TrainingDay.key(for: now, calendar: calendar)
         let trainedToday = sessions.filter {
-            !$0.isActive && calendar.isDate($0.startedAt, inSameDayAs: now) && isTrained($0)
+            !$0.isActive && TrainingDay.key(for: $0.startedAt, calendar: calendar) == today && isTrained($0)
         }
         guard !trainedToday.isEmpty else { return nil }
 
-        let dayStart = calendar.startOfDay(for: now)
-        let earlier = sessions.filter { $0.startedAt < dayStart }
+        let earlier = sessions.filter { TrainingDay.key(for: $0.startedAt, calendar: calendar) < today }
         let latest: ([WorkoutSession]) -> WorkoutSession? = {
             $0.max { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
         }
@@ -144,12 +153,14 @@ enum TrainingStats {
         return DateInterval(start: start, end: startOfDay(1, from: start, calendar: calendar))
     }
 
-    /// The trained sessions of the calendar week holding `now`.
+    /// The trained sessions of the calendar week holding today's training day,
+    /// each placed by its own. A session that started at 01:00 on the week's
+    /// first day is the night before's, so last week's.
     static func sessionsThisWeek(_ sessions: [WorkoutSession],
                                  calendar: Calendar = .current,
                                  now: Date = .now) -> [WorkoutSession] {
-        let week = weekInterval(containing: now, calendar: calendar)
-        return sessions.filter { $0.startedAt >= week.start && $0.startedAt < week.end && isTrained($0) }
+        let week = weekInterval(containing: TrainingDay.key(for: now, calendar: calendar), calendar: calendar)
+        return trained(sessions, from: week.start, to: week.end, calendar: calendar)
     }
 
     /// The first day of the consistency grid: the start of the week that opens
@@ -157,7 +168,7 @@ enum TrainingStats {
     /// on the calendar's first weekday. The grid was hard-coded to Sunday, which
     /// put a Monday-first or Saturday-first locale's week across two columns.
     static func gridStart(weeks: Int, calendar: Calendar, now: Date) -> Date {
-        let today = calendar.startOfDay(for: now)
+        let today = TrainingDay.key(for: now, calendar: calendar)
         let offset = (calendar.component(.weekday, from: today) - calendar.firstWeekday + 7) % 7
         return startOfDay(-offset - 7 * (max(weeks, 1) - 1), from: today, calendar: calendar)
     }
@@ -222,22 +233,32 @@ enum TrainingStats {
 
     // MARK: - Volume
 
-    /// The trained sessions of the last `days` calendar days, today included.
+    /// The trained sessions of the last `days` training days, today included.
     static func sessions(in sessions: [WorkoutSession],
                          days: Int,
                          calendar: Calendar = .current,
                          now: Date = .now) -> [WorkoutSession] {
         guard days > 0 else { return [] }
-        let today = calendar.startOfDay(for: now)
+        let today = TrainingDay.key(for: now, calendar: calendar)
         let cutoff = startOfDay(1 - days, from: today, calendar: calendar)
         let end = startOfDay(1, from: today, calendar: calendar)
-        return sessions.filter { $0.startedAt >= cutoff && $0.startedAt < end && isTrained($0) }
+        return trained(sessions, from: cutoff, to: end, calendar: calendar)
     }
 
-    /// Days with a logged effort, including duration and unloaded bodyweight
-    /// workouts that contribute no weight volume to the chart.
+    /// The trained sessions whose training day is on or after the key `start`
+    /// and before the key `end`.
+    private static func trained(_ sessions: [WorkoutSession], from start: Date, to end: Date,
+                                calendar: Calendar) -> [WorkoutSession] {
+        sessions.filter {
+            let day = TrainingDay.key(for: $0.startedAt, calendar: calendar)
+            return day >= start && day < end && isTrained($0)
+        }
+    }
+
+    /// Training days with a logged effort, including duration and unloaded
+    /// bodyweight workouts that contribute no weight volume to the chart.
     static func trainedDays(in sessions: [WorkoutSession], calendar: Calendar = .current) -> Set<Date> {
-        Set(sessions.filter(isTrained).map { calendar.startOfDay(for: $0.startedAt) })
+        Set(sessions.filter(isTrained).map { TrainingDay.key(for: $0.startedAt, calendar: calendar) })
     }
 
     /// Hard sets per muscle over a window. A set credits its exercise's first
@@ -921,17 +942,17 @@ extension TrainingStats {
         var id: Date { date }
     }
 
-    /// One point per calendar day, oldest first, including the empty days —
+    /// One point per training day, oldest first, including the empty days —
     /// gaps are the most useful thing on a consistency chart.
     static func daily(_ metric: Metric,
                       sessions: [WorkoutSession],
                       days: Int,
                       calendar: Calendar = .current,
                       now: Date = .now) -> [DayPoint] {
-        let today = calendar.startOfDay(for: now)
+        let today = TrainingDay.key(for: now, calendar: calendar)
         var buckets: [Date: Double] = [:]
         for session in sessions where !session.isActive {
-            buckets[calendar.startOfDay(for: session.startedAt), default: 0] += metric.value(of: session)
+            buckets[TrainingDay.key(for: session.startedAt, calendar: calendar), default: 0] += metric.value(of: session)
         }
         return (0..<max(days, 0)).reversed().map { offset in
             let date = startOfDay(-offset, from: today, calendar: calendar)
@@ -955,10 +976,10 @@ extension TrainingStats {
                                calendar: Calendar = .current,
                                now: Date = .now) -> [WorkoutSession] {
         guard days > 0 else { return [] }
-        let today = calendar.startOfDay(for: now)
+        let today = TrainingDay.key(for: now, calendar: calendar)
         let start = startOfDay(1 - days * 2, from: today, calendar: calendar)
         let end = startOfDay(1 - days, from: today, calendar: calendar)
-        return sessions.filter { $0.startedAt >= start && $0.startedAt < end && isTrained($0) }
+        return trained(sessions, from: start, to: end, calendar: calendar)
     }
 
     /// Percentage change, or nil when there is no baseline to compare against.
@@ -971,16 +992,16 @@ extension TrainingStats {
         sessions.reduce(0) { $0 + metric.value(of: $1) }
     }
 
-    /// Seven-calendar-day buckets, oldest first, with today in the newest one.
+    /// Seven-training-day buckets, oldest first, with today in the newest one.
     static func weeklySessionCounts(_ sessions: [WorkoutSession],
                                     weeks: Int = 8,
                                     calendar: Calendar = .current,
                                     now: Date = .now) -> [Double] {
-        let today = calendar.startOfDay(for: now)
+        let today = TrainingDay.key(for: now, calendar: calendar)
         return (0..<max(weeks, 0)).reversed().map { offset in
             let end = startOfDay(1 - 7 * offset, from: today, calendar: calendar)
             let start = startOfDay(-7, from: end, calendar: calendar)
-            return Double(sessions.filter { $0.startedAt >= start && $0.startedAt < end && isTrained($0) }.count)
+            return Double(trained(sessions, from: start, to: end, calendar: calendar).count)
         }
     }
 

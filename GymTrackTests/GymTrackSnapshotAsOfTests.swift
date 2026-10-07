@@ -3,8 +3,8 @@ import Testing
 @testable import GymTrack
 
 /// `GymTrackSnapshot.asOf`, which lets a widget or the watch reloading after
-/// midnight, with no app run in between, stop offering yesterday's session and
-/// yesterday's week.
+/// the training day turns over at 04:00, with no app run in between, stop
+/// offering yesterday's session and yesterday's week.
 ///
 /// The streak across Cairo's spring-forward and the rotation flag are pinned by
 /// `WidgetSnapshotTests`; this holds the rest: the schedule lookup, the week
@@ -40,6 +40,25 @@ struct GymTrackSnapshotAsOfTests {
     @Test func aClockBehindTheStampChangesNothing() {
         let snapshot = mondaySnapshot()
         #expect(snapshot.asOf(at(20), calendar: calendar) == snapshot)
+        #expect(snapshot.asOf(at(28, 3), calendar: calendar) == snapshot,
+                "The small hours of the stamped date are the night before, behind the stamp")
+    }
+
+    /// Before 04:00 it is still the night before, so a widget reloading at
+    /// 00:30 keeps Monday's session, its done card and the week as they were.
+    @Test func theSmallHoursStillReadAsTheNightBefore() {
+        let snapshot = mondaySnapshot()
+        #expect(snapshot.asOf(at(29, 0), calendar: calendar) == snapshot)
+        #expect(snapshot.asOf(at(29, 3), calendar: calendar) == snapshot)
+
+        let tuesday = snapshot.asOf(at(29, 4), calendar: calendar)
+        #expect(tuesday.todayTitle == "Pull" && tuesday.finishedToday == nil)
+        #expect(tuesday.day == calendar.startOfDay(for: at(29)))
+
+        // 03:00 on Sunday is still Saturday night, so the week's count stands
+        // until 04:00 on Sunday, the first day of the next week.
+        #expect(snapshot.asOf(at(4, 3, month: 10), calendar: calendar).sessionsThisWeek == 3)
+        #expect(snapshot.asOf(at(4, 4, month: 10), calendar: calendar).sessionsThisWeek == 0)
     }
 
     // MARK: - A later day

@@ -837,13 +837,15 @@ struct MuscleDetailPanel: View {
                                          startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
     }
 
-    /// Counted in calendar days, so a session logged this evening still reads
-    /// "today" rather than the relative formatter's "in 5 hours". The count is
-    /// `TrainingStats.dayCount`, not the difference of two day starts: where
-    /// the clocks spring forward at midnight, that read yesterday's session as
-    /// "today" for the whole of the next day.
+    /// Counted in training days, so a session logged this evening still reads
+    /// "today" rather than the relative formatter's "in 5 hours", and one
+    /// started at 00:30 reads as the night before's, as the calendar beside it
+    /// files it. The count is `TrainingStats.dayCount`, not the difference of
+    /// two day starts: where the clocks spring forward at midnight, that read
+    /// yesterday's session as "today" for the whole of the next day.
     static func dayLabel(for date: Date, calendar: Calendar = .current, now: Date = .now) -> String {
-        let days = TrainingStats.dayCount(from: date, to: now, calendar: calendar)
+        let days = TrainingStats.dayCount(from: TrainingDay.key(for: date, calendar: calendar),
+                                          to: TrainingDay.key(for: now, calendar: calendar), calendar: calendar)
         switch days {
         case ..<1: return "today"
         case 1: return "yesterday"

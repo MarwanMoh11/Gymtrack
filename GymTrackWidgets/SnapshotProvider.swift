@@ -4,8 +4,8 @@ import WidgetKit
 ///
 /// The app restamps the snapshot whenever anything a widget shows moves and
 /// asks WidgetKit to reload, so the timeline itself only has to cover the one
-/// thing the app can't predict: midnight, when "today" becomes a different day
-/// of the routine.
+/// thing the app can't predict: the training day turning over, when "today"
+/// becomes a different day of the routine.
 struct GymTrackEntry: TimelineEntry {
     let date: Date
     /// `nil` when the app has never published anything — which is also what an
@@ -30,7 +30,8 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     /// Now, and the moments the card has to change with nobody in the app to
-    /// say so: the rest running out, a session going stale, and midnight.
+    /// say so: the rest running out, a session going stale, and the training
+    /// day turning over.
     ///
     /// Each entry carries the snapshot as it reads at that moment — see
     /// `GymTrackSnapshot.asOf`. Reloading at midnight used to hand back the
@@ -46,30 +47,33 @@ struct SnapshotProvider: TimelineProvider {
     /// here is what makes the widget look.
     func getTimeline(in context: Context, completion: @escaping (Timeline<GymTrackEntry>) -> Void) {
         let now = Date.now
-        let midnight = nextRefresh()
+        let turnover = nextRefresh()
         let snapshot = SharedStore.readSnapshot()
 
         var moments = [now]
-        if let restEndsAt = snapshot?.session?.restEndsAt, restEndsAt > now, restEndsAt < midnight {
+        if let restEndsAt = snapshot?.session?.restEndsAt, restEndsAt > now, restEndsAt < turnover {
             moments.append(restEndsAt)
         }
-        if let staleAt = snapshot?.session?.staleAt, staleAt > now, staleAt < midnight {
+        if let staleAt = snapshot?.session?.staleAt, staleAt > now, staleAt < turnover {
             moments.append(staleAt)
         }
-        moments.append(midnight)
+        moments.append(turnover)
         moments.sort()
 
         let entries = moments.map { GymTrackEntry(date: $0, snapshot: snapshot?.asOf($0)) }
-        completion(Timeline(entries: entries, policy: .after(midnight)))
+        completion(Timeline(entries: entries, policy: .after(turnover)))
     }
 
-    /// Just after midnight. A widget showing "Push Day" has to stop showing it
-    /// when Push Day is yesterday, and nothing in the app fires at that moment.
+    /// Just after the training day turns over (see `TrainingDay`). A widget
+    /// showing "Push Day" has to stop showing it when Push Day is yesterday,
+    /// and nothing in the app fires at that moment. Midnight is too early:
+    /// `asOf` still reads the night's day until the cutoff, so a refresh then
+    /// would change nothing and leave the old day up until the next one.
     private func nextRefresh() -> Date {
         let calendar = Calendar.current
-        let midnight = calendar.nextDate(after: .now,
-                                         matching: DateComponents(hour: 0, minute: 1),
+        let turnover = calendar.nextDate(after: .now,
+                                         matching: DateComponents(hour: TrainingDay.cutoffHour, minute: 1),
                                          matchingPolicy: .nextTime)
-        return midnight ?? Date.now.addingTimeInterval(3600)
+        return turnover ?? Date.now.addingTimeInterval(3600)
     }
 }

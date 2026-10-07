@@ -9,7 +9,7 @@ before building or touching a simulator, and confirms all three schemes build be
 |---|---|
 | `GymTrack/` | iPhone app: `App/`, `Models/`, `Services/`, `Features/`, `DesignSystem/` |
 | `GymTrackWatch/` / `GymTrackWidgets/` | watchOS app / Home Screen widgets and the Live Activity |
-| `GymTrackShared/` | Compiled into each target that needs it (not a module): `Theme`, `WatchLink`, `LoadScale`, `SetFeel`, `LaunchMode` |
+| `GymTrackShared/` | Compiled into each target that needs it (not a module): `Theme`, `WatchLink`, `LoadScale`, `SetFeel`, `LaunchMode`, `TrainingDay` |
 | `GymTrackTests/`, `GymTrackWatchTests/`, `GymTrackUITests/` | Swift Testing unit tests (helpers in `Support/`) and XCUITest flows |
 
 Synchronised folders: a new file joins its folder's target. Never edit `project.pbxproj` to add one.
@@ -28,6 +28,8 @@ The backup's `version` stays 2; every field added since is optional.
 - `Models/Entities.swift` holds the SwiftData models (`AppSchema.models` lists them).
   `Services/ActiveWorkout.swift` drives a live session, saving as it goes. `Services/TrainingStats.swift`
   is pure functions over finished sessions. Every suggested weight is a rung `LoadScaleBook` allows.
+- Days are training days: before 04:00 is still the night before. Anything that buckets sessions by
+  day or asks which day is today, on the phone, widget or watch, goes through `TrainingDay.key`.
 - The watch link (`WatchCommandCenter`, `WatchBridge`, `WatchLink`) applies commands headlessly:
   iOS can wake a terminated app to deliver one.
 - `LaunchMode`: a unit-test host opens an in-memory store, leaves singletons unconfigured and shows

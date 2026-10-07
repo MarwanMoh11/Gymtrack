@@ -478,9 +478,13 @@ struct TodayView: View {
 
     // MARK: - Week strip
 
+    /// Training days, like every other reader, so in the small hours the strip
+    /// still marks the night's day as today and a session started then fills
+    /// it in. See `TrainingDay`.
     private var weekStrip: some View {
         let calendar = Calendar.current
-        let start = TrainingStats.weekInterval(containing: .now, calendar: calendar).start
+        let today = TrainingDay.key(for: .now, calendar: calendar)
+        let start = TrainingStats.weekInterval(containing: today, calendar: calendar).start
         let trained = TrainingStats.trainedDays(in: finishedSessions.filter { $0.startedAt >= start },
                                                 calendar: calendar)
         let offeredToday = scheduledDay != nil
@@ -488,16 +492,19 @@ struct TodayView: View {
         return HStack(spacing: 6) {
             ForEach(0..<7, id: \.self) { offset in
                 let date = TrainingStats.startOfDay(offset, from: start, calendar: calendar)
-                let isToday = calendar.isDateInToday(date)
+                let weekday = calendar.component(.weekday, from: date)
+                let isToday = date == today
                 let didTrain = trained.contains(date)
                 // Only today can be marked from the rotation. It moves on when
                 // a day is trained, not when the date changes, so marking every
                 // later unpinned day would promise sessions nobody scheduled.
-                // Other days keep to what is pinned.
-                let isScheduled = isToday ? offeredToday : activePlan?.day(for: date) != nil
+                // Other days keep to what is pinned, asked by weekday because
+                // `date` is a key, and `day(for:)` reads midnight as the night
+                // before.
+                let isScheduled = isToday ? offeredToday : activePlan?.day(onWeekday: weekday) != nil
 
                 VStack(spacing: 6) {
-                    Text(calendar.veryShortWeekdaySymbols[calendar.component(.weekday, from: date) - 1])
+                    Text(calendar.veryShortWeekdaySymbols[weekday - 1])
                         .font(Theme.rounded(11, weight: .bold))
                         .foregroundStyle(isToday ? Theme.accent : Theme.textTertiary)
                     ZStack {

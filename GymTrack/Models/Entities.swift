@@ -32,9 +32,12 @@ final class Plan {
     /// against it.
     var trainingDayCount: Int { days.filter { !$0.isRest && !$0.items.isEmpty }.count }
 
-    /// The day scheduled for a given date, if any.
-    func day(for date: Date) -> PlanDay? {
-        day(onWeekday: Calendar.current.component(.weekday, from: date))
+    /// The day pinned to the weekday of the training day holding `date`, if
+    /// any. At 00:30 on a Thursday that is still Wednesday's: see `TrainingDay`.
+    /// A day key is midnight and would read as the day before, so a caller
+    /// holding one asks `day(onWeekday:)`.
+    func day(for date: Date, calendar: Calendar = .current) -> PlanDay? {
+        day(onWeekday: calendar.component(.weekday, from: TrainingDay.key(for: date, calendar: calendar)))
     }
 
     /// The day scheduled on a weekday, 1 = Sunday, if any.
@@ -51,8 +54,11 @@ final class Plan {
     /// Siri and the watch all started freestyle sessions without the
     /// progression's prefilled loads. `nil` now means only that every training
     /// day is pinned, and none of them to this weekday.
+    ///
+    /// The weekday is the training day's, as in `day(for:calendar:)`, so a
+    /// lifter opening the app at 00:30 is still offered the night's workout.
     func nextDay(on date: Date, after sessions: [WorkoutSession], calendar: Calendar = .current) -> PlanDay? {
-        day(onWeekday: calendar.component(.weekday, from: date)) ?? nextInRotation(after: sessions)
+        day(for: date, calendar: calendar) ?? nextInRotation(after: sessions)
     }
 
     /// The unpinned training day that follows, in `orderedDays` and wrapping

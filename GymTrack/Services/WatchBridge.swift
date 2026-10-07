@@ -275,34 +275,35 @@ extension WatchTracking {
 enum WatchMirrorBuilder {
 
     /// What the watch shows when no session is running: today's prescription,
-    /// the streak, and the last thing that was trained.
+    /// the streak, and the last thing that was trained. "Today" is the training
+    /// day (see `TrainingDay`), as on the phone. `calendar` and `now` are
+    /// parameters so a test can pick the day.
     @MainActor
-    static func idle(plans: [Plan], sessions: [WorkoutSession]) -> WatchIdleSnapshot {
+    static func idle(plans: [Plan], sessions: [WorkoutSession],
+                     calendar: Calendar = .current, now: Date = .now) -> WatchIdleSnapshot {
         let finished = sessions.filter { !$0.isActive }
         let plan = plans.first(where: \.isActive) ?? plans.first
-        let today = plan?.nextDay(on: .now, after: finished)
-        let calendar = Calendar.current
-        let weekStart = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .distantPast
+        let today = plan?.nextDay(on: now, after: finished, calendar: calendar)
         // A session closed with nothing logged is not the last thing trained,
         // and not one of the week's sessions: the phone's week count and
         // streak leave it out, and the wrist should agree with them.
         let last = finished.sorted { $0.startedAt > $1.startedAt }.first(where: TrainingStats.isTrained)
         // Asked of the plan the way the phone's Today card asks it, so the
         // wrist never calls "Today" a day the phone calls "Next up".
-        let todayIsRotation = today != nil && plan?.day(for: .now) == nil
+        let todayIsRotation = today != nil && plan?.day(for: now, calendar: calendar) == nil
 
         return WatchIdleSnapshot(
             // What the rest of this describes. The watch compares it with its
-            // own clock, because nothing wakes the phone at midnight to say the
-            // training day is over and a wrist raised on a rest day was being
-            // shown yesterday's session as today's.
-            day: calendar.startOfDay(for: .now),
+            // own clock, because nothing wakes the phone when the training day
+            // turns over to say it has, and a wrist raised on a rest day was
+            // being shown yesterday's session as today's.
+            day: TrainingDay.key(for: now, calendar: calendar),
             todayTitle: today?.name,
             todayExerciseCount: today?.items.count ?? 0,
             todaySetCount: today?.totalSets ?? 0,
             todayMuscles: (today?.targetedMuscles.prefix(3).map(\.name)) ?? [],
-            streak: TrainingStats.streak(from: finished).current,
-            sessionsThisWeek: finished.filter { $0.startedAt >= weekStart && TrainingStats.isTrained($0) }.count,
+            streak: TrainingStats.streak(from: finished, calendar: calendar, now: now).current,
+            sessionsThisWeek: TrainingStats.sessionsThisWeek(finished, calendar: calendar, now: now).count,
             lastSessionTitle: last?.title,
             lastSessionDate: last?.startedAt,
             unit: AppSettings.shared.weightUnit,

@@ -46,13 +46,17 @@ enum WidgetPublisher {
     /// What the widgets are told, built without touching the shared container
     /// or WidgetKit so a test can ask it questions. `now` and `calendar` are
     /// parameters for the same reason: "today" has to be a day the test picked.
+    ///
+    /// Every day in it is a training day (see `TrainingDay`), as on the phone's
+    /// Today tab, so at 00:30 the widget still offers the night's workout.
     static func snapshot(plans: [Plan], sessions: [WorkoutSession], running: ActiveWorkout?,
                          calendar: Calendar = .current, now: Date = .now) -> GymTrackSnapshot {
         let finished = sessions.filter { !$0.isActive }
         let plan = displayedPlan(among: plans)
         let today = plan?.nextDay(on: now, after: finished, calendar: calendar)
-        let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? .distantPast
-        let thisWeek = finished.filter { $0.startedAt >= weekStart && TrainingStats.isTrained($0) }
+        let trainingDay = TrainingDay.key(for: now, calendar: calendar)
+        let weekStart = TrainingStats.weekInterval(containing: trainingDay, calendar: calendar).start
+        let thisWeek = TrainingStats.sessionsThisWeek(finished, calendar: calendar, now: now)
         let rotation = plan?.nextInRotation(after: finished)
 
         // The whole week, so a widget can say what tomorrow is without the app
@@ -76,17 +80,17 @@ enum WidgetPublisher {
         }
         // Asked of the plan the way the phone's Today card asks it, so a widget
         // never calls "Today" a day the app calls "Next up".
-        let todayIsRotation = today != nil && plan?.day(for: now) == nil
+        let todayIsRotation = today != nil && plan?.day(for: now, calendar: calendar) == nil
 
         return GymTrackSnapshot(
-            day: calendar.startOfDay(for: now),
+            day: trainingDay,
             schedule: schedule,
             // Trained sessions only, because that is what the streak it stands
             // next to counts. The latest is found by date first, so only the
             // sessions newer than it have their sets read.
             lastTrainedDay: finished.sorted { $0.startedAt > $1.startedAt }
                 .first(where: TrainingStats.isTrained)
-                .map { calendar.startOfDay(for: $0.startedAt) },
+                .map { TrainingDay.key(for: $0.startedAt, calendar: calendar) },
             weekStart: weekStart,
             // Decided the way the phone's Today card decides it, so the
             // widget never shows a victory card over a scheduled day the app is
@@ -102,7 +106,7 @@ enum WidgetPublisher {
             todayExerciseCount: today?.items.count ?? 0,
             todaySetCount: today?.totalSets ?? 0,
             todayMuscles: today?.targetedMuscles.prefix(3).map(\.name) ?? [],
-            streak: TrainingStats.streak(from: finished).current,
+            streak: TrainingStats.streak(from: finished, calendar: calendar, now: now).current,
             sessionsThisWeek: thisWeek.count,
             weekVolumeKg: TrainingStats.totalVolume(thisWeek),
             unit: AppSettings.shared.weightUnit,

@@ -4,9 +4,11 @@ import SwiftData
 @testable import GymTrack
 
 /// Protects the numbers behind Today and Progress: streaks, calendar weeks,
-/// windows, day counts, volume, personal records and the Lifts card's tags
-/// over finished sessions, including the days that are 23 or 25 hours long and
-/// the sessions that straddle midnight in a zone other than the runner's.
+/// windows, training days, day counts, volume, personal records and the Lifts
+/// card's tags over finished sessions, including the days that are 23 or 25
+/// hours long, the sessions that start in the small hours and so count for the
+/// night before, and the sessions that straddle midnight in a zone other than
+/// the runner's.
 ///
 /// Every date comes from `TestClock`, so a Mac set to Cairo runs the same
 /// checks as CI in UTC. The progression suggestion has its own file, and the
@@ -161,12 +163,13 @@ struct TrainingStatsTests {
         #expect(streak.longest == 1)
     }
 
-    /// A session at 23:59 and the next at 00:01 are on consecutive local days in
-    /// every zone below, and on the same UTC day in all of them.
+    /// A session at 03:59 and the next at 04:01 are on consecutive local
+    /// training days in every zone below, and on the same UTC one in all of
+    /// them.
     @Test(arguments: ["America/New_York", "Africa/Cairo", "Pacific/Kiritimati"])
-    func sessionsEitherSideOfLocalMidnightAreTwoDaysInThatZoneAndOneInUTC(zone: String) throws {
+    func sessionsEitherSideOfTheLocalCutoffAreTwoDaysInThatZoneAndOneInUTC(zone: String) throws {
         let rig = try Rig()
-        let sessions = [rig.trained("2026-03-09T23:59:00", in: zone), rig.trained("2026-03-10T00:01:00", in: zone)]
+        let sessions = [rig.trained("2026-03-10T03:59:00", in: zone), rig.trained("2026-03-10T04:01:00", in: zone)]
         let morning = TestClock.at("2026-03-10T09:00:00", in: zone)
 
         let local = TrainingStats.streak(from: sessions, calendar: TestClock.calendar(in: zone), now: morning)
@@ -195,9 +198,10 @@ struct TrainingStatsTests {
         StreakCase(zone: "America/New_York",
                    stamps: ["2026-10-31T22:00:00", "2026-11-01T00:30:00", "2026-11-01T23:30:00", "2026-11-02T08:00:00"],
                    now: "2026-11-02T12:00:00", current: 3),
-        // Cairo springs forward at midnight, so Friday 24 April starts at 01:00.
+        // Cairo springs forward at midnight, so Friday 24 April starts at 01:00
+        // and its 04:30 is only three and a half hours in.
         StreakCase(zone: "Africa/Cairo",
-                   stamps: ["2026-04-23T20:00:00", "2026-04-24T01:30:00", "2026-04-25T10:00:00"],
+                   stamps: ["2026-04-23T20:00:00", "2026-04-24T04:30:00", "2026-04-25T10:00:00"],
                    now: "2026-04-25T12:00:00", current: 3),
     ])
     func aStreakRunsThroughTheDayTheClocksChange(_ scenario: StreakCase) throws {
@@ -238,12 +242,12 @@ struct TrainingStatsTests {
         #expect(gapped.longest == 3)
         #expect(TrainingStats.streak(from: [], calendar: calendar, now: now).current == 0)
 
-        // A minute either side of local midnight is two days, not one.
-        let midnight = [at(19, 23, 59), at(20, 0, 1)].map { rig.session($0, [Work(kg: 60, reps: 8)]) }
-        #expect(TrainingStats.streak(from: midnight, calendar: calendar, now: now).current == 2)
-        // Two sessions on one local day are one day.
-        let sameDay = [at(20, 0, 30), at(20, 23, 30)].map { rig.session($0, [Work(kg: 60, reps: 8)]) }
-        let one = TrainingStats.streak(from: sameDay, calendar: calendar, now: at(20, 23, 45))
+        // A minute either side of the local 04:00 cutoff is two days, not one.
+        let cutoff = [at(20, 3, 59), at(20, 4, 1)].map { rig.session($0, [Work(kg: 60, reps: 8)]) }
+        #expect(TrainingStats.streak(from: cutoff, calendar: calendar, now: now).current == 2)
+        // Two sessions on one local training day are one day, midnight or not.
+        let sameDay = [at(20, 4, 30), at(21, 0, 30)].map { rig.session($0, [Work(kg: 60, reps: 8)]) }
+        let one = TrainingStats.streak(from: sameDay, calendar: calendar, now: at(21, 1))
         #expect(one.current == 1)
         #expect(one.longest == 1)
     }
@@ -253,7 +257,7 @@ struct TrainingStatsTests {
     @Test func aDaySkippedInKiritimatiSplitsTheStreakThoughUTCSeesNoGap() throws {
         let rig = try Rig()
         let zone = "Pacific/Kiritimati"
-        let sessions = [rig.trained("2026-03-20T00:30:00", in: zone), rig.trained("2026-03-18T23:30:00", in: zone)]
+        let sessions = [rig.trained("2026-03-20T04:30:00", in: zone), rig.trained("2026-03-18T23:30:00", in: zone)]
         let now = TestClock.at("2026-03-20T12:00:00", in: zone)
         let local = TrainingStats.streak(from: sessions, calendar: TestClock.calendar(in: zone), now: now)
         #expect(local.current == 1)
@@ -360,13 +364,16 @@ struct TrainingStatsTests {
         #expect(week.duration == 167 * 3_600)
     }
 
+    /// The week's edges are where its training days begin: 04:00 on its first
+    /// Monday and on the next. Sunday night's session at 03:59 on Monday is
+    /// last week's.
     @Test func thisWeekCountsFinishedTrainingStartedInsideItsEdges() throws {
         let rig = try Rig()
         let inside = [
-            rig.trained("2026-03-09T00:00:00"), rig.trained("2026-03-11T09:00:00"), rig.trained("2026-03-15T23:59:59"),
+            rig.trained("2026-03-09T04:00:00"), rig.trained("2026-03-11T09:00:00"), rig.trained("2026-03-16T03:59:59"),
         ]
         let outside = [
-            rig.trained("2026-03-08T23:59:59"), rig.trained("2026-03-16T00:00:00"),
+            rig.trained("2026-03-09T03:59:59"), rig.trained("2026-03-16T04:00:00"),
             rig.session(TestClock.at("2026-03-10T08:00:00"), [Work(kg: 100, reps: 5, logged: false)]),
             rig.session(TestClock.at("2026-03-10T09:00:00"), finished: false, [Work(kg: 100, reps: 5)]),
         ]
@@ -375,16 +382,20 @@ struct TrainingStatsTests {
         #expect(TrainingStats.sessionsThisWeek([], calendar: utc, now: now).isEmpty)
     }
 
-    @Test func aLateSundayInNewYorkBelongsToLastWeekThere() throws {
+    @Test func aSundayNightInNewYorkBelongsToLastWeekThere() throws {
         let rig = try Rig()
         let zone = "America/New_York"
-        // 23:30 on Sunday 8 March in New York is 03:30 UTC on Monday the 9th.
+        // 23:30 on Sunday 8 March in New York and 01:00 the next morning are
+        // both Sunday night's. The second is 05:00 UTC on Monday the 9th, past
+        // UTC's cutoff, so UTC files it in the new week.
         let lateSunday = rig.trained("2026-03-08T23:30:00", in: zone)
+        let smallHours = rig.trained("2026-03-09T01:00:00", in: zone)
         let wednesday = TestClock.at("2026-03-11T12:00:00", in: zone)
-        let local = TrainingStats.sessionsThisWeek([lateSunday], calendar: TestClock.calendar(in: zone), now: wednesday)
-        let universal = TrainingStats.sessionsThisWeek([lateSunday], calendar: utc, now: wednesday)
+        let local = TrainingStats.sessionsThisWeek([lateSunday, smallHours], calendar: TestClock.calendar(in: zone),
+                                                   now: wednesday)
+        let universal = TrainingStats.sessionsThisWeek([lateSunday, smallHours], calendar: utc, now: wednesday)
         #expect(local.isEmpty)
-        #expect(universal.count == 1)
+        #expect(universal.map(\.id) == [smallHours.id])
     }
 
     struct WeekStart: Sendable, CustomTestStringConvertible {
@@ -394,9 +405,10 @@ struct TrainingStatsTests {
     }
 
     /// Sunday 8 March. A Monday-first week holds the Wednesday and Saturday
-    /// before it and stops at the Sunday's midnight, so Monday's 1 am is next
-    /// week's; a Sunday-first week has only just begun and holds the Sunday and
-    /// that Monday. The session on 1 March is in neither.
+    /// before it and stops where Sunday's training day ends, at 04:00 on
+    /// Monday, so Monday's 4 am is next week's; a Sunday-first week has only
+    /// just begun and holds the Sunday and that Monday. The session on 1 March
+    /// is in neither.
     @Test(arguments: ["Pacific/Kiritimati", "Pacific/Pago_Pago"],
           [WeekStart(firstWeekday: 2, sessions: 3), WeekStart(firstWeekday: 1, sessions: 2)])
     func aWeekOpensAtLocalMidnightOnTheCalendarsFirstWeekday(zone: String, week: WeekStart) throws {
@@ -408,7 +420,7 @@ struct TrainingStatsTests {
         }
         let now = at(8, 10)
         try #require(calendar.component(.weekday, from: now) == 1, "The fixture day must be a Sunday")
-        let sessions = [at(4, 12), at(7, 12), at(8, 9), at(1, 12), at(9, 1)].map { rig.session($0, [Work(kg: 60, reps: 8)]) }
+        let sessions = [at(4, 12), at(7, 12), at(8, 9), at(1, 12), at(9, 4)].map { rig.session($0, [Work(kg: 60, reps: 8)]) }
         #expect(TrainingStats.sessionsThisWeek(sessions, calendar: calendar, now: now).count == week.sessions)
 
         let interval = TrainingStats.weekInterval(containing: now, calendar: calendar)
@@ -429,8 +441,9 @@ struct TrainingStatsTests {
     }
 
     /// The week holding Cairo's spring-forward Friday is 167 hours long, and the
-    /// one holding its autumn Thursday 169. Its first and last hours, the short
-    /// day's first hour, and the hours either side of it are the edges.
+    /// one holding its autumn Thursday 169. The edges are the 04:00 cutoffs
+    /// either side of its first and last training days, and the short day's
+    /// first hour, which is Thursday night's.
     @Test func cairosWeeksAcrossTheClockChangesKeepTheirEdges() throws {
         try requireMidnightSpringForward(on: "2026-04-24", in: "Africa/Cairo")
         let rig = try Rig()
@@ -440,14 +453,17 @@ struct TrainingStatsTests {
         #expect(week.end == cairoDay("2026-04-27"))
         #expect(week.duration == 167 * 3_600)
         let edges = [
-            rig.session(inCairo("2026-04-19T23:30:00"), [Self.hold]),   // last week
-            rig.session(inCairo("2026-04-20T00:30:00"), [Self.hold]),   // first hour
+            rig.session(inCairo("2026-04-20T03:30:00"), [Self.hold]),   // Sunday night: last week
+            rig.session(inCairo("2026-04-20T04:30:00"), [Self.hold]),   // first training hour
             rig.session(inCairo("2026-04-24T01:15:00"), [Self.hold]),   // first hour of the short day
-            rig.session(inCairo("2026-04-26T23:30:00"), [Self.hold]),   // last hour
-            rig.session(inCairo("2026-04-27T00:30:00"), [Self.hold]),   // next week
+            rig.session(inCairo("2026-04-26T23:30:00"), [Self.hold]),   // Sunday
+            rig.session(inCairo("2026-04-27T03:30:00"), [Self.hold]),   // Sunday night: last training hour
+            rig.session(inCairo("2026-04-27T04:30:00"), [Self.hold]),   // next week
             rig.session(inCairo("2026-04-21T09:00:00"), []),            // nothing logged
         ]
-        #expect(TrainingStats.sessionsThisWeek(edges, calendar: cairo, now: lateSunday).count == 3)
+        #expect(TrainingStats.sessionsThisWeek(edges, calendar: cairo, now: lateSunday).count == 4)
+        // At 00:30 on Monday it is still Sunday night, so still this week.
+        #expect(TrainingStats.sessionsThisWeek(edges, calendar: cairo, now: inCairo("2026-04-27T00:30:00")).count == 4)
 
         let autumn = TrainingStats.weekInterval(containing: inCairo("2026-10-28T12:00:00"), calendar: cairo)
         #expect(autumn.duration == 169 * 3_600)
@@ -542,18 +558,137 @@ struct TrainingStatsTests {
     }
 
     /// Cairo skips 00:00 to 01:00 on Friday 24 April 2026. A session at 23:50
-    /// the night before is not that day's.
-    @Test func aSessionBegunBeforeCairosShortDayStartedIsNotThatDays() throws {
+    /// the night before is not that day's, and nor is one in the short day's
+    /// first hour: that is still Thursday night. 04:10 is only three hours and
+    /// ten minutes into the day, and is the day's own.
+    @Test func aSessionBegunBeforeCairosShortDaysCutoffIsNotThatDays() throws {
         try requireMidnightSpringForward(on: "2026-04-24", in: "Africa/Cairo")
         let rig = try Rig()
         let now = inCairo("2026-04-24T18:00:00")
         let plan = rig.plan()
         let friday = rig.day("Friday", in: plan, weekday: 6)
+        func done(_ sessions: [WorkoutSession]) -> WorkoutSession? {
+            TrainingStats.completedToday(in: sessions, plan: plan, calendar: cairo, now: now)
+        }
         let thursdayNight = rig.session(inCairo("2026-04-23T23:50:00"), lasting: 2 * 3_600, of: friday, [Self.hold])
-        #expect(TrainingStats.completedToday(in: [thursdayNight], plan: plan, calendar: cairo, now: now) == nil)
+        #expect(done([thursdayNight]) == nil)
         let firstHour = rig.session(inCairo("2026-04-24T01:10:00"), of: friday, [Self.hold])
-        #expect(TrainingStats.completedToday(in: [thursdayNight, firstHour], plan: plan,
-                                            calendar: cairo, now: now) === firstHour)
+        #expect(done([thursdayNight, firstHour]) == nil, "The short day's first hour is Thursday night's")
+        let morning = rig.session(inCairo("2026-04-24T04:10:00"), of: friday, [Self.hold])
+        #expect(done([thursdayNight, firstHour, morning]) === morning)
+    }
+
+    // MARK: - Training days
+
+    struct TrainingDayCase: Sendable, CustomTestStringConvertible {
+        let zone: String
+        let stamp: String
+        let day: String
+        var testDescription: String { "\(zone) \(stamp)" }
+    }
+
+    /// Before 04:00 on the wall clock is the night before. Cairo springs
+    /// forward at midnight on 24 April and New York at 02:00 on 8 March, so
+    /// on those days 04:30 is less than four hours in and still the day's own.
+    @Test(arguments: [
+        TrainingDayCase(zone: "UTC", stamp: "2026-03-11T23:30:00", day: "2026-03-11"),
+        TrainingDayCase(zone: "UTC", stamp: "2026-03-12T00:00:00", day: "2026-03-11"),
+        TrainingDayCase(zone: "UTC", stamp: "2026-03-12T00:30:00", day: "2026-03-11"),
+        TrainingDayCase(zone: "UTC", stamp: "2026-03-12T03:59:59", day: "2026-03-11"),
+        TrainingDayCase(zone: "UTC", stamp: "2026-03-12T04:00:00", day: "2026-03-12"),
+        TrainingDayCase(zone: "UTC", stamp: "2026-03-12T04:30:00", day: "2026-03-12"),
+        TrainingDayCase(zone: "Africa/Cairo", stamp: "2026-04-24T01:30:00", day: "2026-04-23"),
+        TrainingDayCase(zone: "Africa/Cairo", stamp: "2026-04-24T03:59:00", day: "2026-04-23"),
+        TrainingDayCase(zone: "Africa/Cairo", stamp: "2026-04-24T04:30:00", day: "2026-04-24"),
+        TrainingDayCase(zone: "Africa/Cairo", stamp: "2026-04-25T00:30:00", day: "2026-04-24"),
+        TrainingDayCase(zone: "America/New_York", stamp: "2026-03-08T03:30:00", day: "2026-03-07"),
+        TrainingDayCase(zone: "America/New_York", stamp: "2026-03-08T04:30:00", day: "2026-03-08"),
+        TrainingDayCase(zone: "America/New_York", stamp: "2026-11-01T01:30:00", day: "2026-10-31"),
+    ])
+    func theSmallHoursBelongToTheNightBefore(_ scenario: TrainingDayCase) throws {
+        if scenario.zone == "Africa/Cairo" { try requireMidnightSpringForward(on: "2026-04-24", in: scenario.zone) }
+        let calendar = TestClock.calendar(in: scenario.zone)
+        let expected = calendar.startOfDay(for: TestClock.at("\(scenario.day)T12:00:00", in: scenario.zone))
+        #expect(TrainingDay.key(for: TestClock.at(scenario.stamp, in: scenario.zone), calendar: calendar) == expected)
+    }
+
+    /// The issue's lifter: Push on Tuesday, Pull pinned to Wednesday, Legs to
+    /// Thursday. Wednesday's Pull is skipped in the day and trained at 00:30 on
+    /// Thursday morning, which is still Wednesday night.
+    @Test func aSessionStartedAfterMidnightIsTheNightBeforesForEveryReader() throws {
+        let rig = try Rig()
+        let plan = rig.plan()
+        let push = rig.day("Push", in: plan, weekday: 3)
+        let pull = rig.day("Pull", in: plan, weekday: 4)
+        let legs = rig.day("Legs", in: plan, weekday: 5)
+        let tuesday = rig.session(TestClock.at("2026-03-10T18:00:00"), of: push, [Self.hold])
+        let smallHours = TestClock.at("2026-03-12T00:30:00")
+
+        // At 00:30 on Thursday, Wednesday's day is still the one on offer.
+        #expect(plan.day(for: smallHours, calendar: utc)?.id == pull.id)
+        #expect(plan.nextDay(on: smallHours, after: [tuesday], calendar: utc)?.id == pull.id)
+        #expect(TrainingStats.completedToday(in: [tuesday], plan: plan, calendar: utc, now: smallHours) == nil)
+
+        let lateNight = rig.session(smallHours, of: pull, [Self.hold])
+        let sessions = [tuesday, lateNight]
+        let wednesday = TestClock.at("2026-03-11T00:00:00")
+        #expect(TrainingStats.trainedDays(in: sessions, calendar: utc) == [TestClock.at("2026-03-10T00:00:00"), wednesday],
+                "The week strip and the calendar mark Wednesday trained, not Thursday")
+        #expect(TrainingStats.completedToday(in: sessions, plan: plan, calendar: utc,
+                                            now: TestClock.at("2026-03-12T01:45:00")) === lateNight,
+                "Later that night it is the night's workout, done")
+
+        let thursdayEvening = TestClock.at("2026-03-12T18:00:00")
+        let streak = TrainingStats.streak(from: sessions, calendar: utc, now: thursdayEvening)
+        #expect(streak.current == 2, "Tuesday to Wednesday is unbroken")
+        #expect(streak.longest == 2)
+        #expect(TrainingStats.completedToday(in: sessions, plan: plan, calendar: utc, now: thursdayEvening) == nil,
+                "Wednesday night's session must not call Thursday done")
+        #expect(plan.nextDay(on: thursdayEvening, after: sessions, calendar: utc)?.id == legs.id)
+        let points = TrainingStats.daily(.sets, sessions: sessions, days: 3, calendar: utc, now: thursdayEvening)
+        #expect(points.map(\.value) == [1, 1, 0])
+        #expect(TrainingStats.sessionsThisWeek(sessions, calendar: utc, now: thursdayEvening).count == 2)
+        // At 00:30 on the next Monday it is still Sunday night, so the grid's
+        // last column is still this week's.
+        #expect(TrainingStats.gridStart(weeks: 1, calendar: utc, now: TestClock.at("2026-03-16T00:30:00"))
+                == TestClock.at("2026-03-09T00:00:00"))
+    }
+
+    /// The same night on a rotation. The rotation moves on past Pull, and the
+    /// next day is offered on Thursday rather than hidden behind a done card.
+    @Test func aRotationOffersTheNextDayAfterASessionStartedAfterMidnight() throws {
+        let rig = try Rig()
+        let plan = rig.plan()
+        let push = rig.day("Push", in: plan, weekday: nil)
+        let pull = rig.day("Pull", in: plan, weekday: nil)
+        let legs = rig.day("Legs", in: plan, weekday: nil)
+        let tuesday = rig.session(TestClock.at("2026-03-10T18:00:00"), of: push, [Self.hold])
+        let lateNight = rig.session(TestClock.at("2026-03-12T00:30:00"), of: pull, [Self.hold])
+        let sessions = [tuesday, lateNight]
+
+        #expect(TrainingStats.completedToday(in: sessions, plan: plan, calendar: utc,
+                                            now: TestClock.at("2026-03-12T01:45:00")) === lateNight)
+        let thursdayEvening = TestClock.at("2026-03-12T18:00:00")
+        #expect(TrainingStats.completedToday(in: sessions, plan: plan, calendar: utc, now: thursdayEvening) == nil)
+        #expect(plan.nextDay(on: thursdayEvening, after: sessions, calendar: utc)?.id == legs.id)
+    }
+
+    /// A session that starts before midnight and runs past it was always
+    /// filed under the day it started, and still is.
+    @Test func aSessionRunningPastMidnightStaysOnTheDayItStarted() throws {
+        let rig = try Rig()
+        let plan = rig.plan()
+        let pull = rig.day("Pull", in: plan, weekday: 4)
+        let session = rig.session(TestClock.at("2026-03-11T23:30:00"), of: pull, [Self.hold])
+        try #require(session.endedAt == TestClock.at("2026-03-12T00:30:00"))
+
+        #expect(TrainingStats.trainedDays(in: [session], calendar: utc) == [TestClock.at("2026-03-11T00:00:00")])
+        let afterward = TestClock.at("2026-03-12T00:45:00")
+        #expect(TrainingStats.completedToday(in: [session], plan: plan, calendar: utc, now: afterward) === session)
+        #expect(TrainingStats.finishedToday(in: [session], calendar: utc, now: afterward) === session)
+        let thursday = TestClock.at("2026-03-12T18:00:00")
+        #expect(TrainingStats.completedToday(in: [session], plan: plan, calendar: utc, now: thursday) == nil)
+        #expect(TrainingStats.finishedToday(in: [session], calendar: utc, now: thursday) == nil)
     }
 
     // MARK: - Counting days
@@ -601,6 +736,19 @@ struct TrainingStatsTests {
         #expect(TrainingStats.dayCount(from: evening, to: early, calendar: calendar) == 1)
     }
 
+    /// The heat map's "Last hit" counts training days, as the calendar beside
+    /// it files them: Wednesday night's session at 00:30 on Thursday reads
+    /// "yesterday" on Thursday evening.
+    @Test func lastHitCountsTrainingDays() {
+        let evening = TestClock.at("2026-03-12T18:00:00")
+        #expect(MuscleDetailPanel.dayLabel(for: TestClock.at("2026-03-12T00:30:00"), calendar: utc, now: evening)
+                == "yesterday")
+        #expect(MuscleDetailPanel.dayLabel(for: TestClock.at("2026-03-12T04:30:00"), calendar: utc, now: evening)
+                == "today")
+        #expect(MuscleDetailPanel.dayLabel(for: TestClock.at("2026-03-11T23:30:00"), calendar: utc,
+                                           now: TestClock.at("2026-03-12T01:00:00")) == "today")
+    }
+
     @Test func cairosLongDayIsOneDayAndAWeekAcrossItsShortOneIsSeven() {
         #expect(TrainingStats.dayCount(from: inCairo("2026-10-29T12:00:00"), to: inCairo("2026-10-30T12:00:00"),
                                        calendar: cairo) == 1)
@@ -645,8 +793,10 @@ struct TrainingStatsTests {
     @Test func theSevenDayWindowAndTheOneBeforeItMeetWithoutAGap() throws {
         let rig = try Rig()
         let today = utc.startOfDay(for: now)
+        // At 04:00, the first moment of each training day.
         func finished(_ offset: Int) throws -> WorkoutSession {
-            rig.session(try #require(utc.date(byAdding: .day, value: offset, to: today)), [Self.hold])
+            let day = try #require(utc.date(byAdding: .day, value: offset, to: today))
+            return rig.session(day.addingTimeInterval(4 * 3_600), [Self.hold])
         }
         let fourteenDaysAgo = try finished(-14)
         let thirteenDaysAgo = try finished(-13)
@@ -668,20 +818,21 @@ struct TrainingStatsTests {
     @Test func aLoggedHoldIsADayTrainedThoughItMovedNoWeight() throws {
         let rig = try Rig()
         let today = utc.startOfDay(for: now)
-        let hold = rig.session(today, [Self.hold])
-        let empty = rig.session(TrainingStats.startOfDay(-1, from: today, calendar: utc), [])
+        let hold = rig.session(today.addingTimeInterval(9 * 3_600), [Self.hold])
+        let empty = rig.session(TrainingStats.startOfDay(-1, from: today, calendar: utc).addingTimeInterval(9 * 3_600), [])
         #expect(hold.totalVolumeKg == 0)
         #expect(TrainingStats.trainedDays(in: [hold, empty], calendar: utc) == [today])
     }
 
-    /// The first half hour of the window's first day and the last half hour
-    /// before it both sit on the edge that used to land an hour late.
-    @Test func theWindowsMeetAtMidnightBesideCairosShortDay() throws {
+    /// The first half hour of the window's first training day and the last
+    /// half hour before it both sit on the edge that used to land an hour
+    /// late.
+    @Test func theWindowsMeetAtTheCutoffBesideCairosShortDay() throws {
         try requireMidnightSpringForward(on: "2026-04-24", in: "Africa/Cairo")
         let rig = try Rig()
         let onFriday = inCairo("2026-04-24T12:00:00")
-        let windowStart = rig.session(inCairo("2026-04-18T00:30:00"), [Self.hold])
-        let lastWeek = rig.session(inCairo("2026-04-17T23:30:00"), [Self.hold])
+        let windowStart = rig.session(inCairo("2026-04-18T04:30:00"), [Self.hold])
+        let lastWeek = rig.session(inCairo("2026-04-18T03:30:00"), [Self.hold])
         let edges = [windowStart, lastWeek]
         #expect(TrainingStats.sessions(in: edges, days: 7, calendar: cairo, now: onFriday).map(\.id) == [windowStart.id])
         #expect(TrainingStats.previousWindow(edges, days: 7, calendar: cairo, now: onFriday).map(\.id) == [lastWeek.id])
@@ -692,9 +843,11 @@ struct TrainingStatsTests {
         let rig = try Rig()
         let zone = "America/New_York"
         let calendar = TestClock.calendar(in: zone)
+        // New York skips 02:00 to 03:00 on 8 March, so 04:30 that morning is
+        // three and a half hours after midnight, and still the 8th's.
         let sessions = [
             rig.session(TestClock.at("2026-03-07T20:00:00", in: zone), [Work(kg: 100, reps: 5)]),
-            rig.session(TestClock.at("2026-03-08T00:30:00", in: zone), [Work(kg: 100, reps: 5), Work(kg: 100, reps: 5)]),
+            rig.session(TestClock.at("2026-03-08T04:30:00", in: zone), [Work(kg: 100, reps: 5), Work(kg: 100, reps: 5)]),
             rig.session(TestClock.at("2026-03-08T15:00:00", in: zone), [Work(kg: 100, reps: 5)]),
             rig.session(TestClock.at("2026-03-10T09:00:00", in: zone), [Work(kg: 100, reps: 5)]),
         ]
@@ -711,8 +864,8 @@ struct TrainingStatsTests {
     @Test func sevenDayBucketsIncludeTheirFirstDayAndNotTheNextBucketsLast() throws {
         let rig = try Rig()
         let sessions = [
-            "2026-03-11T08:00:00", "2026-03-08T08:00:00", "2026-03-05T00:00:00",
-            "2026-03-04T23:59:00", "2026-02-26T00:00:00", "2026-02-25T23:59:00",
+            "2026-03-11T08:00:00", "2026-03-08T08:00:00", "2026-03-05T04:00:00",
+            "2026-03-05T03:59:00", "2026-02-26T04:00:00", "2026-02-26T03:59:00",
         ].map { rig.trained($0) }
         let counts = TrainingStats.weeklySessionCounts(sessions, weeks: 2, calendar: utc, now: now)
         #expect(counts == [2, 3])

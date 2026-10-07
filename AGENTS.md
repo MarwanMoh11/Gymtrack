@@ -57,6 +57,9 @@ negotiable:
   written as you go, so a force-quit mid-workout loses nothing.
 - `Services/TrainingStats.swift` — pure functions over finished sessions. Volume,
   streaks, records, and the double-progression suggestion.
+- `GymTrackShared/TrainingDay.swift` — which day a session counts for. Before
+  04:00 is still the night before, and every reader that buckets sessions by day
+  or asks which day is today (phone, widget, watch) goes through it.
 - `Services/BackupService.swift` — JSON export/import. **`version` is 2 and stays
   2**; every field added since is optional so older backups still decode. Read
   the comments on `bodyMetrics` / `loadScales` / `exerciseCatalog` before adding
