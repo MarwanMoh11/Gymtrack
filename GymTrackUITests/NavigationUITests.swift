@@ -12,20 +12,6 @@ final class NavigationUITests: GymTrackUITestCase {
 
     private let exerciseCount = NSPredicate(format: "label MATCHES %@", "^[0-9]+ exercises?$")
 
-    /// How long the first thing on the Library may take to appear after its
-    /// tab is tapped.
-    ///
-    /// The Library is the slowest tab to open in the simulator, since it lays
-    /// out the catalog's list, the search field and the filter menus at once.
-    /// On an idle CI runner it appears about four and a half seconds after the
-    /// tap, up to a second behind the other tabs; the app's own share is half
-    /// a second, and the rest is the simulator and XCUITest. That leaves the
-    /// usual ten seconds little room on a busy runner: in the two failed runs
-    /// of #34 the simulator took 45 seconds to launch and 36 for one
-    /// accessibility snapshot, and only the Library missed its wait. A minute
-    /// outlasts such a snapshot, and a Library that never opens still fails.
-    private let libraryFirstOpen: TimeInterval = 60
-
     func testEveryTabOpensItsScreen() throws {
         app = launchApp(onboarded: true)
 
@@ -35,7 +21,7 @@ final class NavigationUITests: GymTrackUITestCase {
         require(app.navigationBars["Plan"], "the Plan title")
 
         tap(app.tabBars.buttons["Library"], "the Library tab")
-        require(app.navigationBars["Library"], "the Library title", timeout: libraryFirstOpen)
+        require(app.navigationBars["Library"], "the Library title")
 
         tap(app.tabBars.buttons["Progress"], "the Progress tab")
         require(app.navigationBars["Progress"], "the Progress title")
@@ -50,8 +36,7 @@ final class NavigationUITests: GymTrackUITestCase {
         app = launchApp(onboarded: true)
         tap(app.tabBars.buttons["Library"], "the Library tab")
 
-        let count = require(app.staticTexts.matching(exerciseCount).firstMatch, "the exercise count",
-                            timeout: libraryFirstOpen)
+        let count = require(app.staticTexts.matching(exerciseCount).firstMatch, "the exercise count")
         let everything = count.label
 
         let search = require(app.searchFields.firstMatch, "the search field")
@@ -69,7 +54,7 @@ final class NavigationUITests: GymTrackUITestCase {
         app = launchApp(onboarded: true)
         tap(app.tabBars.buttons["Library"], "the Library tab")
 
-        let search = require(app.searchFields.firstMatch, "the search field", timeout: libraryFirstOpen)
+        let search = require(app.searchFields.firstMatch, "the search field")
         search.tap()
         search.typeText("Zzqxj Machine")
 
