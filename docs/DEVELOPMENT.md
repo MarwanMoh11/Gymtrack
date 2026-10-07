@@ -82,7 +82,7 @@ sh scripts/test-all.sh
 
 The first runs `GymTrackTests` and `GymTrackUITests`, the second
 `GymTrackWatchTests`, the third the older `Tests/` suite (about seven minutes;
-`sh scripts/test-all.sh backup` runs only the scripts with "backup" in their
+`sh scripts/test-all.sh watch` runs only the scripts with "watch" in their
 name). Add `-only-testing:GymTrackTests/SuiteName` to run one suite. CI runs
 all three on every pull request; see `docs/claude-pipeline.md`.
 
