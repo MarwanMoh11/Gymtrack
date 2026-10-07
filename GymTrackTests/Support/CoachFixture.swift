@@ -1,14 +1,14 @@
 import Foundation
 import SwiftData
+@testable import GymTrack
 
-/// Shared by the Coach*Tests files. Not a test itself: it builds the plan every
-/// coach check runs against, and writes proposals as JSON so each check also
-/// goes through the decoder the phone uses on the file the Mac pushes.
+/// The plan every coach suite runs against, and proposals written as JSON so
+/// each check also goes through the decoder the phone uses on the file the Mac
+/// pushes. Shared by `CoachApplyTests`, `CoachValidationTests` and
+/// `CoachModelTests`.
 enum CoachFixture {
 
-    static func uuid(_ n: Int) -> UUID {
-        UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", n))!
-    }
+    static func uuid(_ n: Int) -> UUID { PersistenceFixtures.uuid(n) }
 
     static func id(_ n: Int) -> String { uuid(n).uuidString }
 
@@ -24,22 +24,18 @@ enum CoachFixture {
     static let plank = id(0x305)
     static let squat = id(0x306)
 
-    static let modelTypes: [any PersistentModel.Type] = [
-        Plan.self, PlanDay.self, PlanItem.self, WorkoutSession.self, SetLog.self,
-        ExerciseNote.self, CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
-        ExerciseLoadPreference.self, HiddenExerciseRecord.self,
-    ]
+    static let proposalID = "6F1C0000-0000-0000-0000-000000000001"
 
-    @MainActor static func makeContainer() throws -> ModelContainer {
-        let schema = Schema(modelTypes)
-        return try ModelContainer(for: schema,
-                                  configurations: ModelConfiguration(schema: schema, isStoredInMemoryOnly: true))
-    }
-
+    /// A folder of its own standing in for `Documents/Coach`, so no test reads
+    /// another's decisions. The caller removes it with `discard`.
     static func temporaryStore() -> CoachStore {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("coach-tests-\(UUID().uuidString)", isDirectory: true)
         return CoachStore(root: root)
+    }
+
+    static func discard(_ store: CoachStore) {
+        try? FileManager.default.removeItem(at: store.root)
     }
 
     /// The active plan: a push day with three slots, a pull day with a timed
@@ -81,10 +77,13 @@ enum CoachFixture {
         return plan
     }
 
-    @MainActor static func items(of day: String, _ context: ModelContext) throws -> [PlanItem] {
-        let dayID = UUID(uuidString: day)!
-        let days = try context.fetch(FetchDescriptor<PlanDay>())
-        return (days.first { $0.id == dayID }?.items ?? []).sorted { $0.order < $1.order }
+    @MainActor static func day(_ dayID: String, _ context: ModelContext) throws -> PlanDay? {
+        let id = UUID(uuidString: dayID)!
+        return try context.fetch(FetchDescriptor<PlanDay>()).first { $0.id == id }
+    }
+
+    @MainActor static func items(of dayID: String, _ context: ModelContext) throws -> [PlanItem] {
+        (try day(dayID, context)?.items ?? []).sorted { $0.order < $1.order }
     }
 
     @MainActor static func item(_ itemID: String, _ context: ModelContext) throws -> PlanItem? {
@@ -112,7 +111,7 @@ enum CoachFixture {
         return change
     }
 
-    static func proposalJSON(id: String = "6F1C0000-0000-0000-0000-000000000001", planID: String = planID,
+    static func proposalJSON(id: String = proposalID, planID: String = planID,
                              changes: [[String: Any]], extra: [String: Any] = [:]) throws -> Data {
         var object: [String: Any] = [
             "format": "gymtrack-coach-proposal", "version": 1, "id": id,
@@ -123,7 +122,7 @@ enum CoachFixture {
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
-    static func proposal(id: String = "6F1C0000-0000-0000-0000-000000000001", planID: String = planID,
+    static func proposal(id: String = proposalID, planID: String = planID,
                          changes: [[String: Any]], extra: [String: Any] = [:]) throws -> CoachProposal {
         try CoachJSON.decoded(CoachProposal.self,
                               from: try proposalJSON(id: id, planID: planID, changes: changes, extra: extra))
@@ -131,7 +130,6 @@ enum CoachFixture {
 
     /// The first row's status, for the checks that look at one change alone.
     @MainActor static func status(_ change: [String: Any], plans: [Plan]) throws -> CoachValidator.Status {
-        let review = CoachValidator.review(try proposal(changes: [change]), plans: plans)
-        return review.rows[0].status
+        CoachValidator.review(try proposal(changes: [change]), plans: plans).rows[0].status
     }
 }
