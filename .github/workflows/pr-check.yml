@@ -1,9 +1,8 @@
 name: PR Check
 
-# Every pull request gets, in parallel: build-and-test, the required merge gate
-# (all three targets build, and both apps' unit tests pass); the UI tests and the
-# older script suite, which report on the PR but don't block it; and an advisory
-# Claude review comment.
+# Every pull request gets, in parallel, two required merge gates, build-and-test
+# (all three targets build, and both apps' unit tests pass) and ui-tests (the
+# iPhone flows pass), and an advisory Claude review comment.
 # The why behind each line is in docs/claude-pipeline.md.
 
 on:
@@ -57,8 +56,8 @@ jobs:
           retention-days: 7
 
   ui-tests:
-    # Not required: the flows add ten minutes of building and tapping, and the
-    # gate should answer in about fifteen. A failure still shows red on the PR.
+    # Required by the ruleset too. It has its own runner because the flows add ten
+    # minutes of building and tapping, and in one job the gate passed forty.
     if: github.event.pull_request.draft == false
     runs-on: macos-26
     timeout-minutes: 30
@@ -76,37 +75,6 @@ jobs:
           path: |
             build/claude-check/*.log
             build/claude-check/dd/Logs/Test
-          if-no-files-found: ignore
-          retention-days: 7
-
-  script-tests:
-    # Not required: 66 scripts that each compile a slice of the app take about
-    # 20 minutes on a runner. A change rarely breaks one without breaking a unit
-    # test too, and a merge shouldn't wait the extra 10 minutes to find out.
-    if: github.event.pull_request.draft == false
-    runs-on: macos-26
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Script tests (Tests/ via scripts/test-*.sh)
-        run: |
-          mkdir -p build
-          if ! sh scripts/test-all.sh | tee build/script-tests.txt; then
-            awk '/FAIL/ { print $3 }' build/script-tests.txt | while read -r name; do
-              echo "::group::$name"
-              tail -n 40 "build/test-logs/$name.log"
-              echo "::endgroup::"
-            done
-            exit 1
-          fi
-
-      - name: Keep the logs of a failed run
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: script-test-logs-${{ github.event.pull_request.number }}
-          path: build/test-logs
           if-no-files-found: ignore
           retention-days: 7
 

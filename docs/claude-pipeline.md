@@ -61,9 +61,9 @@ that for one issue.
    is, whether you need your phone at all, and the taps to try. Tick the boxes in the PR as you go.
    How Claude writes it, and the part about you that you can edit, is in
    [`.github/claude-test-checklist.md`](../.github/claude-test-checklist.md).
-3. `PR Check` starts. The review comment arrives in about 2 minutes. `build-and-test`, the only
-   check that blocks merging, runs every unit test in about 10 minutes; `ui-tests` reports later
-   (see [timings](#7-timings-observed)).
+3. `PR Check` starts. The review comment arrives in about 2 minutes. Two checks block merging:
+   `build-and-test` runs every unit test in about 10 minutes, and `ui-tests` every UI flow in
+   about 14 (see [timings](#7-timings-observed)).
 
 **Read the review.** The comment's first line is the verdict:
 
@@ -131,7 +131,7 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 | Planning instructions | [`.github/claude-planning.md`](../.github/claude-planning.md) | How a run splits an issue into sub-issues instead of implementing it | Generic |
 | Test checklist | [`.github/claude-test-checklist.md`](../.github/claude-test-checklist.md) | How every PR's **Test before you merge** section is written, with an "About the owner" part to edit | The format is generic; the owner part and the app's tabs are specific |
 | Checker | [`scripts/claude-pipeline/check.sh`](../scripts/claude-pipeline/check.sh) | `check.sh build` compiles all three targets, `check.sh test <Target/Suite>` runs suites; both print only errors and failures. The only build or test command a cloud run may execute; also usable locally | Specific |
-| PR workflow | [`.github/workflows/pr-check.yml`](../.github/workflows/pr-check.yml) | `build-and-test` on `macos-26`, plus the Claude review | `build-and-test` steps and the review's app description are specific; the rest is generic |
+| PR workflow | [`.github/workflows/pr-check.yml`](../.github/workflows/pr-check.yml) | `build-and-test` and `ui-tests` on `macos-26`, plus the Claude review | `build-and-test` steps and the review's app description are specific; the rest is generic |
 | Issue forms | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | Bug report and Feature request: apply the label, ask for what Claude needs, and add `@claude` only if you choose "Yes" | Generic structure, GymTrack wording |
 | `CLAUDE.md` | [`CLAUDE.md`](../CLAUDE.md) | What every Claude run reads first: layout, data rules, test conventions, CI rules. 60 lines or fewer | Specific |
 | Local notes | [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) | Building, phone installs and simulator quirks, kept out of `CLAUDE.md` because cloud runs can't use them | Specific |
@@ -260,8 +260,9 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
 **`pr-check.yml`**
 - `concurrency` with `cancel-in-progress` means a new push to a PR cancels the run for the old
   commit, so a stale red check can't be the one you see.
-- `build-and-test` is the job's `name:`, and that name is what the ruleset requires. Renaming the
-  job without updating the ruleset leaves every PR waiting for a check that never reports.
+- `build-and-test` is the first job's `name:` and `ui-tests` the second's id, and those names are
+  what the ruleset requires. Renaming either job without updating the ruleset leaves every PR
+  waiting for a check that never reports.
 - `runs-on: macos-26` is pinned rather than `macos-latest`, so the Xcode under the build only
   changes when this line does. The job prints `xcodebuild -version` first.
 - Every Xcode step calls [`check.sh`](../scripts/claude-pipeline/check.sh), the same command a
@@ -280,13 +281,25 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   same commit's watch tests passed on another Mac, and `build-and-test` still went red. Nothing
   else is retried, so a failing test still fails on its first run, and a launch the change itself
   breaks fails both times.
+- **A cold simulator was the UI tests' random failure.** On PR #52 the UI test runner took three
+  minutes to start and the app's first launch seventy seconds, against two to five for every
+  later launch, and the first look at the screen timed out inside XCTest ("Failed to get matching
+  snapshots"), where no wait in a test can help. Two changes answer it. `check.sh test` boots the
+  phone simulator (`simctl bootstatus -b`) before `xcodebuild test` builds, so it settles during
+  the build; on PR #53 the runner then started in 41 seconds and the app in 35. And the run's
+  first UI test launches the app once and closes it before its own launch
+  (`GymTrackUITestCase.setUpWithError`), so no test's first step lands on the slow launch.
+  `check.sh build` doesn't boot anything: on #53 a simulator settling beside the compiler
+  stretched `build-and-test`'s build from two minutes to eleven.
 - Building the GymTrack scheme also builds the watch app and the widgets, because both are
   embedded in the app.
-- **Every unit test gates merging; the UI tests don't.** `build-and-test` runs all of
-  `GymTrackTests` and `GymTrackWatchTests`, which hold every unit test the repo has. `ui-tests`
-  runs in parallel on its own runner and shows red on the PR when it fails, but the ruleset
-  doesn't require it: the flows add ten minutes of building and tapping, and with everything in
-  one job the gate once took over 40 minutes.
+- **Every test gates merging.** `build-and-test` runs all of `GymTrackTests` and
+  `GymTrackWatchTests`, which hold every unit test the repo has, and `ui-tests` runs the UI flows.
+  The ruleset requires both. `ui-tests` has its own runner and runs in parallel, because the flows
+  add ten minutes of building and tapping, and with everything in one job the gate once took over
+  40 minutes. Until October 2026 it reported without blocking, and a red that was usually a cold
+  simulator taught everyone to ignore it; that cause is gone (see above), so a red
+  `ui-tests` now means a broken flow.
 - The review job saves the PR's diff to `pr.diff` (and a summary to `pr-stat.txt`) before Claude
   starts, from the merge commit and its base (`fetch-depth: 2`), so no API limit applies and Claude
   reads it in parts with Read and Grep. It must post within 25 of its 40 turns, then refine.
@@ -515,7 +528,8 @@ unit tests. The implementing run's time depends on the issue; its summary page r
    copy of this document.
 6. Install the Claude GitHub App on the repo. Run `claude setup-token` in Terminal.app, then
    `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner/repo>`.
-7. Run `sh scripts/claude-pipeline/apply-repo-settings.sh <owner/repo> build-and-test`.
+7. Run `sh scripts/claude-pipeline/apply-repo-settings.sh <owner/repo>`. It requires
+   `build-and-test` and `ui-tests`; name other checks after the repo to require those instead.
 8. Push the four workflows to the default branch first. The review refuses to run from a
    workflow file that differs from the default branch's copy, and comment- and `workflow_run`-
    triggered workflows only ever run from the default branch.
@@ -532,10 +546,10 @@ unit tests. The implementing run's time depends on the issue; its summary page r
 - **`actions/checkout@v7`** rather than `@v6`, because v7 is current.
 - **`macos-26` pinned** rather than `macos-latest`. Its default Xcode, 26.6, builds the project,
   which uses no iOS 26 or 27 APIs.
-- **Only the unit tests gate merging.** The prompt allowed moving UI tests out once the gate passed
-  about 15 minutes; with everything in one job it passed 40. So the gate builds all three targets
-  and runs every iPhone and watch unit test, while `ui-tests` runs in parallel as a check that
-  isn't required. Failed jobs upload their logs.
+- **The UI tests run in their own job.** The prompt allowed moving UI tests out once the gate
+  passed about 15 minutes; with everything in one job it passed 40. So `build-and-test` builds all
+  three targets and runs every iPhone and watch unit test, while `ui-tests` runs in parallel. Both
+  are required. Failed jobs upload their logs.
 - **The implementing run is on a Mac and builds and tests its own change** with
   `scripts/claude-pipeline/check.sh`. The prompt had it on Linux with CI as the only compiler.
 - **Claude opens its PR with `gh pr create`.** The action's create-PR tool runs in Docker, which
