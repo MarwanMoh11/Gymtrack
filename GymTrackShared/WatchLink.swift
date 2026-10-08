@@ -252,6 +252,34 @@ struct WatchIdleSnapshot: Codable, Hashable, Sendable {
     /// can be the older build: a watch that predates it ignores the key, and a
     /// mirror without it reads as "Today", exactly as before.
     var todayIsRotation: Bool? = nil
+    /// The workout that makes today done, decided as the phone's Today card
+    /// decides it (`TrainingStats.completedToday`), so a short freestyle
+    /// session on Leg Day does not put a done card over Legs.
+    ///
+    /// Without it the wrist offered Start workout for the day just trained,
+    /// one tap from a duplicate session. Absent on a day with nothing done,
+    /// and in a mirror from an older phone, which reads as "not done"; an
+    /// older watch ignores the key. Like everything here it answers for `day`
+    /// only, and is never shown once that day has ended.
+    var completedToday: Completed? = nil
+
+    /// A finished workout as the phone's done card draws it.
+    struct Completed: Codable, Hashable, Sendable {
+        /// Which session this is, so the wrist can tell the phone has answered
+        /// for a Finish tapped on it.
+        var sessionID: UUID
+        var title: String
+        /// Counted as efforts, the phone's way: a drop is part of its set.
+        var sets: Int
+        var volumeKg: Double
+        /// When it ended and how long it took. Both absent for a session
+        /// written down afterwards: no clock ran, and its end is a placeholder
+        /// that would read as a measured time.
+        var endedAt: Date?
+        var duration: TimeInterval?
+        /// True for a session written down afterwards, and absent otherwise.
+        var loggedAfterwards: Bool?
+    }
 
     /// Whether this still describes today. A snapshot from an older build
     /// carries no day and is believed — it is the only thing the watch has.

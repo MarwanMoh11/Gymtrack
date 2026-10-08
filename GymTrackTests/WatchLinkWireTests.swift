@@ -113,7 +113,9 @@ struct WatchLinkWireTests {
         let idle = WatchIdleSnapshot(
             day: Self.t0, todayTitle: "Push", todayExerciseCount: 5, todaySetCount: 15,
             todayMuscles: ["Chest", "Triceps"], streak: 3, sessionsThisWeek: 2,
-            lastSessionTitle: "Pull", lastSessionDate: Self.t0, unit: .lb, todayIsRotation: true)
+            lastSessionTitle: "Pull", lastSessionDate: Self.t0, unit: .lb, todayIsRotation: true,
+            completedToday: .init(sessionID: Self.sessionID, title: "Pull", sets: 15, volumeKg: 7_250,
+                                  endedAt: Self.t0, duration: 3_600))
         let mirror = WatchMirror(
             revision: 7, sentAt: Self.t0, idle: idle, session: session, healthEnabled: true,
             endedSession: WatchSessionEnd(sessionID: Self.sessionID, reason: .finished,
@@ -261,9 +263,34 @@ struct WatchLinkWireTests {
         #expect(richer.rpe == 9)
 
         let idle = try json(WatchIdleSnapshot.empty)
-        #expect(idle["todayIsRotation"] == nil)
+        #expect(idle["todayIsRotation"] == nil && idle["completedToday"] == nil)
         #expect(try JSONDecoder.watchLink.decode(
             WatchIdleSnapshot.self, from: JSONSerialization.data(withJSONObject: idle)) == .empty)
+    }
+
+    /// Issue #51. The idle screen exactly as a phone from before the done card
+    /// sends it: it reads as "not done", which is what that phone meant.
+    @Test func anIdleScreenFromAPhoneThatPredatesTheDoneCardReadsAsNotDone() throws {
+        let old: [String: Any] = [
+            "day": Self.t0.timeIntervalSince1970 * 1000, "todayTitle": "Legs", "todayExerciseCount": 5,
+            "todaySetCount": 18, "todayMuscles": ["Quads"], "streak": 4, "sessionsThisWeek": 2,
+            "lastSessionTitle": "Legs", "lastSessionDate": Self.t0.timeIntervalSince1970 * 1000, "unit": "kg",
+        ]
+        let read = try JSONDecoder.watchLink.decode(WatchIdleSnapshot.self,
+                                                    from: JSONSerialization.data(withJSONObject: old))
+        #expect(read.todayTitle == "Legs" && read.streak == 4)
+        #expect(read.completedToday == nil)
+
+        // A done card with no time, as a session written down afterwards sends
+        // it, still comes back whole.
+        var afterwards = read
+        afterwards.completedToday = .init(sessionID: Self.sessionID, title: "Legs", sets: 6, volumeKg: 3_000,
+                                          loggedAfterwards: true)
+        let back = try JSONDecoder.watchLink.decode(WatchIdleSnapshot.self,
+                                                    from: JSONEncoder.watchLink.encode(afterwards))
+        #expect(back == afterwards)
+        let done = try #require(try json(afterwards)["completedToday"] as? [String: Any])
+        #expect(done["endedAt"] == nil && done["duration"] == nil && done["loggedAfterwards"] as? Bool == true)
     }
 
     // MARK: - Riders on a command

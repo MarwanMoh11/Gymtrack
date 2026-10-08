@@ -1,9 +1,14 @@
 import SwiftUI
 
 /// What the watch shows when nothing is running: today's session, and one tap
-/// to start it.
+/// to start it, or the workout that already made today done.
 struct WatchIdleView: View {
     var connector: WatchConnector
+
+    /// Read so the screen is decided again when the wrist comes up. Every card
+    /// below is judged against the clock, and last night's done card has to
+    /// give way at 04:00 even when no mirror arrives to redraw it.
+    @Environment(\.scenePhase) private var scenePhase
 
     /// A start has been asked for and the session hasn't arrived yet.
     @State private var isStarting = false
@@ -21,11 +26,27 @@ struct WatchIdleView: View {
     /// lands it says plainly that it doesn't know yet.
     private var isStale: Bool { !idle.describesToday }
 
+    /// Today's workout, once it is done, on the phone's word or, until the
+    /// phone has heard a Finish tapped here, this wrist's. Nothing to dismiss:
+    /// it is this screen in another state, and it holds until the training day
+    /// turns over.
+    private var doneCard: WatchIdleRules.DoneCard? {
+        WatchIdleRules.doneCard(idle: idle, finishedHere: connector.finishedHere, now: .now, calendar: .current)
+    }
+
+    /// The streak, the week and the last session were counted before a Finish
+    /// the phone has not heard yet, and until it has, each is wrong rather
+    /// than merely old.
+    private var countsPredateAFinish: Bool { connector.finishedHere != nil }
+
     /// Nothing is running, so the screen wears the colour a session would be
-    /// started in — except on a rest day, which has earned the calm green. A
-    /// mirror that has gone out of date can't claim either, and a green screen
-    /// is a claim that today is a rest day.
-    private var phase: SessionPhase { idle.todayTitle == nil && !isStale ? .done : .working }
+    /// started in — except on a rest day or once today is done, which have
+    /// earned the calm green. A mirror that has gone out of date can't claim
+    /// a rest day, and a green screen is a claim that today is one.
+    private var phase: SessionPhase {
+        if doneCard != nil { return .done }
+        return idle.todayTitle == nil && !isStale ? .done : .working
+    }
 
     /// "Next up" for a day the plan's rotation chose, because "Today" would
     /// state a schedule the plan never set. The phone's Today card says the
@@ -39,9 +60,15 @@ struct WatchIdleView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 if connector.hasEverReceivedMirror {
-                    if isStale { stalePlanCard } else { todayCard }
+                    if let doneCard {
+                        doneCardView(doneCard)
+                    } else if isStale {
+                        stalePlanCard
+                    } else {
+                        todayCard
+                    }
                     startButtons
-                    footer
+                    if !countsPredateAFinish { footer }
                 } else {
                     waitingForPhone
                 }
@@ -94,6 +121,69 @@ struct WatchIdleView: View {
         .watchCard(phase: phase)
     }
 
+    // MARK: - Done
+
+    /// The phone's Today card once the workout is saved, shrunk to the wrist.
+    /// Before the phone has heard the Finish it shows the name alone: the
+    /// wrist can have missed a set logged on the phone, and its numbers would
+    /// be a guess shown as a count.
+    private func doneCardView(_ card: WatchIdleRules.DoneCard) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                WatchGlyphTile(symbol: "checkmark", tint: phase.tint, size: 24)
+                Text("WORKOUT DONE")
+                    .font(Theme.eyebrow)
+                    .tracking(1.2)
+                    .foregroundStyle(phase.tint.opacity(0.9))
+                Spacer(minLength: 0)
+            }
+
+            Text(card.title)
+                .font(Theme.rounded(19, weight: .heavy))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+
+            switch card {
+            case .confirmed(let done):
+                Text(totals(of: done))
+                    .font(Theme.number(12, weight: .semibold))
+                    .foregroundStyle(phase.gradient)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if let line = finishLine(of: done) {
+                    Text(line)
+                        .font(Theme.rounded(11, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            case .awaitingPhone:
+                Text(connector.isReachable
+                     ? "Saving on your phone."
+                     : "Saved on your phone when it's back in reach.")
+                    .font(Theme.rounded(11, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(3)
+            }
+        }
+        .watchCard(phase: phase)
+    }
+
+    /// "5 sets · 3.2k kg · 48m", in the unit the phone sent. A session written
+    /// down afterwards has no length to give.
+    private func totals(of done: WatchIdleSnapshot.Completed) -> String {
+        var parts = ["\(done.sets) \(done.sets == 1 ? "set" : "sets")",
+                     "\(idle.unit.fromKg(done.volumeKg).compactVolume) \(idle.unit.short)"]
+        if let duration = done.duration { parts.append(duration.durationString) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func finishLine(of done: WatchIdleSnapshot.Completed) -> String? {
+        if done.loggedAfterwards == true { return "Logged afterwards" }
+        return done.endedAt.map { "Finished at \($0.formatted(.dateTime.hour().minute()))" }
+    }
+
+    // MARK: - Out of date
+
     /// A card for a mirror the watch can no longer read as "today".
     ///
     /// It names the day the plan it holds belongs to rather than showing a
@@ -142,24 +232,38 @@ struct WatchIdleView: View {
 
     private var startButtons: some View {
         VStack(spacing: 6) {
-            Button {
-                WatchHaptics.log()
-                start(startsFreestyle ? .startFreestyle : .startToday)
-            } label: {
-                if isStarting {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .tint(.black)
-                            .frame(width: 16, height: 16)
-                        Text("Starting")
+            if doneCard == nil {
+                Button {
+                    WatchHaptics.log()
+                    start(startsFreestyle ? .startFreestyle : .startToday)
+                } label: {
+                    if isStarting {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .tint(.black)
+                                .frame(width: 16, height: 16)
+                            Text("Starting")
+                        }
+                    } else {
+                        Label(startsFreestyle ? "Start freestyle" : "Start workout",
+                              systemImage: "figure.strengthtraining.traditional")
                     }
-                } else {
-                    Label(startsFreestyle ? "Start freestyle" : "Start workout",
-                          systemImage: "figure.strengthtraining.traditional")
                 }
+                .buttonStyle(WatchProminentButtonStyle(phase: .working))
+                .disabled(isStarting)
+            } else {
+                // Quiet, as on the phone's done card, and still one tap.
+                // Freestyle, because the phone's day picker has no room here
+                // and `.startToday` on a pinned plan is the day just trained.
+                Button {
+                    WatchHaptics.tick()
+                    start(.startFreestyle)
+                } label: {
+                    Text(isStarting ? "Starting" : "Start another workout")
+                }
+                .buttonStyle(WatchQuietButtonStyle(weight: .semibold))
+                .disabled(isStarting)
             }
-            .buttonStyle(WatchProminentButtonStyle(phase: .working))
-            .disabled(isStarting)
 
             if isStarting {
                 Text(connector.isReachable
@@ -170,7 +274,7 @@ struct WatchIdleView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .transition(.opacity)
-            } else if !startsFreestyle {
+            } else if doneCard == nil, !startsFreestyle {
                 Button {
                     WatchHaptics.tick()
                     start(.startFreestyle)

@@ -489,6 +489,26 @@ struct ActiveWorkoutLifecycleTests {
         }
     }
 
+    /// Issue #51. The wrist hears the end with the idle screen that counts the
+    /// workout. Sent apart, the mirror without the session carried the idle
+    /// screen from before it, and offered the same day's Start workout. The
+    /// bridge's idle screen is cleared first, so only the Finish can fill it.
+    @Test func finishTellsTheWristTheEndWithAnIdleScreenThatCountsTheWorkout() throws {
+        try WorkoutBench.run { bench in
+            let (session, rows, workout) = bench.standard()
+            workout.complete(rows[0], restSeconds: nil, at: WorkoutBench.t0.addingTimeInterval(60))
+            WatchBridge.shared.update(idle: .empty)
+
+            #expect(workout.finish(at: WorkoutBench.t0.addingTimeInterval(1_800)))
+
+            let state = WatchBridge.shared.mirrorState
+            #expect(state.session == nil)
+            #expect(state.endedSession == WatchSessionEnd(sessionID: session.id, reason: .finished))
+            #expect(state.idle.lastSessionTitle == "Push" && state.idle.lastSessionDate == WorkoutBench.t0)
+            #expect(state.idle == WatchMirrorBuilder.idle(in: bench.context))
+        }
+    }
+
     @Test func finishKeepsWhatWasLiftedAndDropsTheRestIntoMemory() throws {
         try WorkoutBench.run { bench in
             let (session, rows, workout) = bench.standard()

@@ -1592,7 +1592,8 @@ final class ActiveWorkout {
         restTimer.stop()
         writeThrough()
         WorkoutLiveActivity.shared.end(with: activityState)
-        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: session.id, reason: .finished))
+        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: session.id, reason: .finished),
+                                  idle: WatchMirrorBuilder.idle(in: context))
         WatchBridge.shared.clearMetrics()
         WidgetPublisher.updateSession(nil)
         recordToHealth()

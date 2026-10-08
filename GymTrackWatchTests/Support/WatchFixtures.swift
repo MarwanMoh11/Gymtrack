@@ -20,6 +20,14 @@ enum WatchTestClock {
     /// the date it is given changes nothing it decides.
     static let restReference = at("2099-12-31T23:59:30")
 
+    /// Gregorian in the given zone, for the rules that bucket by training day.
+    static func calendar(in zone: String = "UTC") -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        return calendar
+    }
+
     /// A wall-clock time in the given zone, written `yyyy-MM-dd'T'HH:mm:ss`.
     static func at(_ stamp: String, in zone: String = "UTC") -> Date {
         let formatter = DateFormatter()
