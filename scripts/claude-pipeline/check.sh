@@ -117,6 +117,21 @@ run() {
     return 1
 }
 
+# Boots a simulator and returns once it has finished, at once if it already has.
+# Left to itself, xcodebuild boots the simulator only after building, and a
+# freshly booted simulator stays slow for minutes. On PR #52 the UI test runner
+# took three minutes to start and the app's first launch seventy seconds. Booted
+# before `xcodebuild test` builds, it settles while the build runs: on PR #53
+# those took 41 and 35 seconds. A boot that fails is left for xcodebuild to
+# retry and report.
+#
+# `check.sh build` doesn't boot: a simulator busy settling takes the runner's
+# three cores from the compiler, and on PR #53 that stretched the build from
+# two minutes to eleven.
+boot() {
+    xcrun simctl bootstatus "$1" -b > "$OUT/boot-$1.log" 2>&1
+}
+
 build() {
     status=0
     run "iPhone app, watch app, widgets and their test bundles" "$OUT/build-iphone.log" -quiet \
@@ -145,6 +160,7 @@ test_suites() {
 
     status=0
     if [ -n "$phone" ]; then
+        boot "$IPHONE_ID"
         # shellcheck disable=SC2086 # each -only-testing is its own argument
         run "iPhone tests:$phone" "$OUT/test-iphone.log" "" \
             test -project GymTrack.xcodeproj -scheme GymTrack -destination "id=$IPHONE_ID" \
