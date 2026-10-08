@@ -497,9 +497,14 @@ final class WatchCommandCenter {
         apply(metrics, to: session, final: true, context: context)
         save(context)
         WorkoutLiveActivity.shared.end(with: nil)
-        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: session.id, reason: .finished))
+        // With the idle screen that counts it: nothing else restamps the wrist
+        // on this path, so a Finish handled with the app asleep left it on the
+        // start screen it showed before the workout.
+        let sessions = allSessions(in: context)
+        WatchBridge.shared.update(session: nil, ended: WatchSessionEnd(sessionID: session.id, reason: .finished),
+                                  idle: WatchMirrorBuilder.idle(plans: allPlans(in: context), sessions: sessions))
         WatchBridge.shared.clearMetrics()
-        publishWidgets(context: context)
+        publishWidgets(context: context, sessions: sessions)
         recordToHealth(session, context: context)
         NotificationCenter.default.post(name: .gymTrackWorkoutFinished, object: nil)
     }

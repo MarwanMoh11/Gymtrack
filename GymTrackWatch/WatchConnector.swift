@@ -322,9 +322,15 @@ final class WatchConnector: NSObject {
     /// so no later mirror, and no relaunch, can hand the session back to it.
     /// The unconfirmed sets are left where they are: they still belong to the
     /// phone's copy of the session, whenever it hears them.
-    func markEndedLocally(_ sessionID: UUID) {
-        endedLocally.mark(sessionID)
+    ///
+    /// - Parameter finished: what the idle screen may say about a Finish until
+    ///   the phone answers; `nil` for a Discard. See `WatchIdleRules`.
+    func markEndedLocally(_ sessionID: UUID, finished: WatchWristFinish? = nil) {
+        endedLocally.mark(sessionID, finished: finished)
     }
+
+    /// A session finished on this wrist that the phone has not answered for.
+    var finishedHere: WatchWristFinish? { endedLocally.finished }
 
     /// Whether the recorder may run, or report, a Health workout for this
     /// session.

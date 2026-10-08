@@ -83,10 +83,18 @@ final class WatchBridge: NSObject {
     }
 
     /// The running session, or `nil` once it ends.
-    func update(session snapshot: WatchSessionSnapshot?, ended end: WatchSessionEnd? = nil) {
+    ///
+    /// A Finish passes the idle screen that counts it, so both go out in one
+    /// mirror. Sent one after the other, the mirror without the session carried
+    /// the idle screen from before it, and a wrist that had just finished it
+    /// was offered the same day's Start workout until the second one landed.
+    func update(session snapshot: WatchSessionSnapshot?, ended end: WatchSessionEnd? = nil,
+                idle: WatchIdleSnapshot? = nil) {
+        let idleChanged = idle.map { mirrorState.update(idle: $0) } ?? false
         // A session ending is also the moment the watch should stop its own
         // workout, so that transition is always worth a push.
-        guard mirrorState.update(session: snapshot, ended: end) else { return }
+        let sessionChanged = mirrorState.update(session: snapshot, ended: end)
+        guard sessionChanged || idleChanged else { return }
         if snapshot == nil { liveMetrics = nil }
         push()
     }
@@ -307,7 +315,37 @@ enum WatchMirrorBuilder {
             lastSessionTitle: last?.title,
             lastSessionDate: last?.startedAt,
             unit: AppSettings.shared.weightUnit,
-            todayIsRotation: todayIsRotation
+            todayIsRotation: todayIsRotation,
+            // The phone's Today card and the widgets' done state ask the same
+            // question, so the wrist never offers again a day they call done.
+            completedToday: TrainingStats.completedToday(in: finished, plan: plan, calendar: calendar, now: now)
+                .map(completed)
+        )
+    }
+
+    /// The same, read from the store as it stands, for a session ending: its
+    /// end and the idle screen that counts it go to the wrist together. See
+    /// `WatchBridge.update(session:ended:idle:)`.
+    @MainActor
+    static func idle(in context: ModelContext) -> WatchIdleSnapshot {
+        let plans = (try? context.fetch(FetchDescriptor<Plan>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
+        let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        return idle(plans: plans, sessions: sessions)
+    }
+
+    /// A session as the wrist's done card draws it. One written down afterwards
+    /// has no end or length worth showing, and says so instead.
+    @MainActor
+    private static func completed(_ session: WorkoutSession) -> WatchIdleSnapshot.Completed {
+        let timed = !session.isLoggedAfterwards
+        return WatchIdleSnapshot.Completed(
+            sessionID: session.id,
+            title: session.title,
+            sets: session.effortSets.count,
+            volumeKg: session.totalVolumeKg,
+            endedAt: timed ? session.endedAt : nil,
+            duration: timed ? session.duration : nil,
+            loggedAfterwards: timed ? nil : true
         )
     }
 }

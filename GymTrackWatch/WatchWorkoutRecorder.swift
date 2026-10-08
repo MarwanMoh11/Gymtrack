@@ -369,7 +369,9 @@ final class WatchWorkoutRecorder: NSObject {
         // it closes what it built as soon as the wait is over.
         if isStarting { startCancelled = true }
         let released = release()
-        connector.markEndedLocally(snapshot.sessionID)
+        // With what the idle screen may say about it, so the wrist says the
+        // workout is done the moment it leaves the screen, phone or no phone.
+        connector.markEndedLocally(snapshot.sessionID, finished: WatchIdleRules.wristFinish(of: snapshot))
         return Task {
             let metrics = await save(released, discarding: discard, endingAt: endingAt, snapshot: snapshot)
             // A Finish with nothing logged still goes as a Finish, never as a

@@ -12,13 +12,18 @@ import Foundation
 /// start, which the phone then linked in place of the real one.
 ///
 /// Persisted, because a relaunch is exactly when that stale context arrives.
-/// It holds nothing but the ID: the sets the phone has not confirmed stay in
-/// `WatchPendingActions`, where they still have to reach it.
+/// It holds the ID, and for a Finish what the idle screen may say about it: the
+/// sets the phone has not confirmed stay in `WatchPendingActions`, where they
+/// still have to reach it.
 struct WatchSessionTombstone: Equatable, Sendable {
 
     static let defaultsKey = "watch.endedLocally"
+    static let finishedKey = "watch.endedLocally.finished"
 
     private(set) var sessionID: UUID?
+    /// Set when the session ended with a Finish that had sets in it, until
+    /// the phone answers for it. See `WatchIdleRules.doneCard`.
+    private(set) var finished: WatchWristFinish?
 
     init(sessionID: UUID? = nil) {
         self.sessionID = sessionID
@@ -26,6 +31,11 @@ struct WatchSessionTombstone: Equatable, Sendable {
 
     init(defaults: UserDefaults) {
         sessionID = defaults.string(forKey: Self.defaultsKey).flatMap(UUID.init(uuidString:))
+        let saved = defaults.data(forKey: Self.finishedKey)
+            .flatMap { try? JSONDecoder().decode(WatchWristFinish.self, from: $0) }
+        // Saved by a build that wrote the two keys apart, or half-written: a
+        // record of another session says nothing about this one.
+        finished = saved?.sessionID == sessionID ? saved : nil
     }
 
     func save(to defaults: UserDefaults) {
@@ -34,10 +44,18 @@ struct WatchSessionTombstone: Equatable, Sendable {
         } else {
             defaults.removeObject(forKey: Self.defaultsKey)
         }
+        if let finished, let data = try? JSONEncoder().encode(finished) {
+            defaults.set(data, forKey: Self.finishedKey)
+        } else {
+            defaults.removeObject(forKey: Self.finishedKey)
+        }
     }
 
-    mutating func mark(_ id: UUID) {
+    /// - Parameter finished: what a Finish with sets in it may show until the
+    ///   phone answers; `nil` for a Discard, or a Finish with nothing logged.
+    mutating func mark(_ id: UUID, finished: WatchWristFinish? = nil) {
         sessionID = id
+        self.finished = finished?.sessionID == id ? finished : nil
     }
 
     /// Whether a session may be drawn as in progress and recorded to Health.
@@ -52,9 +70,14 @@ struct WatchSessionTombstone: Equatable, Sendable {
     /// predate the Finish, or the session itself, so its silence proves
     /// nothing about whether the phone has heard the command; retiring on it
     /// would let the next stale reply bring the session back.
+    ///
+    /// The finish record goes with it. The phone sends a session's end in the
+    /// same mirror as the idle screen that counts it, so from here on that idle
+    /// screen is what says whether today is done.
     mutating func settle(with mirror: WatchMirror, fromCache: Bool) {
         guard !fromCache, let ended = sessionID, mirror.session?.sessionID != ended else { return }
         sessionID = nil
+        finished = nil
     }
 
     /// The mirrored session the wrist may treat as in progress, before its own
@@ -70,6 +93,22 @@ struct WatchSessionTombstone: Equatable, Sendable {
         guard admits(session.sessionID) else { return nil }
         return session
     }
+}
+
+/// What the wrist can vouch for about a session it finished, for the time
+/// between the tap and the phone's answer.
+///
+/// No sets, volume or time: the wrist can have missed a set logged on the
+/// phone, so its count can be lower than the phone's. Those numbers are the
+/// phone's to give.
+struct WatchWristFinish: Codable, Equatable, Sendable {
+    var sessionID: UUID
+    var title: String
+    /// What files the session under a training day, as the phone files it.
+    var startedAt: Date
+    /// Empty for a freestyle session, which the phone does not count as the
+    /// day's workout while a day of the plan is scheduled.
+    var planName: String
 }
 
 // MARK: - The phone's half

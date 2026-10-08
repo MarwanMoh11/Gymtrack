@@ -164,6 +164,95 @@ struct WidgetSnapshotTests {
         #expect(todayTitle() == "Push")
     }
 
+    // MARK: - The wrist's done card
+
+    private static func wrist(_ plan: Plan, _ sessions: [WorkoutSession], at moment: Date = now) -> WatchIdleSnapshot {
+        WatchMirrorBuilder.idle(plans: [plan], sessions: sessions, calendar: calendar, now: moment)
+    }
+
+    /// Issue #51. The wrist is told what the phone's Today card and the
+    /// widgets call done, so it never offers the day just trained again, and
+    /// never calls a day done that the phone still offers.
+    @Test func theWristIsToldTheWorkoutThePhoneCallsDoneToday() throws {
+        let context = try TestStore.context()
+        let (plan, legs, push) = Self.plan(in: context)
+        #expect(Self.wrist(plan, []).completedToday == nil)
+
+        // A freestyle arm pump on Leg Day, and last night's tail, leave Legs on offer.
+        let freestyle = Self.session(nil, from: Self.at(hours: 8.1), in: context)
+        let lastNight = Self.session(legs, from: Self.at(hours: -0.8), lasting: 90 * 60, in: context)
+        let notYet = Self.wrist(plan, [freestyle, lastNight])
+        #expect(notYet.completedToday == nil && notYet.todayTitle == "Legs")
+
+        let trained = Self.session(legs, from: Self.at(hours: 8.3), lasting: 45 * 60, in: context)
+        let sessions = [freestyle, lastNight, trained]
+        let done = try #require(Self.wrist(plan, sessions).completedToday)
+        #expect(done == WatchIdleSnapshot.Completed(sessionID: trained.id, title: "Legs",
+                                                    sets: trained.effortSets.count, volumeKg: trained.totalVolumeKg,
+                                                    endedAt: trained.endedAt, duration: trained.duration))
+        #expect(abs((done.duration ?? 0) - 45 * 60) < 0.001)
+        #expect(Self.snapshot(plan, sessions).finishedToday?.title == done.title, "the widgets agree")
+
+        // A plan day swapped in for Legs is today's workout too.
+        let swapped = Self.session(push, from: Self.at(hours: 8.2), in: context)
+        #expect(Self.wrist(plan, [swapped]).completedToday?.sessionID == swapped.id)
+
+        // Still Wednesday's at 03:59 on Thursday, and gone at 04:00.
+        #expect(Self.wrist(plan, sessions, at: Self.at(hours: 27.99)).completedToday?.sessionID == trained.id)
+        #expect(Self.wrist(plan, sessions, at: Self.at(hours: 28)).completedToday == nil)
+
+        // On a rest day whatever was trained is the day's workout, freestyle included.
+        let friday = Self.at(hours: 48 + 12)
+        let restDay = Self.session(nil, from: Self.at(hours: 48 + 9), in: context)
+        let rest = Self.wrist(plan, sessions + [restDay], at: friday)
+        #expect(rest.todayTitle == nil && rest.completedToday?.sessionID == restDay.id)
+    }
+
+    /// The rotation moves on the moment its day is trained, so the wrist used
+    /// to answer a Finish with "Next up" for the following day.
+    @Test func aRotationDayTrainedTodayIsDoneAndTheNextDayWaitsForTomorrow() throws {
+        let context = try TestStore.context()
+        let plan = Plan(name: "Rotation", isActive: true)
+        context.insert(plan)
+        var days: [PlanDay] = []
+        for (order, name) in ["Legs", "Pull"].enumerated() {
+            let day = PlanDay(name: name, order: order)
+            context.insert(day)
+            day.plan = plan
+            let item = PlanItem(catalogID: "test-plank", name: "Plank", order: 0)
+            context.insert(item)
+            item.day = day
+            days.append(day)
+        }
+        let trained = Self.session(days[0], from: Self.at(hours: 9), in: context)
+
+        let idle = Self.wrist(plan, [trained])
+        #expect(idle.todayTitle == "Pull" && idle.todayIsRotation == true)
+        #expect(idle.completedToday?.sessionID == trained.id && idle.completedToday?.title == "Legs")
+    }
+
+    /// A session written down afterwards had no clock, so its placeholder end
+    /// and zero length are not sent as a time.
+    @Test func aWorkoutLoggedAfterwardsIsDoneWithNoTimeAndADayWithNothingDoneSendsNoKey() throws {
+        let context = try TestStore.context()
+        let (plan, legs, _) = Self.plan(in: context)
+        let remembered = Self.session(legs, from: Self.at(hours: 11), lasting: 0, in: context)
+        remembered.isLoggedAfterwards = true
+
+        let done = try #require(Self.wrist(plan, [remembered]).completedToday)
+        #expect(done.sessionID == remembered.id && done.sets == 1)
+        #expect(done.endedAt == nil && done.duration == nil && done.loggedAfterwards == true)
+        let json = String(decoding: try JSONEncoder.watchLink.encode(done), as: UTF8.self)
+        #expect(!json.contains("endedAt") && !json.contains("duration"))
+
+        let nothing = String(decoding: try JSONEncoder.watchLink.encode(Self.wrist(plan, [])), as: UTF8.self)
+        #expect(!nothing.contains("completedToday"))
+        let ordinary = Self.session(legs, from: Self.at(hours: 9), in: context)
+        let timed = try #require(Self.wrist(plan, [ordinary]).completedToday)
+        #expect(!String(decoding: try JSONEncoder.watchLink.encode(timed), as: UTF8.self).contains("loggedAfterwards"),
+                "an ordinary session adds no flag")
+    }
+
     // MARK: - The small hours
 
     /// The issue's night, as the widgets and the wrist tell it. Legs is pinned
@@ -283,6 +372,8 @@ struct WidgetSnapshotTests {
         fresh.todayTitle = "Legs"
         fresh.todayExerciseCount = 5
         fresh.todayIsRotation = true
+        fresh.completedToday = .init(sessionID: UUID(), title: "Pull", sets: 15, volumeKg: 7_250,
+                                     endedAt: Date(timeIntervalSince1970: 1_790_003_600), duration: 3_600)
         let data = try JSONEncoder.watchLink.encode(fresh)
 
         let onOldWatch = try JSONDecoder.watchLink.decode(OldWatchIdleSnapshot.self, from: data)

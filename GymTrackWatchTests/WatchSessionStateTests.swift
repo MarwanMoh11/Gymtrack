@@ -558,6 +558,49 @@ struct WatchSessionStateTests {
         #expect(tombstone.liveSession(in: watchMirror(empty, at: now), awaitingFreshMirror: false, now: now) == empty)
     }
 
+    /// Issue #51. What a Finish with sets in it leaves for the idle screen
+    /// lives as long as the tombstone and no longer: across a relaunch, and
+    /// past a reply or a cached context that still names the session, until
+    /// the phone's fresh mirror has moved on. A Discard leaves nothing.
+    @Test func aFinishIsRememberedForTheIdleScreenUntilThePhoneAnswersAndADiscardIsNot() throws {
+        let defaults = watchTestDefaults()
+        let session = watchSession(title: "Legs", startedAt: t0,
+                                   exercises: [watchExercise(sets: [watchSet(completedAt: t0)])])
+        let finish = try #require(WatchIdleRules.wristFinish(of: session))
+        var tombstone = WatchSessionTombstone()
+        tombstone.mark(session.sessionID, finished: finish)
+        #expect(tombstone.finished == finish && !tombstone.admits(session.sessionID))
+
+        tombstone.save(to: defaults)
+        #expect(WatchSessionTombstone(defaults: defaults).finished == finish, "it survives a relaunch")
+
+        tombstone.settle(with: watchMirror(session, at: t0), fromCache: false)
+        tombstone.settle(with: watchMirror(nil, at: t0), fromCache: true)
+        #expect(tombstone.finished == finish, "neither has heard the Finish")
+        tombstone.settle(with: watchMirror(nil, at: t0), fromCache: false)
+        #expect(tombstone.finished == nil && tombstone.sessionID == nil)
+        tombstone.save(to: defaults)
+        #expect(defaults.data(forKey: WatchSessionTombstone.finishedKey) == nil, "no key left behind")
+
+        // A Discard tapped after it, and a record naming another session.
+        tombstone.mark(session.sessionID, finished: finish)
+        tombstone.mark(session.sessionID)
+        #expect(tombstone.finished == nil)
+        tombstone.mark(UUID(), finished: finish)
+        #expect(tombstone.finished == nil)
+
+        // Read back beside another session's ID, or unreadable: nothing.
+        var saved = WatchSessionTombstone()
+        saved.mark(session.sessionID, finished: finish)
+        saved.save(to: defaults)
+        defaults.set(UUID().uuidString, forKey: WatchSessionTombstone.defaultsKey)
+        #expect(WatchSessionTombstone(defaults: defaults).finished == nil)
+        saved.save(to: defaults)
+        defaults.set(Data("not json".utf8), forKey: WatchSessionTombstone.finishedKey)
+        #expect(WatchSessionTombstone(defaults: defaults).finished == nil)
+        #expect(WatchSessionTombstone(defaults: defaults).sessionID == session.sessionID)
+    }
+
     /// Finish tapped on the wrist with the phone out of range, and the reply to
     /// `requestMirror` overtaking the queued Finish. Asked at the reply's own
     /// moment, so the twelve-hour rule cannot be what refuses the session: an

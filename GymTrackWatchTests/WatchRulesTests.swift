@@ -698,6 +698,117 @@ struct WatchRulesTests {
         #expect(full.sessionID == id && full.title == "Push" && full.sets == 2 && full.volumeKg == 960)
     }
 
+    // MARK: - The done card
+
+    /// The idle screen as the phone sent it, stamped for `day`, with Legs
+    /// scheduled unless told otherwise.
+    private func idle(for day: String, todayTitle: String? = "Legs",
+                      completed: WatchIdleSnapshot.Completed? = nil) -> WatchIdleSnapshot {
+        var idle = WatchIdleSnapshot.empty
+        idle.day = WatchTestClock.at("\(day)T00:00:00")
+        idle.todayTitle = todayTitle
+        idle.completedToday = completed
+        return idle
+    }
+
+    private func doneCard(_ idle: WatchIdleSnapshot, finishedHere: WatchWristFinish?,
+                          at stamp: String) -> WatchIdleRules.DoneCard? {
+        WatchIdleRules.doneCard(idle: idle, finishedHere: finishedHere, now: WatchTestClock.at(stamp),
+                                calendar: WatchTestClock.calendar())
+    }
+
+    private func finish(_ title: String = "Legs", startedAt stamp: String = "2026-03-11T17:30:00",
+                        planName: String = "PPL") -> WatchWristFinish {
+        WatchWristFinish(sessionID: UUID(), title: title, startedAt: WatchTestClock.at(stamp), planName: planName)
+    }
+
+    /// Issue #51. A Finish leaves the idle screen the session's name and day,
+    /// and nothing when nothing was logged: the phone deletes that session.
+    @Test func aFinishLeavesTheIdleScreenItsNameOnlyWhenSomethingWasLogged() {
+        let start = WatchTestClock.reference
+        let untouched = watchSession(startedAt: start, sets: [watchSet(), watchSet()])
+        #expect(WatchIdleRules.wristFinish(of: untouched) == nil)
+        #expect(WatchIdleRules.wristFinish(of: watchSession(startedAt: start, exercises: [])) == nil)
+
+        var lifted = watchSession(title: "Legs", startedAt: start,
+                                  exercises: [watchExercise(sets: [watchSet(completedAt: start), watchSet()])],
+                                  volumeKg: 480)
+        lifted.planName = "PPL"
+        #expect(WatchIdleRules.wristFinish(of: lifted)
+                == WatchWristFinish(sessionID: lifted.sessionID, title: "Legs", startedAt: start, planName: "PPL"))
+    }
+
+    /// Right after Finish the wrist says the workout is done with the name
+    /// alone, and the phone's numbers take over once its mirror names it.
+    @Test func aFinishTappedHereIsDoneAtOnceAndThePhonesAnswerTakesOver() {
+        let legs = finish()
+        let before = idle(for: "2026-03-11")
+        let now = "2026-03-11T18:42:00"
+
+        #expect(doneCard(before, finishedHere: nil, at: now) == nil, "nothing finished: the start screen")
+        #expect(doneCard(before, finishedHere: legs, at: now) == .awaitingPhone(legs))
+
+        let done = WatchIdleSnapshot.Completed(sessionID: legs.sessionID, title: "Legs", sets: 18, volumeKg: 9_200,
+                                               endedAt: WatchTestClock.at(now), duration: 72 * 60)
+        let answered = idle(for: "2026-03-11", completed: done)
+        #expect(doneCard(answered, finishedHere: legs, at: now) == .confirmed(done),
+                "the phone has counted it, so its numbers can be shown")
+        #expect(doneCard(answered, finishedHere: nil, at: now) == .confirmed(done), "and after the tombstone settles")
+
+        // The phone's done card is about an earlier session: the one just
+        // finished here is still news, and the phone hasn't heard it.
+        var earlier = done
+        earlier.sessionID = UUID()
+        earlier.title = "Push"
+        let pushDone = idle(for: "2026-03-11", completed: earlier)
+        #expect(doneCard(pushDone, finishedHere: legs, at: now) == .awaitingPhone(legs))
+        #expect(doneCard(pushDone, finishedHere: nil, at: now) == .confirmed(earlier))
+    }
+
+    /// Both the wrist's card and the phone's hold for the rest of the training
+    /// day and give way at 04:00, and a mirror from yesterday never shows
+    /// yesterday's done card as today's.
+    @Test func theDoneCardHoldsUntilTheTrainingDayTurnsOverAndNoLonger() {
+        let late = finish(startedAt: "2026-03-11T23:00:00")
+        let done = WatchIdleSnapshot.Completed(sessionID: late.sessionID, title: "Legs", sets: 12, volumeKg: 6_000,
+                                               endedAt: WatchTestClock.at("2026-03-12T00:10:00"), duration: 70 * 60)
+        let answered = idle(for: "2026-03-11", completed: done)
+        let waiting = idle(for: "2026-03-11")
+
+        for stamp in ["2026-03-12T00:30:00", "2026-03-12T03:59:59"] {
+            #expect(doneCard(answered, finishedHere: nil, at: stamp) == .confirmed(done), "still Wednesday night")
+            #expect(doneCard(waiting, finishedHere: late, at: stamp) == .awaitingPhone(late))
+        }
+        #expect(doneCard(answered, finishedHere: nil, at: "2026-03-12T04:00:00") == nil)
+        #expect(doneCard(waiting, finishedHere: late, at: "2026-03-12T04:00:00") == nil)
+        #expect(doneCard(answered, finishedHere: nil, at: "2026-03-13T12:00:00") == nil)
+
+        // Started after midnight is still the night before's, as the phone files it.
+        let smallHours = finish(startedAt: "2026-03-12T00:30:00")
+        #expect(doneCard(waiting, finishedHere: smallHours, at: "2026-03-12T02:00:00") == .awaitingPhone(smallHours))
+        #expect(doneCard(waiting, finishedHere: smallHours, at: "2026-03-12T09:00:00") == nil)
+    }
+
+    /// The phone's rule, asked with what the wrist holds: a short freestyle
+    /// session does not put a done card over a scheduled day, before or after
+    /// the phone answers. On a rest day it is the day's workout.
+    @Test(arguments: [
+        // (planName, today's scheduled day, mirror day, shows the card)
+        ("", "Legs", "2026-03-11", false),
+        ("", nil, "2026-03-11", true),
+        ("", nil, "2026-03-10", false),
+        ("PPL", "Legs", "2026-03-11", true),
+        ("PPL", "Pull", "2026-03-10", true),
+    ] as [(String, String?, String, Bool)])
+    func aFreestyleFinishIsDoneOnlyWhereThePhoneWouldCallItDone(planName: String, todayTitle: String?,
+                                                               mirrorDay: String, shows: Bool) {
+        let session = finish(planName.isEmpty ? "Freestyle Session" : "Push", planName: planName)
+        let card = doneCard(idle(for: mirrorDay, todayTitle: todayTitle), finishedHere: session,
+                            at: "2026-03-11T18:00:00")
+        let expected: WatchIdleRules.DoneCard? = shows ? .awaitingPhone(session) : nil
+        #expect(card == expected)
+    }
+
     // MARK: - Sending to the phone
 
     nonisolated static let lastSession = UUID()

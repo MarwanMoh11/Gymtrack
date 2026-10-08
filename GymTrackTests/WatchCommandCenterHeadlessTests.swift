@@ -1874,6 +1874,39 @@ extension WatchCommandCenterHeadlessTests {
         }
     }
 
+    /// Issue #51. Nothing else restamps the wrist after a Finish handled with
+    /// the app asleep, so the end goes with the idle screen that counts it:
+    /// the done card, not the start screen from before the workout. The
+    /// bridge's idle screen is cleared first, so only the Finish can fill it.
+    ///
+    /// The headless path reads the wall clock for "today", so the session
+    /// starts no earlier than the training day it is finished on.
+    @Test func aWristFinishWithTheAppAsleepReachesTheWristAsTodaysDoneCard() throws {
+        try withRig { rig in
+            let now = Date.now
+            let today = TrainingDay.key(for: now, calendar: .current)
+            let dayBegan = Calendar.current.date(bySettingHour: TrainingDay.cutoffHour, minute: 0, second: 0,
+                                                 of: today) ?? today
+            let start = max(rig.started, dayBegan)
+            let (session, sets) = try rig.seed(startedAt: start)
+            let log = WatchPendingLog(setID: sets[0].id, weightKg: 60, reps: 8, seconds: 0,
+                                      completedAt: start.addingTimeInterval(now.timeIntervalSince(start) / 2))
+            WatchBridge.shared.update(idle: .empty)
+
+            rig.send(.finishSession(WatchFinishBatch(sessionID: session.id, logs: [log], undos: [], starts: [:],
+                                                     cancels: [], ratings: []), metrics: nil))
+
+            let state = WatchBridge.shared.mirrorState
+            #expect(state.session == nil)
+            #expect(state.endedSession == WatchSessionEnd(sessionID: session.id, reason: .finished))
+            let done = try #require(state.idle.completedToday)
+            #expect(done.sessionID == session.id && done.title == "Push")
+            #expect(done.sets == 1 && done.volumeKg == 480)
+            #expect(done.endedAt == session.endedAt && done.loggedAfterwards == nil)
+            #expect(state.idle.lastSessionTitle == "Push" && state.idle.sessionsThisWeek == 1)
+        }
+    }
+
     /// Told as finished when it kept a set, so a watch still recording keeps
     /// its workout rather than throwing it away; as discarded when it was
     /// deleted for being empty.
