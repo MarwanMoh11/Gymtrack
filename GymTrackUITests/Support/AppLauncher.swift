@@ -75,8 +75,22 @@ class GymTrackUITestCase: XCTestCase {
     /// that never shows, and that step still fails.
     static let stepTimeout: TimeInterval = 60
 
+    /// Whether this run has launched the app yet.
+    ///
+    /// The first launch after installing is the slow one: seventy seconds on
+    /// PR #52 and thirty-five on #53, against two to five for every later
+    /// launch. On #52 the first look at the screen after it timed out inside
+    /// XCTest ("Failed to get matching snapshots"), which no wait in a test can
+    /// stretch. So the run's first test launches the app once and closes it
+    /// before its own launch, and no test's first step lands on that launch.
+    private static var hasLaunched = false
+
     override func setUpWithError() throws {
         continueAfterFailure = false
+        if !Self.hasLaunched {
+            Self.hasLaunched = true
+            launchApp(onboarded: true).terminate()
+        }
     }
 
     override func tearDownWithError() throws {

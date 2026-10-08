@@ -118,20 +118,21 @@ run() {
 }
 
 # Boots a simulator and returns once it has finished, at once if it already has.
-# Left to itself, xcodebuild boots the simulator only when testing starts, and a
+# Left to itself, xcodebuild boots the simulator only after building, and a
 # freshly booted simulator stays slow for minutes. On PR #52 the UI test runner
-# took three minutes to start and the app's first launch seventy seconds, against
-# two to five for every later launch, and the first look at the screen timed out
-# inside XCTest, where no wait in the test could help. Booting before the build
-# gives the simulator the build's minutes to settle. A boot that fails is left
-# for xcodebuild to retry and report.
+# took three minutes to start and the app's first launch seventy seconds. Booted
+# before `xcodebuild test` builds, it settles while the build runs: on PR #53
+# those took 41 and 35 seconds. A boot that fails is left for xcodebuild to
+# retry and report.
+#
+# `check.sh build` doesn't boot: a simulator busy settling takes the runner's
+# three cores from the compiler, and on PR #53 that stretched the build from
+# two minutes to eleven.
 boot() {
     xcrun simctl bootstatus "$1" -b > "$OUT/boot-$1.log" 2>&1
 }
 
 build() {
-    boot "$IPHONE_ID" &
-    booting=$!
     status=0
     run "iPhone app, watch app, widgets and their test bundles" "$OUT/build-iphone.log" -quiet \
         build-for-testing -project GymTrack.xcodeproj -scheme GymTrack \
@@ -139,7 +140,6 @@ build() {
     run "watch test bundle" "$OUT/build-watch.log" -quiet \
         build-for-testing -project GymTrack.xcodeproj -scheme GymTrackWatch \
         -destination "id=$WATCH_ID" -derivedDataPath "$OUT/dd-watch" || status=1
-    wait "$booting"
     return $status
 }
 
@@ -158,17 +158,9 @@ test_suites() {
         phone=" " watch=" "
     fi
 
-    # The phone boots before its tests build, and the watch boots while they run:
-    # phone first, the order a paired watch needs (docs/DEVELOPMENT.md).
     status=0
     if [ -n "$phone" ]; then
         boot "$IPHONE_ID"
-    fi
-    if [ -n "$watch" ]; then
-        boot "$WATCH_ID" &
-        watch_booting=$!
-    fi
-    if [ -n "$phone" ]; then
         # shellcheck disable=SC2086 # each -only-testing is its own argument
         run "iPhone tests:$phone" "$OUT/test-iphone.log" "" \
             test -project GymTrack.xcodeproj -scheme GymTrack -destination "id=$IPHONE_ID" \
@@ -176,7 +168,6 @@ test_suites() {
             $phone || status=1
     fi
     if [ -n "$watch" ]; then
-        wait "$watch_booting"
         # shellcheck disable=SC2086
         run "watch tests:$watch" "$OUT/test-watch.log" "" \
             test -project GymTrack.xcodeproj -scheme GymTrackWatch -destination "id=$WATCH_ID" \

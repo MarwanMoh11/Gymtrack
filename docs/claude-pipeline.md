@@ -281,13 +281,16 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   same commit's watch tests passed on another Mac, and `build-and-test` still went red. Nothing
   else is retried, so a failing test still fails on its first run, and a launch the change itself
   breaks fails both times.
-- `check.sh` boots the simulators itself, before building, with `simctl bootstatus -b`. Left to
-  `xcodebuild`, a simulator boots only when testing starts, and one freshly booted stays slow for
-  minutes. On PR #52 the UI test runner took three minutes to start and the app's first launch
-  seventy seconds, against two to five for every later launch, and the first look at the screen
-  timed out inside XCTest ("Failed to get matching snapshots"), where no wait in a test can help.
-  Every UI failure since the tests got a minute per step was this first launch. Now the phone
-  boots while the tests build, and the watch boots, phone first, while the phone's tests run.
+- **A cold simulator was the UI tests' random failure.** On PR #52 the UI test runner took three
+  minutes to start and the app's first launch seventy seconds, against two to five for every
+  later launch, and the first look at the screen timed out inside XCTest ("Failed to get matching
+  snapshots"), where no wait in a test can help. Two changes answer it. `check.sh test` boots the
+  phone simulator (`simctl bootstatus -b`) before `xcodebuild test` builds, so it settles during
+  the build; on PR #53 the runner then started in 41 seconds and the app in 35. And the run's
+  first UI test launches the app once and closes it before its own launch
+  (`GymTrackUITestCase.setUpWithError`), so no test's first step lands on the slow launch.
+  `check.sh build` doesn't boot anything: on #53 a simulator settling beside the compiler
+  stretched `build-and-test`'s build from two minutes to eleven.
 - Building the GymTrack scheme also builds the watch app and the widgets, because both are
   embedded in the app.
 - **Every test gates merging.** `build-and-test` runs all of `GymTrackTests` and
@@ -295,7 +298,7 @@ issue you want built; each run gets its own Mac and its own PR. Two or three at 
   The ruleset requires both. `ui-tests` has its own runner and runs in parallel, because the flows
   add ten minutes of building and tapping, and with everything in one job the gate once took over
   40 minutes. Until October 2026 it reported without blocking, and a red that was usually a cold
-  simulator taught everyone to ignore it; that cause is gone (see `check.sh` above), so a red
+  simulator taught everyone to ignore it; that cause is gone (see above), so a red
   `ui-tests` now means a broken flow.
 - The review job saves the PR's diff to `pr.diff` (and a summary to `pr-stat.txt`) before Claude
   starts, from the merge commit and its base (`fetch-depth: 2`), so no API limit applies and Claude
