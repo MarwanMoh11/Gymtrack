@@ -1355,6 +1355,22 @@ final class HiddenExerciseRecord {
     }
 }
 
+/// Only exercises whose suggestion the lifter replaced get a row.
+@Model
+final class FormVideoRecord {
+    /// The canonical catalog ID, including custom exercises.
+    var catalogID: String = ""
+    /// The canonical link produced by `FormVideo`.
+    var link: String = ""
+    var updatedAt: Date = Date()
+
+    init(catalogID: String, link: String) {
+        self.catalogID = catalogID
+        self.link = link
+        self.updatedAt = .now
+    }
+}
+
 /// One slot of a plan day, frozen when a session was opened from it: the
 /// exercise, how it is measured, and its targets, so a reader can tell what was
 /// prescribed that day from what was done. No starting weight, which the phone

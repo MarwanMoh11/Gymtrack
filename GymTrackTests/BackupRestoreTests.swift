@@ -157,6 +157,7 @@ struct BackupRestoreTests {
         #expect(try target.fetchCount(FetchDescriptor<BodyMeasurement>()) == 1)
         #expect(try target.fetchCount(FetchDescriptor<ExerciseLoadPreference>()) == 1)
         #expect(try target.fetchCount(FetchDescriptor<HiddenExerciseRecord>()) == 1)
+        #expect(try target.fetchCount(FetchDescriptor<FormVideoRecord>()) == 1)
         #expect(try target.fetchCount(FetchDescriptor<CustomExerciseRecord>()) == 1)
 
         let sessions = try target.fetch(FetchDescriptor<WorkoutSession>())
@@ -491,6 +492,7 @@ struct BackupRestoreTests {
         #expect(try context.fetchCount(FetchDescriptor<PlanItem>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<BodyMetric>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<HiddenExerciseRecord>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<FormVideoRecord>()) == 0)
         #expect(!ExerciseCatalog.shared.isHidden("deadlift"))
     }
 
@@ -589,6 +591,7 @@ struct BackupRestoreTests {
         #expect(try context.fetchCount(FetchDescriptor<BodyMeasurement>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<ExerciseLoadPreference>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<HiddenExerciseRecord>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<FormVideoRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<CustomExerciseRecord>()) == 0)
     }
 
@@ -802,6 +805,7 @@ struct BackupRestoreTests {
         tape.set(81, for: .waist)
         context.insert(tape)
         context.insert(ExerciseLoadPreference(catalogID: bench.id, scale: LoadScale(unit: .kg, increment: 1.25)))
+        context.insert(FormVideoRecord(catalogID: bench.id, link: "https://youtu.be/aaaaaaaaaaa"))
         context.insert(HiddenExerciseRecord(catalogID: "deadlift"))
         context.insert(CustomExerciseRecord(name: "Landmine Press", muscles: [], equipment: ["Barbell"], tracking: .weightReps))
         try context.save()

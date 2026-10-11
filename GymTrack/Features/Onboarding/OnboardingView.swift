@@ -1,7 +1,8 @@
 import SwiftUI
 import SwiftData
 
-/// Three quick steps: name, units, starting routine. No account, no network —
+/// Three quick steps: name, units, starting routine. No account, no network
+/// apart from the YouTube form videos it streams when you open an exercise —
 /// the app is usable from the first tap.
 struct OnboardingView: View {
     @Environment(\.modelContext) private var context

@@ -1,6 +1,7 @@
 # GymTrack
 
-Native iOS 17 + watchOS 10 workout tracker: SwiftUI, SwiftData, all data on the device, no network.
+Native iOS 17 + watchOS 10 workout tracker: SwiftUI, SwiftData, all data on the device,
+no network apart from the YouTube form videos it streams when you open an exercise.
 A local session reads `docs/DEVELOPMENT.md` (builds, phone installs, test runs, simulator quirks)
 before building or touching a simulator, and confirms all three schemes build before calling it done.
 

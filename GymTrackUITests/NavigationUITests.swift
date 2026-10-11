@@ -61,6 +61,29 @@ final class NavigationUITests: GymTrackUITestCase {
         require(app.staticTexts["Nothing matches"], "the no-match message")
     }
 
+    func testExerciseDetailShowsAnEditableFormVideo() throws {
+        app = launchApp(onboarded: true)
+        tap(app.tabBars.buttons["Library"], "the Library tab")
+        let search = require(app.searchFields.firstMatch, "the search field")
+        search.tap()
+        search.typeText("Barbell Back Squat")
+        tap(button(labelContains: "Barbell Back Squat"), "the matching exercise")
+        require(app.descendants(matching: .any)["formVideo.player"], "the form video player")
+        tap(app.buttons["formVideo.edit"], "the form video editor")
+        let link = require(app.textFields["formVideo.link"], "the YouTube link field")
+        link.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        let value = link.value as? String ?? ""
+        link.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
+        link.typeText("https://youtu.be/aaaaaaaaaaa")
+        XCTAssertTrue(app.buttons["formVideo.save"].isEnabled)
+        tap(app.buttons["formVideo.save"], "Save")
+        XCTAssertTrue(link.waitForNonExistence(timeout: 5))
+        require(app.descendants(matching: .any)["formVideo.player"], "the replacement player")
+        tap(app.buttons["formVideo.edit"], "the form video editor again")
+        tap(app.buttons["formVideo.reset"], "Use the suggested video")
+        require(app.descendants(matching: .any)["formVideo.player"], "the suggested player")
+    }
+
     func testSettingsOpensFromTodayAndListsTheBackup() throws {
         app = launchApp(onboarded: true)
 

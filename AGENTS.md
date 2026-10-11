@@ -1,7 +1,8 @@
 # GymTrack
 
 Native iOS + watchOS workout tracker. SwiftUI, SwiftData, no account, no server,
-no network — everything lives on the device. Minimum target iOS 17.
+no network apart from the YouTube form videos it streams when you open an
+exercise — everything lives on the device. Minimum target iOS 17.
 
 Read this before scanning the repo. It exists so you don't have to re-derive the
 architecture, the conventions or the simulator's quirks on every task.

@@ -44,6 +44,11 @@ enum BackupService {
         /// Which library exercises the user has put away. Optional like the
         /// rest — an older backup simply restores with nothing hidden.
         var hiddenExercises: [String]?
+        /// The videos the lifter chose in place of the bundled suggestions.
+        /// Absent when every suggestion was kept: bundled suggestions belong
+        /// to the app and are never written. Optional like the rest; restore
+        /// reads it.
+        var formVideos: [FormVideoDTO]?
         /// What the bundled library knows about the exercises this file names,
         /// so the file explains itself to whatever reads it — a backup handed
         /// to an AI coach otherwise has to guess from "Front Squat" that the
@@ -390,6 +395,12 @@ enum BackupService {
         var thighCm: Double?
     }
 
+    /// A replacement link that travels with the lifter's backup.
+    struct FormVideoDTO: Codable {
+        var catalogID: String
+        var link: String
+    }
+
     struct LoadScaleDTO: Codable {
         var catalogID: String
         var unit: String
@@ -593,6 +604,7 @@ enum BackupService {
         var bodyMeasurements: [BodyMeasurement]
         var loadScales: [ExerciseLoadPreference]
         var hidden: [HiddenExerciseRecord]
+        var formVideos: [FormVideoRecord]
     }
 
     private static func fetchInputs(_ context: ModelContext) throws -> SnapshotInputs {
@@ -607,7 +619,8 @@ enum BackupService {
             bodyMeasurements: try context.fetch(FetchDescriptor<BodyMeasurement>())
                 .sorted { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) },
             loadScales: try context.fetch(FetchDescriptor<ExerciseLoadPreference>()),
-            hidden: try context.fetch(FetchDescriptor<HiddenExerciseRecord>())
+            hidden: try context.fetch(FetchDescriptor<HiddenExerciseRecord>()),
+            formVideos: try context.fetch(FetchDescriptor<FormVideoRecord>())
         )
     }
 
@@ -676,6 +689,7 @@ enum BackupService {
             },
             loadScales: corrections,
             hiddenExercises: inputs.hidden.map(\.catalogID).sorted(),
+            formVideos: formVideoDTOs(inputs.formVideos),
             exerciseCatalog: referencedCatalog(referenced),
             effectiveLoadScales: effectiveLoadScales(referenced, corrections: corrections),
             effortScale: effortScale
@@ -790,6 +804,18 @@ enum BackupService {
     /// continues.
     private static func setsInOrder(of session: WorkoutSession) -> [SetLog] {
         session.sets.sorted(by: SetLog.precedesInSession)
+    }
+
+    /// Only valid replacements travel with the backup; an empty result has
+    /// no key, so keeping every suggestion leaves no stored preference.
+    private static func formVideoDTOs(_ rows: [FormVideoRecord]) -> [FormVideoDTO]? {
+        let ids = Set(rows.map { ExerciseCatalog.canonicalID(for: $0.catalogID) })
+        let dtos = ids.sorted().compactMap { id -> FormVideoDTO? in
+            guard let row = FormVideos.override(for: id, in: rows),
+                  let video = FormVideo(link: row.link) else { return nil }
+            return FormVideoDTO(catalogID: id, link: video.link)
+        }
+        return dtos.isEmpty ? nil : dtos
     }
 
     /// One correction per movement, written under the survivor's ID.
@@ -1586,6 +1612,11 @@ enum BackupService {
             context.insert(ExerciseLoadPreference(catalogID: dto.catalogID, scale: scale))
         }
 
+        for dto in archive.formVideos ?? [] {
+            guard let video = FormVideo(link: dto.link) else { continue }
+            context.insert(FormVideoRecord(catalogID: ExerciseCatalog.canonicalID(for: dto.catalogID), link: video.link))
+        }
+
         for catalogID in archive.hiddenExercises ?? [] {
             context.insert(HiddenExerciseRecord(catalogID: catalogID))
         }
@@ -1683,6 +1714,7 @@ enum BackupService {
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
+        for video in try context.fetch(FetchDescriptor<FormVideoRecord>()) { context.delete(video) }
 
         return healthLinks
     }
@@ -1724,6 +1756,7 @@ enum BackupService {
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
+        for video in try context.fetch(FetchDescriptor<FormVideoRecord>()) { context.delete(video) }
 
         return healthLinks
     }

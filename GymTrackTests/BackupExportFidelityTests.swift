@@ -269,6 +269,25 @@ struct BackupExportFidelityTests {
         }
     }
 
+    @Test func formVideosAreAbsentUnlessReplacedAndCanonicalSortedWhenPresent() throws {
+        let context = try TestStore.context()
+        let empty = try BackupService.exportData(context: context, stamp: stamp)
+        #expect(try PersistenceFixtures.object(empty)["formVideos"] == nil)
+        let older = FormVideoRecord(catalogID: "scaption", link: "https://youtu.be/ccccccccccc")
+        older.updatedAt = base
+        context.insert(older)
+        let newer = FormVideoRecord(catalogID: "scaption-dumbbell", link: "https://www.youtube.com/watch?v=bbbbbbbbbbb&t=1m30s")
+        newer.updatedAt = base.addingTimeInterval(1)
+        context.insert(newer)
+        context.insert(FormVideoRecord(catalogID: "barbell-bench-press", link: "aaaaaaaaaaa"))
+        context.insert(FormVideoRecord(catalogID: "invalid", link: "not a link"))
+        try context.save()
+        let data = try BackupService.exportData(context: context, stamp: stamp)
+        let rows = try #require(PersistenceFixtures.object(data)["formVideos"] as? [[String: String]])
+        #expect(rows.map { $0["catalogID"] } == ["barbell-bench-press", "scaption"])
+        #expect(rows.map { $0["link"] } == ["https://youtu.be/aaaaaaaaaaa", "https://youtu.be/bbbbbbbbbbb?t=90"])
+    }
+
     // MARK: - Fixture
 
     /// A store filled in the order least likely to come back sorted: everything
