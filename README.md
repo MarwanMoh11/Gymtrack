@@ -3,8 +3,9 @@
 A native iOS workout tracker. Build a routine, log every set as you lift, and
 watch the numbers move.
 
-Everything lives on the device — no account, no server, no network. It works in
-a basement gym with no signal, and your training history is yours.
+Everything lives on the device — no account, no server, no network apart from
+the YouTube form videos it streams when you open an exercise. It works in a
+basement gym with no signal, and your training history is yours.
 
 ## Running it on your phone
 
