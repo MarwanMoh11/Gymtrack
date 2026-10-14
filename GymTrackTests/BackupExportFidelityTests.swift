@@ -288,6 +288,38 @@ struct BackupExportFidelityTests {
         #expect(rows.map { $0["link"] } == ["https://youtu.be/aaaaaaaaaaa", "https://youtu.be/bbbbbbbbbbb?t=90"])
     }
 
+    @Test func machinesAreAbsentUntilChosenAndHoldOnlyWhatWasSet() throws {
+        let context = try TestStore.context()
+        let empty = try PersistenceFixtures.object(BackupService.exportData(context: context, stamp: stamp))
+        #expect(empty["machineSetups"] == nil && empty["machineCatalog"] == nil)
+
+        // A position the machine doesn't have, and a machine this build can't
+        // draw, are both dropped rather than written as fact.
+        context.insert(MachineSetupRecord(catalogID: "machine-chest-press", machineID: "panatta-chest-press",
+                                          settings: MachineSettings(["stop": 99, "grip": 1])))
+        context.insert(MachineSetupRecord(catalogID: "leg-press", machineID: "cybex-leg-press"))
+        context.insert(MachineSetupRecord(catalogID: "leg-extension-machine", machineID: "retired-model"))
+        let t = TestClock.at("2026-03-02T18:00:00")
+        let session = PersistenceFixtures.session("Legs", startedAt: t, endedAt: t.addingTimeInterval(1800), in: context)
+        let set = PersistenceFixtures.set(setIndex: 0, kg: 120, reps: 10, completedAt: t.addingTimeInterval(60))
+        set.machineID = "cybex-leg-press"
+        PersistenceFixtures.add(set, to: session, in: context)
+        try context.save()
+
+        let root = try PersistenceFixtures.object(BackupService.exportData(context: context, stamp: stamp))
+        let setups = try #require(root["machineSetups"] as? [[String: Any]])
+        #expect(setups.map { $0["catalogID"] as? String } == ["leg-press", "machine-chest-press"])
+        #expect(setups[0]["settings"] == nil)
+        #expect(setups[1]["settings"] as? [String: Int] == ["grip": 1])
+        let machines = try #require(root["machineCatalog"] as? [[String: Any]])
+        #expect(machines.map { $0["id"] as? String } == ["cybex-leg-press", "panatta-chest-press"])
+        let grip = try #require((machines[1]["adjustments"] as? [[String: Any]])?.first { $0["id"] as? String == "grip" })
+        #expect(grip["options"] as? [String] == ["Prone", "Neutral"] && grip["positions"] == nil)
+        let row = try #require(PersistenceFixtures.sessions(in: root).first?["sets"] as? [[String: Any]]).first
+        #expect(row?["machine"] as? String == "cybex-leg-press")
+        #expect(row?["machineSettings"] == nil)
+    }
+
     // MARK: - Fixture
 
     /// A store filled in the order least likely to come back sorted: everything

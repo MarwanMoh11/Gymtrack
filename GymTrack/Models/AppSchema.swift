@@ -12,5 +12,6 @@ enum AppSchema {
         WorkoutSession.self, SetLog.self, ExerciseNote.self,
         CustomExerciseRecord.self, BodyMetric.self, BodyMeasurement.self,
         ExerciseLoadPreference.self, HiddenExerciseRecord.self, FormVideoRecord.self,
+        MachineSetupRecord.self,
     ]
 }

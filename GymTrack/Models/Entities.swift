@@ -810,6 +810,20 @@ final class SetLog {
     var loadNudgeOutcomeRaw: String?
     var loadNudgeToKg: Double?
 
+    // MARK: The machine it was done on
+
+    /// The machine this set was done on (a `MachineRig` ID) and how it was set
+    /// up at the moment the set was logged, as `MachineSettings` JSON.
+    ///
+    /// Copied from the exercise's `MachineSetupRecord` when the set is logged,
+    /// so changing the seat next week doesn't rewrite what this set was done
+    /// at. Both absent on a set whose exercise has no machine chosen, which is
+    /// most of them; the settings are absent too where a machine was chosen
+    /// but nothing on it was set, rather than an empty object that reads as
+    /// "measured: nothing".
+    var machineID: String?
+    var machineSettingsRaw: String?
+
     // MARK: One effort, spread over rows
 
     /// Set on the rows that were not a set of their own — the second and third
@@ -976,6 +990,20 @@ final class SetLog {
 
     /// Forgets the offer ever happened. Called where the record has to read as
     /// though the button was never pressed and the question never asked.
+    /// Copies the exercise's machine and setup onto the set being logged, or
+    /// clears both where no machine is chosen.
+    func stampMachine(_ setup: MachineSetupRecord?) {
+        guard let setup, !setup.machineID.isEmpty else { return clearMachine() }
+        machineID = setup.machineID
+        let settings = setup.settings
+        machineSettingsRaw = settings.isEmpty ? nil : settings.raw
+    }
+
+    func clearMachine() {
+        machineID = nil
+        machineSettingsRaw = nil
+    }
+
     func clearLoadNudge() {
         loadNudgeOutcomeRaw = nil
         loadNudgeToKg = nil
@@ -1048,6 +1076,9 @@ final class SetLog {
         // answer gone there was never a reading of this set to act on, so what
         // was done about it stops being a fact about anything.
         clearLoadNudge()
+        // The machine was copied on at the log. Taken back, the set was never
+        // done on anything; logged again, it takes whatever is set up then.
+        clearMachine()
         // `continuesPreviousSet` deliberately stays, along with `setIndex` and
         // for the same reason: it is not something the set gained by being
         // logged, it is what the row is. A drop's second row was created as a
@@ -1369,6 +1400,36 @@ final class FormVideoRecord {
         self.link = link
         self.updatedAt = .now
     }
+}
+
+// MARK: - Machine setup
+
+/// The machine the lifter uses for one exercise, and how they set it up.
+///
+/// One row per exercise, and only for exercises where a machine was chosen:
+/// choosing "No machine" deletes the row, so an exercise nobody set up looks
+/// exactly like one from before the feature existed. The settings hold only
+/// the adjustments the lifter actually set; a position the model happens to be
+/// drawn in is never written here.
+@Model
+final class MachineSetupRecord {
+    /// The canonical catalog ID, including custom exercises.
+    var catalogID: String = ""
+    /// A `MachineRig` ID.
+    var machineID: String = ""
+    /// `MachineSettings` JSON.
+    var settingsRaw: String = "{}"
+    var updatedAt: Date = Date()
+
+    init(catalogID: String, machineID: String, settings: MachineSettings = MachineSettings(), at moment: Date = .now) {
+        self.catalogID = catalogID
+        self.machineID = machineID
+        self.settingsRaw = settings.raw
+        self.updatedAt = moment
+    }
+
+    var settings: MachineSettings { MachineSettings(raw: settingsRaw) }
+    var rig: MachineRig? { MachineCatalog.rig(machineID) }
 }
 
 /// One slot of a plan day, frozen when a session was opened from it: the

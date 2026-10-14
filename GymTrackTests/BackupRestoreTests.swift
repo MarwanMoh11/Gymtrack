@@ -158,6 +158,7 @@ struct BackupRestoreTests {
         #expect(try target.fetchCount(FetchDescriptor<ExerciseLoadPreference>()) == 1)
         #expect(try target.fetchCount(FetchDescriptor<HiddenExerciseRecord>()) == 1)
         #expect(try target.fetchCount(FetchDescriptor<FormVideoRecord>()) == 1)
+        #expect(try target.fetchCount(FetchDescriptor<MachineSetupRecord>()) == 1)
         #expect(try target.fetchCount(FetchDescriptor<CustomExerciseRecord>()) == 1)
 
         let sessions = try target.fetch(FetchDescriptor<WorkoutSession>())
@@ -477,6 +478,7 @@ struct BackupRestoreTests {
         let oldSession = PersistenceFixtures.session("Old session", startedAt: t, endedAt: t.addingTimeInterval(3600), in: context)
         context.insert(BodyMetric(date: t, weightKg: 90))
         context.insert(HiddenExerciseRecord(catalogID: "deadlift"))
+        context.insert(MachineSetupRecord(catalogID: "leg-press", machineID: "cybex-leg-press"))
         try context.save()
         let donor = try donorBackup()
 
@@ -493,6 +495,7 @@ struct BackupRestoreTests {
         #expect(try context.fetchCount(FetchDescriptor<BodyMetric>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<HiddenExerciseRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<FormVideoRecord>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<MachineSetupRecord>()) == 0)
         #expect(!ExerciseCatalog.shared.isHidden("deadlift"))
     }
 
@@ -592,6 +595,7 @@ struct BackupRestoreTests {
         #expect(try context.fetchCount(FetchDescriptor<ExerciseLoadPreference>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<HiddenExerciseRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<FormVideoRecord>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<MachineSetupRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<CustomExerciseRecord>()) == 0)
     }
 
@@ -778,6 +782,8 @@ struct BackupRestoreTests {
         let solid = PersistenceFixtures.set(setIndex: 0, kg: 100, reps: 5, completedAt: t.addingTimeInterval(120))
         solid.rpe = SetFeel.solid.rawValue
         solid.startedAt = t.addingTimeInterval(90)
+        solid.machineID = "panatta-chest-press"
+        solid.machineSettingsRaw = MachineSettings(["stop": 3]).raw
         let hard = PersistenceFixtures.decoratedSet(at: t.addingTimeInterval(400), setIndex: 1)
         let drop = PersistenceFixtures.set(setIndex: 2, kg: 80, reps: 6, completedAt: t.addingTimeInterval(560))
         drop.continuesPreviousSet = true
@@ -806,6 +812,8 @@ struct BackupRestoreTests {
         context.insert(tape)
         context.insert(ExerciseLoadPreference(catalogID: bench.id, scale: LoadScale(unit: .kg, increment: 1.25)))
         context.insert(FormVideoRecord(catalogID: bench.id, link: "https://youtu.be/aaaaaaaaaaa"))
+        context.insert(MachineSetupRecord(catalogID: bench.id, machineID: "panatta-chest-press",
+                                          settings: MachineSettings(["stop": 3, "grip": 1])))
         context.insert(HiddenExerciseRecord(catalogID: "deadlift"))
         context.insert(CustomExerciseRecord(name: "Landmine Press", muscles: [], equipment: ["Barbell"], tracking: .weightReps))
         try context.save()

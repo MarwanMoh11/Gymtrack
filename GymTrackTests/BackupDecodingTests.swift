@@ -40,6 +40,7 @@ struct BackupDecodingTests {
         #expect(archive.bodyMetrics == nil && archive.bodyMeasurements == nil)
         #expect(archive.loadScales == nil && archive.hiddenExercises == nil)
         #expect(archive.exerciseCatalog == nil && archive.effectiveLoadScales == nil && archive.effortScale == nil)
+        #expect(archive.machineSetups == nil && archive.machineCatalog == nil)
     }
 
     @Test func aMinimalFileRestoresAsAnEmptyPhoneWithTheFilesSettings() throws {
