@@ -85,6 +85,9 @@ struct ExerciseDetailView: View {
             VStack(spacing: 16) {
                 header(referenceKg: history.first?.topSet?.weightKg ?? 0)
                 FormVideoCard(exercise: exercise)
+                if MachineCatalog.offersSetup(for: exercise) {
+                    MachineCard(exercise: exercise)
+                }
                 if history.isEmpty {
                     EmptyStateView(icon: "chart.line.uptrend.xyaxis",
                                    title: "No history yet",

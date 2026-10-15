@@ -1760,6 +1760,8 @@ struct ActiveWorkoutLoggingTests {
         ("detectedEndedAt", .loggedByTheSet, { text($0.detectedEndedAt) }),
         ("loadNudgeOutcomeRaw", .loggedByTheSet, { text($0.loadNudgeOutcomeRaw) }),
         ("loadNudgeToKg", .loggedByTheSet, { text($0.loadNudgeToKg) }),
+        ("machineID", .loggedByTheSet, { text($0.machineID) }),
+        ("machineSettingsRaw", .loggedByTheSet, { text($0.machineSettingsRaw) }),
         ("id", .identity, { text($0.id) }),
         ("catalogID", .identity, { text($0.catalogID) }),
         ("exerciseName", .identity, { text($0.exerciseName) }),
@@ -1828,6 +1830,8 @@ struct ActiveWorkoutLoggingTests {
         set.recordDetectedWindow(DetectedSetWindow(start: moment.addingTimeInterval(-38),
                                                    end: moment.addingTimeInterval(-2)))
         set.recordLoadNudge(.taken, toKg: 62.5)
+        set.stampMachine(MachineSetupRecord(catalogID: set.catalogID, machineID: "panatta-chest-press",
+                                            settings: MachineSettings(["stop": 3])))
     }
 
     @Test func everyStoredPropertyOfASetAndASessionIsClassifiedForUndo() throws {

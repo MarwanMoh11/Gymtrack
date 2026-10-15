@@ -582,6 +582,7 @@ final class ActiveWorkout {
         restCancelledByStart = nil
         restCancelledByContinuation = nil
         carryLoadForward(from: set)
+        set.stampMachine(MachineSetups.setup(for: set.catalogID, context: context))
         save()
 
         if isPersonalRecord(set) {

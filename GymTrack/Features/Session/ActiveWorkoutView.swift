@@ -543,6 +543,7 @@ private struct ExerciseLogCard: View {
     let scroll: ScrollViewProxy
 
     @State private var showingDetail = false
+    @State private var showingMachine = false
     /// Whether the note's field is open on this card. Off by default and never
     /// opened by the app — a note is offered, never asked for.
     @State private var isWriting = false
@@ -592,6 +593,8 @@ private struct ExerciseLogCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+
+            MachineSetupStrip(catalogID: group.catalogID) { showingMachine = true }
 
             if isWriting {
                 noteEditor
@@ -675,6 +678,9 @@ private struct ExerciseLogCard: View {
             if let catalog = group.catalog {
                 NavigationStack { ExerciseDetailView(exercise: catalog) }
             }
+        }
+        .sheet(isPresented: $showingMachine) {
+            MachineSetupSheet(catalogID: group.catalogID, exerciseName: group.name)
         }
     }
 
@@ -829,6 +835,9 @@ private struct ExerciseLogCard: View {
                 .font(Theme.number(13, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
             noteButton
+            if let catalog = group.catalog, MachineCatalog.offersSetup(for: catalog) {
+                MachineSetupButton(catalogID: group.catalogID, exerciseName: group.name) { showingMachine = true }
+            }
             // Only for an exercise the catalog still knows. The sheet is built
             // from the catalog entry, so for a deleted custom exercise the
             // button opened an empty sheet with nothing on it to dismiss.

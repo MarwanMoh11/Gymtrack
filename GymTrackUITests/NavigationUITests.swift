@@ -84,6 +84,24 @@ final class NavigationUITests: GymTrackUITestCase {
         require(app.descendants(matching: .any)["formVideo.player"], "the suggested player")
     }
 
+    func testExerciseDetailChoosesAMachineAndShowsItsSetup() throws {
+        app = launchApp(onboarded: true)
+        tap(app.tabBars.buttons["Library"], "the Library tab")
+        let search = require(app.searchFields.firstMatch, "the search field")
+        search.tap()
+        search.typeText("Machine Chest Press")
+        tap(button(labelContains: "Machine Chest Press"), "the matching exercise")
+        tap(app.buttons["machine.choose"], "Choose the machine you use")
+        tap(app.buttons["machine.pick.panatta-chest-press"], "the Panatta horizontal bench press")
+        require(app.descendants(matching: .any)["machine.model"], "the machine in 3D")
+        require(app.staticTexts["Not set"], "an unset adjustment")
+        tap(app.buttons["machine.pin.stop.3"], "end-run stop 3")
+        require(app.staticTexts["3 of 4"], "the stop it was set to")
+        tap(app.buttons["machine.option.grip.1"], "the neutral grip")
+        tap(app.buttons["machine.done"], "Done")
+        require(button(labelContains: "Stop 3 · Grip Neutral"), "the setup on the exercise")
+    }
+
     func testSettingsOpensFromTodayAndListsTheBackup() throws {
         app = launchApp(onboarded: true)
 

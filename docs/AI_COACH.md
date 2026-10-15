@@ -199,6 +199,13 @@ turn into false detail:
 - Notes carry the tags `pain`, `formBreakdown`, `substitution`, `feltStrong` and
   `feltFlat`. `hiddenExercises` are exercises the lifter trimmed because the gym
   lacks them, and are never proposed. Dates are UTC; `timeZone` gives the local day.
+- `machine` on a set is the machine it was done on, and `machineSettings` the
+  positions saved on it when the set was logged (a pin row is 1-based, a choice
+  is an index into its `options`). `machineCatalog` names each machine and its
+  adjustments; `machineSetups` is each exercise's current machine and setup. All
+  are absent where no machine was chosen, and `machineSettings` is absent where
+  a machine was chosen but nothing on it was set. Two sets on different machines
+  are not the same load, even at the same number.
 
 ### proposal.json
 

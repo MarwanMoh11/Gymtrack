@@ -49,6 +49,10 @@ enum BackupService {
         /// to the app and are never written. Optional like the rest; restore
         /// reads it.
         var formVideos: [FormVideoDTO]?
+        /// The machine each exercise is done on and the positions the lifter
+        /// saved on it. Absent when no exercise has a machine chosen, and
+        /// optional like the rest; restore reads it.
+        var machineSetups: [MachineSetupDTO]?
         /// What the bundled library knows about the exercises this file names,
         /// so the file explains itself to whatever reads it — a backup handed
         /// to an AI coach otherwise has to guess from "Front Squat" that the
@@ -68,6 +72,10 @@ enum BackupService {
         /// this build writes, so a reader can tell a file that says so from an
         /// older one that never did. Restore never reads it.
         var effortScale: EffortScaleDTO?
+        /// What each machine this file names is, and how to read its settings,
+        /// so "stop": 2 on a set means something without the app to hand. Only
+        /// machines named in `machineSetups` or on a set. Restore never reads it.
+        var machineCatalog: [MachineInfoDTO]?
     }
 
     struct Settings: Codable {
@@ -354,6 +362,12 @@ enum BackupService {
         /// Absent on every ordinary set, which is nearly all of them, and
         /// optional like the rest so older backups still decode.
         var continues: String?
+        /// The machine the set was done on, an ID in `machineCatalog`, and the
+        /// positions saved on it when the set was logged. Both absent on a set
+        /// with no machine chosen; the settings are absent too where a machine
+        /// was chosen but nothing on it was set.
+        var machine: String?
+        var machineSettings: [String: Int]?
     }
 
     /// One load offer and what became of it.
@@ -399,6 +413,32 @@ enum BackupService {
     struct FormVideoDTO: Codable {
         var catalogID: String
         var link: String
+    }
+
+    /// One exercise's machine and the positions saved on it.
+    struct MachineSetupDTO: Codable {
+        var catalogID: String
+        var machine: String
+        var settings: [String: Int]?
+    }
+
+    /// A machine named in this file, and what each of its settings means.
+    struct MachineInfoDTO: Codable {
+        var id: String
+        var brand: String
+        var model: String
+        var code: String?
+        var name: String
+        var adjustments: [MachineAdjustmentDTO]
+    }
+
+    /// One thing on a machine that is set: a pin row stores 1...positions,
+    /// a choice stores the index into `options`.
+    struct MachineAdjustmentDTO: Codable {
+        var id: String
+        var name: String
+        var positions: Int?
+        var options: [String]?
     }
 
     struct LoadScaleDTO: Codable {
@@ -605,6 +645,7 @@ enum BackupService {
         var loadScales: [ExerciseLoadPreference]
         var hidden: [HiddenExerciseRecord]
         var formVideos: [FormVideoRecord]
+        var machineSetups: [MachineSetupRecord]
     }
 
     private static func fetchInputs(_ context: ModelContext) throws -> SnapshotInputs {
@@ -620,7 +661,8 @@ enum BackupService {
                 .sorted { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) },
             loadScales: try context.fetch(FetchDescriptor<ExerciseLoadPreference>()),
             hidden: try context.fetch(FetchDescriptor<HiddenExerciseRecord>()),
-            formVideos: try context.fetch(FetchDescriptor<FormVideoRecord>())
+            formVideos: try context.fetch(FetchDescriptor<FormVideoRecord>()),
+            machineSetups: try context.fetch(FetchDescriptor<MachineSetupRecord>())
         )
     }
 
@@ -657,6 +699,7 @@ enum BackupService {
         // Taken from the session values rather than the models, so this walk
         // over every set is not a second trip through the store.
         let referenced = referencedExerciseIDs(plans: plans, sessions: sessions)
+        let setups = machineSetupDTOs(inputs.machineSetups)
 
         return Archive(
             exportedAt: stamp.exportedAt,
@@ -690,9 +733,11 @@ enum BackupService {
             loadScales: corrections,
             hiddenExercises: inputs.hidden.map(\.catalogID).sorted(),
             formVideos: formVideoDTOs(inputs.formVideos),
+            machineSetups: setups,
             exerciseCatalog: referencedCatalog(referenced),
             effectiveLoadScales: effectiveLoadScales(referenced, corrections: corrections),
-            effortScale: effortScale
+            effortScale: effortScale,
+            machineCatalog: referencedMachines(setups: setups, sessions: sessions)
         )
     }
 
@@ -766,7 +811,9 @@ enum BackupService {
                                      // Read through the set, so a link whose
                                      // set isn't in this file can't reach a
                                      // reader as half a drop set.
-                                     continues: set.continuation?.rawValue)
+                                     continues: set.continuation?.rawValue,
+                                     machine: set.isCompleted ? set.machineID : nil,
+                                     machineSettings: set.isCompleted ? machineSettings(of: set) : nil)
                           })
     }
 
@@ -804,6 +851,40 @@ enum BackupService {
     /// continues.
     private static func setsInOrder(of session: WorkoutSession) -> [SetLog] {
         session.sets.sorted(by: SetLog.precedesInSession)
+    }
+
+    /// One setup per movement, for machines this build can still draw, holding
+    /// only positions the machine has. Nil when nothing is set up, so the key
+    /// is left out.
+    private static func machineSetupDTOs(_ rows: [MachineSetupRecord]) -> [MachineSetupDTO]? {
+        let ids = Set(rows.map { ExerciseCatalog.canonicalID(for: $0.catalogID) })
+        let dtos = ids.sorted().compactMap { id -> MachineSetupDTO? in
+            guard let row = MachineSetups.setup(for: id, in: rows), let rig = row.rig else { return nil }
+            let settings = row.settings.valid(for: rig)
+            return MachineSetupDTO(catalogID: id, machine: rig.id, settings: settings.isEmpty ? nil : settings.values)
+        }
+        return dtos.isEmpty ? nil : dtos
+    }
+
+    /// What was set when this set was logged, checked against the machine where
+    /// this build still knows it. Nil for nothing set.
+    private static func machineSettings(of set: SetLog) -> [String: Int]? {
+        guard let machine = set.machineID else { return nil }
+        var settings = MachineSettings(raw: set.machineSettingsRaw)
+        if let rig = MachineCatalog.rig(machine) { settings = settings.valid(for: rig) }
+        return settings.isEmpty ? nil : settings.values
+    }
+
+    private static func referencedMachines(setups: [MachineSetupDTO]?, sessions: [SessionDTO]) -> [MachineInfoDTO]? {
+        var ids = Set((setups ?? []).map(\.machine))
+        for session in sessions { for set in session.sets { if let machine = set.machine { ids.insert(machine) } } }
+        let dtos = ids.sorted().compactMap(MachineCatalog.rig).map { rig in
+            MachineInfoDTO(id: rig.id, brand: rig.brand, model: rig.model, code: rig.code, name: rig.name,
+                           adjustments: rig.adjustments.map {
+                               MachineAdjustmentDTO(id: $0.id, name: $0.name, positions: $0.positions, options: $0.options)
+                           })
+        }
+        return dtos.isEmpty ? nil : dtos
     }
 
     /// Only valid replacements travel with the backup; an empty result has
@@ -1581,6 +1662,14 @@ enum BackupService {
             if setDTO.continues != nil && setDTO.setIndex > 0 {
                 set.continuesPreviousSet = true
             }
+            // Only on a logged set: the machine is copied on at the log, so a
+            // row nobody lifted can't have been done on anything.
+            if let machine = setDTO.machine, setDTO.isCompleted {
+                var settings = MachineSettings(setDTO.machineSettings ?? [:])
+                if let rig = MachineCatalog.rig(machine) { settings = settings.valid(for: rig) }
+                set.machineID = machine
+                set.machineSettingsRaw = settings.isEmpty ? nil : settings.raw
+            }
             set.session = session
             context.insert(set)
         }
@@ -1615,6 +1704,14 @@ enum BackupService {
         for dto in archive.formVideos ?? [] {
             guard let video = FormVideo(link: dto.link) else { continue }
             context.insert(FormVideoRecord(catalogID: ExerciseCatalog.canonicalID(for: dto.catalogID), link: video.link))
+        }
+
+        // A machine this build can't draw is dropped, like an unreadable video
+        // link: kept, its setup could never be shown or changed.
+        for dto in archive.machineSetups ?? [] {
+            guard let rig = MachineCatalog.rig(dto.machine) else { continue }
+            context.insert(MachineSetupRecord(catalogID: ExerciseCatalog.canonicalID(for: dto.catalogID), machineID: rig.id,
+                                              settings: MachineSettings(dto.settings ?? [:]).valid(for: rig)))
         }
 
         for catalogID in archive.hiddenExercises ?? [] {
@@ -1715,6 +1812,7 @@ enum BackupService {
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
         for video in try context.fetch(FetchDescriptor<FormVideoRecord>()) { context.delete(video) }
+        for setup in try context.fetch(FetchDescriptor<MachineSetupRecord>()) { context.delete(setup) }
 
         return healthLinks
     }
@@ -1757,6 +1855,7 @@ enum BackupService {
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
         for hidden in try context.fetch(FetchDescriptor<HiddenExerciseRecord>()) { context.delete(hidden) }
         for video in try context.fetch(FetchDescriptor<FormVideoRecord>()) { context.delete(video) }
+        for setup in try context.fetch(FetchDescriptor<MachineSetupRecord>()) { context.delete(setup) }
 
         return healthLinks
     }
