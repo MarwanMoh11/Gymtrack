@@ -221,6 +221,84 @@ struct ProgressionSuggestionTests {
         }
     }
 
+    // MARK: - Last time's plan
+
+    /// A day of `plan` giving `id` one slot of `sets` sets of 8-12.
+    private func day(_ name: String, giving id: String, sets: Int, order: Int, in plan: Plan,
+                     context: ModelContext) -> (day: PlanDay, slot: PlanItem) {
+        let day = PlanDay(name: name, order: order)
+        let slot = PlanItem(catalogID: id, name: id, order: 0, targetSets: sets, targetRepsLow: 8, targetRepsHigh: 12)
+        context.insert(day)
+        context.insert(slot)
+        day.plan = plan
+        slot.day = day
+        return (day, slot)
+    }
+
+    /// A finished session opened from `day`, its plan frozen as it stands now,
+    /// holding `work`.
+    private func finished(_ day: PlanDay, holding work: [SetLog], context: ModelContext) -> WorkoutSession {
+        let past = WorkoutSession(title: day.name, planDayID: day.id,
+                                  startedAt: TestClock.reference.addingTimeInterval(-86_400))
+        past.endedAt = past.startedAt.addingTimeInterval(3_600)
+        context.insert(past)
+        past.recordPlan(of: day)
+        for set in work {
+            set.session = past
+            context.insert(set)
+        }
+        return past
+    }
+
+    /// An exercise on two days, two sets on one and three on the other, is read
+    /// from whichever came last. Measured against today's three, the two-set day
+    /// read as an early finish every time and the three-set day never moved its
+    /// load.
+    @Test func lastTimeIsMeasuredAgainstTheSetsItsOwnPlanAsked() throws {
+        try inUnit(.kg) {
+            let context = try TestStore.context()
+            let press = "progress-test"
+            let plan = Plan(name: "Split")
+            context.insert(plan)
+            let light = day("Light", giving: press, sets: 2, order: 0, in: plan, context: context)
+            let heavy = day("Heavy", giving: press, sets: 3, order: 1, in: plan, context: context)
+
+            let lightDone = work([(60, 12), (60, 12)], id: press)
+            let lightSession = finished(light.day, holding: lightDone, context: context)
+            let climb = TrainingStats.suggestion(for: heavy.slot, lastSets: lightDone)
+            #expect(climb.action == .increaseWeight, "\(climb.message)")
+            #expect(climb.weightKg > 60)
+            let opened = SessionFactory.openingRows(for: heavy.day, history: [lightSession])
+            #expect(opened.count == 3)
+            #expect(opened.allSatisfy { $0.weightKg > 60 })
+
+            // The other way round, a session cut short is still short by its own plan.
+            let heavyShort = work([(60, 12), (60, 12)], id: press)
+            _ = finished(heavy.day, holding: heavyShort, context: context)
+            let held = TrainingStats.suggestion(for: light.slot, lastSets: heavyShort)
+            #expect(held.action == .repeatLoad)
+            #expect(held.weightKg == 60)
+            #expect(held.message.contains("2 of 3"), "\(held.message)")
+        }
+    }
+
+    /// A set added to the plan since last time wasn't asked of last time, so
+    /// finishing what was asked then still moves the load.
+    @Test func aSetAddedToThePlanSinceDoesNotHoldTheLoad() throws {
+        try inUnit(.kg) {
+            let context = try TestStore.context()
+            let press = "progress-test"
+            let plan = Plan(name: "Grown")
+            context.insert(plan)
+            let only = day("Day", giving: press, sets: 3, order: 0, in: plan, context: context)
+            let done = work([(60, 12), (60, 12), (60, 12)], id: press)
+            _ = finished(only.day, holding: done, context: context)
+            only.slot.targetSets = 4
+            let advice = TrainingStats.suggestion(for: only.slot, lastSets: done)
+            #expect(advice.action == .increaseWeight, "\(advice.message)")
+        }
+    }
+
     // MARK: - Both units
 
     /// A barbell's rung is 2.5 kg or 5 lb, read through the phone's unit. 60 kg

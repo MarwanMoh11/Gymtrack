@@ -719,6 +719,32 @@ enum TrainingStats {
         (0..<max(1, rungs)).reduce(kg) { weight, _ in scale.step(kg: weight, by: 1) }
     }
 
+    /// How many sets last time's own plan asked of the slot `lastSets` came from.
+    ///
+    /// Last time is the newest session with the exercise in it, whichever day
+    /// that was. An exercise given two sets on one day and three on another,
+    /// measured against today's three, read the two-set day as an early finish
+    /// every time, and the three-set day never earned its next rung. Today's
+    /// count stands in only where last time's can't be told: a session stored
+    /// before plans were frozen, one with no plan behind it, or another day
+    /// that repeats the movement, where nothing says which slot these sets were.
+    private static func setsAskedLastTime(of item: PlanItem, lastSets: [SetLog]) -> Int {
+        guard let session = lastSets.first?.session, let slots = session.plannedSlots else {
+            return item.targetSets
+        }
+        // The same slot trained before, which stays exact where a day repeats a
+        // movement and these sets are only one slot's share of it.
+        if let same = slots.first(where: { $0.itemID == item.id }) { return same.targetSets }
+        let canonicalID = ExerciseCatalog.canonicalID(for: item.catalogID)
+        let matching = slots.filter { ExerciseCatalog.canonicalID(for: $0.catalogID) == canonicalID }
+        // Another day's one slot answers only for everything that day did of the
+        // exercise. A share split off it by today's repeated slots would read
+        // as a session cut short.
+        let whole = session.effortSets.filter { ExerciseCatalog.canonicalID(for: $0.catalogID) == canonicalID }
+        guard matching.count == 1, lastSets.count == whole.count else { return item.targetSets }
+        return matching[0].targetSets
+    }
+
     /// Double progression: work up the rep range at a fixed load, then add
     /// weight and drop back to the bottom of the range.
     static func suggestion(for item: PlanItem, lastSets: [SetLog]) -> OverloadSuggestion {
@@ -777,8 +803,9 @@ enum TrainingStats {
         // Only a session that did the prescribed work at its load says the load
         // is beaten. One set at the top of the range and then an early finish,
         // or a light technique set of the same lift, would otherwise read as a
-        // whole session cleared and move the load on the strength of it.
-        let prescribedSets = max(1, item.targetSets)
+        // whole session cleared and move the load on the strength of it. The
+        // work is what last time's plan asked, not today's.
+        let prescribedSets = max(1, setsAskedLastTime(of: item, lastSets: lastSets))
         guard setsAtWeight.count >= prescribedSets else {
             let done = setsAtWeight.count == 1
                 ? "Only 1 of \(prescribedSets) sets was"
