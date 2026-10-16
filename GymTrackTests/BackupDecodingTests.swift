@@ -577,6 +577,16 @@ struct BackupDecodingTests {
         #expect(try PersistenceFixtures.sets(in: again, sessionIndex: 0).first?["effort"] as? String == "easy")
     }
 
+    @Test func aCatalogEntryWithNoMergedIntoDecodesAndAFileWithOneKeepsIt() throws {
+        let entry = #"{"catalogID":"a","name":"A","category":"strength","muscleRaw":[],"muscles":[],"equipment":[],"trackingRaw":"weightReps"}"#
+        let plain = try JSONDecoder().decode(BackupService.CatalogExerciseDTO.self, from: Data(entry.utf8))
+        #expect(plain.mergedInto == nil)
+        let merged = entry.replacingOccurrences(of: #""trackingRaw""#, with: #""mergedInto":"b","trackingRaw""#)
+        #expect(try JSONDecoder().decode(BackupService.CatalogExerciseDTO.self, from: Data(merged.utf8)).mergedInto == "b")
+        let written = String(decoding: try JSONEncoder().encode(plain), as: UTF8.self)
+        #expect(!written.contains("mergedInto"), "No survivor means no key, not null")
+    }
+
     // MARK: - A field with no data has no key
 
     @Test func aLoggedSetWithNoExtrasWritesNoKeysForThem() throws {

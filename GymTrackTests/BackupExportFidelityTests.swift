@@ -90,6 +90,54 @@ struct BackupExportFidelityTests {
         #expect(!catalogIDs.isEmpty && catalogIDs == catalogIDs.sorted())
     }
 
+    // MARK: - Merged exercise IDs
+
+    /// A set logged before the library folded one entry into another keeps the
+    /// old ID, and the file has to say the two are one movement.
+    private func exportCatalog(loggedAs ids: [String]) throws -> (entries: [BackupService.CatalogExerciseDTO], root: [String: Any]) {
+        let context = try TestStore.context()
+        let t = TestClock.at("2026-03-10T18:00:00")
+        let session = PersistenceFixtures.session(startedAt: t, endedAt: t.addingTimeInterval(3600), in: context)
+        for (n, id) in ids.enumerated() {
+            let set = PersistenceFixtures.set(order: n, setIndex: 0, completedAt: t.addingTimeInterval(Double(n) * 60))
+            set.catalogID = id
+            PersistenceFixtures.add(set, to: session, in: context)
+        }
+        let data = try BackupService.exportData(context: context, stamp: stamp)
+        let archive = try BackupService.decodedArchive(from: data)
+        return (archive.exerciseCatalog ?? [], try PersistenceFixtures.object(data))
+    }
+
+    @Test(arguments: ExerciseCatalog.merges.keys.sorted())
+    func aRetiredIDThatASetStillNamesExportsItsEntryAndTheSurvivor(_ retired: String) throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let survivor = try #require(ExerciseCatalog.merges[retired])
+
+        let (entries, root) = try exportCatalog(loggedAs: [retired])
+
+        let entry = try #require(entries.first { $0.catalogID == retired }, "The set's own spelling must be findable")
+        #expect(entry.mergedInto == survivor)
+        let written = try #require((root["exerciseCatalog"] as? [[String: Any]])?.first { $0["catalogID"] as? String == retired })
+        #expect(written["mergedInto"] as? String == survivor)
+    }
+
+    @Test func theSurvivorAndAnOrdinaryIDWriteNoMergedIntoKey() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let retired = try #require(ExerciseCatalog.merges.keys.sorted().first)
+        let survivor = try #require(ExerciseCatalog.merges[retired])
+
+        let (entries, root) = try exportCatalog(loggedAs: [retired, survivor, PersistenceFixtures.bench.id])
+
+        #expect(Set(entries.map(\.catalogID)) == [retired, survivor, PersistenceFixtures.bench.id])
+        let written = try #require(root["exerciseCatalog"] as? [[String: Any]])
+        for entry in written {
+            let id = entry["catalogID"] as? String
+            #expect(entry.keys.contains("mergedInto") == (id == retired), "Only a retired ID names its survivor: \(id ?? "?")")
+        }
+    }
+
     // MARK: - Absence
 
     @Test func aCheckInWritesOnlyThePartsMeasuredAndAStoreWithoutOneWritesNoSection() throws {

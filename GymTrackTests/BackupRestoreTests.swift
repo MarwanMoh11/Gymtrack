@@ -572,6 +572,81 @@ struct BackupRestoreTests {
         #expect(try BackupService.exportData(context: context, stamp: stamp) == before)
     }
 
+    @Test func restoringOnTheSamePhoneMustKeepItsBodyMassLink() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let row = BodyMetric(date: TestClock.reference, weightKg: 81)
+        let sampleID = UUID()
+        row.healthSampleID = sampleID
+        context.insert(row)
+        try context.save()
+        let file = try BackupService.exportData(context: context, stamp: stamp)
+        #expect(!String(decoding: file, as: UTF8.self).contains(sampleID.uuidString),
+                "The link points into this phone's Health store, so the file never carries it")
+
+        try BackupService.restore(data: file, context: context)
+
+        let restored = try #require(context.fetch(FetchDescriptor<BodyMetric>()).first { $0.id == row.id })
+        #expect(restored.writtenSampleID == sampleID, "Restoring this same entry must not strand its Health sample")
+    }
+
+    @Test func theOffMainRestoreKeepsTheBodyMassLinkToo() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let row = BodyMetric(date: TestClock.reference, weightKg: 81)
+        let sampleID = UUID()
+        row.healthSampleID = sampleID
+        context.insert(row)
+        try context.save()
+        let file = try BackupService.exportData(context: context, stamp: stamp)
+
+        try await BackupService.restoreOffMain(data: file, context: context, sliceMilliseconds: 0, progress: { _ in })
+
+        let restored = try #require(context.fetch(FetchDescriptor<BodyMetric>()).first { $0.id == row.id })
+        #expect(restored.healthSampleID == sampleID)
+    }
+
+    @Test func aWeighInThatWasNotOnThisPhoneGetsNoHealthLink() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let source = try TestStore.context()
+        let foreign = BodyMetric(date: TestClock.reference, weightKg: 79)
+        foreign.healthSampleID = UUID()
+        source.insert(foreign)
+        try source.save()
+        let file = try BackupService.exportData(context: source, stamp: stamp)
+
+        // Another phone: one weigh-in of its own, with a link, and a different ID.
+        let target = try TestStore.context()
+        let local = BodyMetric(date: TestClock.reference.addingTimeInterval(-86_400), weightKg: 80)
+        local.healthSampleID = UUID()
+        target.insert(local)
+        try target.save()
+        try BackupService.restore(data: file, context: target)
+
+        let rows = try target.fetch(FetchDescriptor<BodyMetric>())
+        #expect(rows.map(\.id) == [foreign.id])
+        #expect(rows.first?.healthSampleID == nil, "A link from another phone's Health store means nothing here")
+    }
+
+    @Test func aReadingFromAnotherHealthSourceKeepsWhatItHasAcrossARestore() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let imported = BodyMetric(date: TestClock.reference, weightKg: 82)
+        imported.source = BodyMetric.Source.health.rawValue
+        context.insert(imported)
+        try context.save()
+        let file = try BackupService.exportData(context: context, stamp: stamp)
+
+        try BackupService.restore(data: file, context: context)
+
+        let restored = try #require(context.fetch(FetchDescriptor<BodyMetric>()).first)
+        #expect(restored.isFromHealth && restored.healthSampleID == nil && restored.writtenSampleID == nil)
+    }
+
     // MARK: - Erase
 
     @Test func eraseRemovesEverythingAndNeverTouchesHealthUnlessAsked() async throws {

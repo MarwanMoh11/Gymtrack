@@ -500,6 +500,11 @@ enum BackupService {
         var muscles: [String]
         var equipment: [String]
         var trackingRaw: String
+        /// The survivor's ID, present only when `catalogID` is one of the
+        /// retired spellings in `ExerciseCatalog.merges`. The app treats the two
+        /// as one movement, so a reader that groups by `catalogID` alone would
+        /// split one history in two. Absent, not null, for every other entry.
+        var mergedInto: String?
     }
 
     // MARK: - Export
@@ -1033,7 +1038,8 @@ enum BackupService {
                 muscleRaw: exercise.muscleGroups,
                 muscles: exercise.muscles.map(\.name),
                 equipment: exercise.equipment,
-                trackingRaw: exercise.tracking.rawValue
+                trackingRaw: exercise.tracking.rawValue,
+                mergedInto: ExerciseCatalog.merges[id]
             )
         }
     }
@@ -1255,6 +1261,7 @@ enum BackupService {
             let oldSessions = try context.fetchCount(FetchDescriptor<WorkoutSession>())
             let total = Double(oldSessions + archive.sessions.count + 1)
 
+            let bodyLinks = try bodyMassLinks(context: context)
             let localLinks = try await deleteStoredRecords(context: context, pacer: &pacer, total: total)
             let links = linksBySession(localLinks)
 
@@ -1263,7 +1270,7 @@ enum BackupService {
                 insertSession(dto, keepingLinks: links, context: context)
                 await pacer.pauseIfDue(fraction: Double(oldSessions + n + 1) / total)
             }
-            insertRemainder(archive, context: context)
+            insertRemainder(archive, keepingBodyLinks: bodyLinks, context: context)
 
             try beforeCommit()
             progress((total - 1) / total)
@@ -1285,9 +1292,11 @@ enum BackupService {
                                    beforeCommit: () throws -> Void) throws {
         try requireNoOpenWorkout(context)
         do {
+            let bodyLinks = try bodyMassLinks(context: context)
             let localLinks = try deleteStoredRecords(context: context)
 
-            insertArchive(archive, keepingLinks: linksBySession(localLinks), context: context)
+            insertArchive(archive, keepingLinks: linksBySession(localLinks), keepingBodyLinks: bodyLinks,
+                          context: context)
 
             try beforeCommit()
             try context.save()
@@ -1320,6 +1329,19 @@ enum BackupService {
     private struct HealthLink {
         let session: UUID
         let workout: UUID
+    }
+
+    /// The Health sample each weigh-in on this phone has, by the entry's ID,
+    /// read before the wipe takes the rows. The backup leaves the link out
+    /// because it points into this phone's Health store, so a restore onto the
+    /// same phone would otherwise strand the sample: a later correction or
+    /// delete would have no ID to take the old number back out with. An entry
+    /// with no link, such as a reading imported from another source, adds
+    /// nothing and so stays without one.
+    private static func bodyMassLinks(context: ModelContext) throws -> [UUID: UUID] {
+        let rows = try context.fetch(FetchDescriptor<BodyMetric>())
+        return Dictionary(rows.compactMap { row in row.healthSampleID.map { (row.id, $0) } },
+                          uniquingKeysWith: { first, _ in first })
     }
 
     /// `id` carries no uniqueness constraint. Should two rows ever share one,
@@ -1503,10 +1525,10 @@ enum BackupService {
     }
 
     private static func insertArchive(_ archive: Archive, keepingLinks localLinks: [UUID: UUID],
-                                      context: ModelContext) {
+                                      keepingBodyLinks bodyLinks: [UUID: UUID], context: ModelContext) {
         insertExercisesAndPlans(archive, context: context)
         for dto in archive.sessions { insertSession(dto, keepingLinks: localLinks, context: context) }
-        insertRemainder(archive, context: context)
+        insertRemainder(archive, keepingBodyLinks: bodyLinks, context: context)
     }
 
     /// The user's own exercises and the plans, the small part of a restore.
@@ -1676,11 +1698,16 @@ enum BackupService {
     }
 
     /// Body weights, tape measurements, load corrections and hidden exercises.
-    private static func insertRemainder(_ archive: Archive, context: ModelContext) {
+    private static func insertRemainder(_ archive: Archive, keepingBodyLinks bodyLinks: [UUID: UUID],
+                                        context: ModelContext) {
         for dto in archive.bodyMetrics ?? [] {
             let metric = BodyMetric(date: dto.date, weightKg: dto.weightKg)
             metric.id = dto.id
             metric.source = dto.source
+            // Only a link this phone already held, found by the entry's own
+            // ID. The file never carries one, and an entry that wasn't here
+            // before has nothing in this phone's Health to point at.
+            metric.healthSampleID = bodyLinks[dto.id]
             context.insert(metric)
         }
 
