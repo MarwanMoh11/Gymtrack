@@ -120,8 +120,9 @@ fills, a snapshot file, and one row in Settings.
   disputed and was kept anyway). Each change is accepted or declined on its own;
   advice is text with no button. Refused while a workout is running, as a restore
   is. A proposal that is advice alone, with no changes, is offered the same way
-  and has one "Got it" button in place of accept and decline; it edits nothing,
-  so it is allowed during a workout.
+  and has no buttons: opening it records that it was read, which clears the
+  Today line. It edits nothing, so it is allowed during a workout, and there is
+  no Undo.
 - **Stale changes.** The phone checks every change against the live plan. One
   whose `expect` values no longer match its slot is marked stale: shown, never
   applicable. There is no rebase; the answer is the next review. Sessions logged
@@ -156,9 +157,10 @@ The app writes `snapshot.json` atomically, debounced, after any save that
 changes what the export carries (a finished workout, its sets, notes or late
 Health vitals, a plan, a weigh-in, a tape check-in, a custom exercise, a
 machine, a load correction), when a proposal is applied or reverted, and once
-at every launch so a stale file cannot outlive the data it came from. Saves
-that touch only the workout in progress never reach it, so the logging path
-stays clear. Erase all data removes the snapshot, the decisions and any
+at every launch so a stale file cannot outlive the data it came from. While a
+workout is open, saves that touch only it, machine-setup changes and the launch
+write are all skipped, so the logging path stays clear; finishing or discarding
+the workout writes. Erase all data removes the snapshot, the decisions and any
 pushed proposal along with the records. `xcrun devicectl` reaches the container on
 development-signed builds, which is all a free Apple ID makes:
 
