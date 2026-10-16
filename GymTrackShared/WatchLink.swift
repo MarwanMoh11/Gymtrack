@@ -413,6 +413,12 @@ struct WatchFinishBatch: Codable, Hashable, Sendable {
     /// ends the session when it lands, as every wrist Finish used to. See
     /// `WorkoutSession.wristFinishMoment` for how the phone bounds it.
     var endedAt: Date? = nil
+    /// The completion each undo in `undos` takes back, as `WatchCommand.undoSet`
+    /// names it. Without it the phone erased a row by set ID alone, so an undo
+    /// of a log the lifter had since replaced on the phone wiped the newer
+    /// lift. An undo with no stamp here, and every undo in a batch from an
+    /// older watch, takes back whatever the row holds, as before.
+    var undoStamps: [UUID: Date]? = nil
 }
 
 enum WatchCommand: Codable, Hashable, Sendable {

@@ -50,10 +50,19 @@ extension WorkoutSession {
             // lands.
             guard !DroppedSetMemory.shared.wasHeardLog(log.setID, loggedAt: log.completedAt) else { continue }
             set.takeWristLog(weightKg: log.weightKg, reps: log.reps, seconds: log.seconds,
-                             at: WatchCommand.loggedMoment(log.completedAt))
+                             at: WatchCommand.loggedMoment(log.completedAt), context: modelContext)
         }
-        for id in batch.undos { rows[id]?.unlog() }
-        for id in batch.cancels { rows[id]?.startedAt = nil }
+        // An undo naming a log the row no longer holds is refused, as it is
+        // when it arrives on its own (`SetLog.admitsWristUndo`): the lifter
+        // took the set back on the phone and logged it again before the wrist
+        // heard, and erasing by set ID alone wiped the lift they corrected.
+        // The cancel beside a refused undo goes with it, since the start it
+        // would clear now belongs to that newer log.
+        let refused = Set(batch.undos.filter {
+            rows[$0]?.admitsWristUndo(of: batch.undoStamps?[$0]) == false
+        })
+        for id in batch.undos where !refused.contains(id) { rows[id]?.unlog() }
+        for id in batch.cancels where !refused.contains(id) { rows[id]?.startedAt = nil }
         settleStarts(replayedFrom: batch, on: rows)
         for rating in batch.ratings where rating.sessionID == id && rating.isValid {
             guard let set = rows[rating.setID], set.isCompleted,
@@ -267,7 +276,7 @@ extension WorkoutSession {
         let set = row.rebuilt()
         set.session = self
         context.insert(set)
-        set.takeWristLog(weightKg: weightKg, reps: reps, seconds: seconds, at: moment)
+        set.takeWristLog(weightKg: weightKg, reps: reps, seconds: seconds, at: moment, context: context)
         // The start the phone heard is held to the rules a live one is: a start
         // remembered from before the close can be as old as any abandoned one.
         settleStarts(afterLogging: set, at: moment)
@@ -338,7 +347,14 @@ extension WorkoutSession {
     func applyLateWatchFinish(_ batch: WatchFinishBatch, in context: ModelContext) -> Bool {
         guard !isActive, batch.sessionID == id else { return false }
         var withdrew = false
-        for setID in batch.undos where withdrawDroppedSet(setID, in: context) { withdrew = true }
+        for setID in batch.undos {
+            // The stamp does here what it does for an undo sent alone: a
+            // restored row now holding a different log keeps it, and the log
+            // the undo did name is refused wherever it turns up later.
+            let stamp = batch.undoStamps?[setID]
+            if stamp != nil { DroppedSetMemory.shared.rememberTakenBack(setID, completedAt: stamp) }
+            if withdrawDroppedSet(setID, completedAt: stamp, in: context) { withdrew = true }
+        }
         var restored: [UUID: SetLog] = [:]
         for log in batch.logs where !batch.undos.contains(log.setID) {
             guard let set = restoreDroppedSet(log.setID, weightKg: log.weightKg, reps: log.reps,
@@ -526,7 +542,7 @@ private extension SetLog {
     /// The wrist's log, written the one way every path writes it. Its
     /// seconds only count on a set measured in time; on a rep set they are a
     /// field the message has to carry, not something anybody timed.
-    func takeWristLog(weightKg: Double, reps: Int, seconds: Int, at moment: Date) {
+    func takeWristLog(weightKg: Double, reps: Int, seconds: Int, at moment: Date, context: ModelContext?) {
         self.weightKg = weightKg
         self.reps = reps
         if tracking == .duration { self.seconds = seconds }
@@ -534,6 +550,24 @@ private extension SetLog {
         completedAt = moment
         // A start after the log is a count-in that never finished.
         if let start = startedAt, start > moment { startedAt = nil }
+        stampWristMachine(loggedAt: moment, context: context)
+    }
+}
+
+extension SetLog {
+    /// Stamps the machine and setup onto a log the wrist made at `moment`,
+    /// for every path a wrist log reaches the phone by.
+    ///
+    /// A wrist log can land long after it was made, and the exercise's setup
+    /// is only known as it stands now. One unchanged since before the log is
+    /// the one the set was done on. One changed after it says nothing certain
+    /// about the set: a new machine and a moved seat look alike from here,
+    /// and stamping it would record a setup chosen later as the one measured.
+    /// That set carries no machine instead, as does one with no store to ask.
+    func stampWristMachine(loggedAt moment: Date, context: ModelContext?) {
+        guard let context, let setup = MachineSetups.setup(for: catalogID, context: context),
+              setup.updatedAt <= moment else { return clearMachine() }
+        stampMachine(setup)
     }
 }
 

@@ -217,7 +217,7 @@ final class WatchCommandCenter {
             // minutes before the log that used to close it.
             set.session?.settleStarts(afterLogging: set, at: loggedMoment)
             carryLoadForward(from: set, in: context)
-            set.stampMachine(MachineSetups.setup(for: set.catalogID, context: context))
+            set.stampWristMachine(loggedAt: loggedMoment, context: context)
             save(context)
             pushMirror(context: context)
 

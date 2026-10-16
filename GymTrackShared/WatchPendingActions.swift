@@ -74,8 +74,13 @@ struct WatchPendingActions: Codable {
             return WatchFinishBatch(sessionID: id, logs: [], undos: [], starts: [:],
                                     cancels: [], ratings: ratings.filter { $0.sessionID == id })
         }
+        // Each undo's stamp goes with it, so the phone can refuse a stale one
+        // in the batch as it does one sent alone. None to send leaves the key
+        // out, as an older watch's batch does.
+        let stamps = undoStamps.filter { undos.contains($0.key) }
         return WatchFinishBatch(sessionID: id, logs: Array(logs.values), undos: undos,
                                 starts: starts, cancels: cancels,
-                                ratings: ratings.filter { $0.sessionID == id })
+                                ratings: ratings.filter { $0.sessionID == id },
+                                undoStamps: stamps.isEmpty ? nil : stamps)
     }
 }
