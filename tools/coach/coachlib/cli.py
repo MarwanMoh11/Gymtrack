@@ -14,6 +14,8 @@ GymTrack's coach loop, Mac side. Typical review:
   coach submit          validate proposal.json and run an independent reviewer round
   coach submit          again, after replying to the reviewer's objections
   coach push            send the final proposal to the phone's inbox
+Daily check, between reviews:
+  coach today           read one training day against its own history (no plan edits)
 
 Environment: COACH_HOME (default ~/Documents/GymTrackCoach); GYMTRACK_PHONE or
 COACH_PHONE (device id, default the one scripts/install-phone.sh uses);
@@ -37,6 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=text)
         sp.add_argument("dir", nargs="?", help="review folder (default: the latest)")
     sub.add_parser("status", help="is the phone reachable, and is a proposal waiting on it")
+    today = sub.add_parser("today", help="write daily/DAY/today.md for one training day")
+    today.add_argument("--file", help="use this exported backup instead of the phone")
+    today.add_argument("--day", help="the training day, YYYY-MM-DD (default: the latest with a finished workout)")
     return parser
 
 
@@ -53,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
             return commands.submit(args.dir)
         if args.command == "push":
             return commands.push(args.dir)
+        if args.command == "today":
+            return commands.today(args.file, args.day)
         return commands.status()
     except CoachError as error:
         print(f"coach: {error}", file=sys.stderr)

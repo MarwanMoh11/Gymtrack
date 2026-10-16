@@ -27,7 +27,8 @@ can neither build nor drive a simulator, don't pay for them each time.
   will know the coach helps. Read it before designing AI coach work.
 - `tools/coach/` and `.claude/skills/coach-review/` — the Mac side of that loop
   (pull the export, compute stats, run the reviewer, push a proposal), driven by
-  `/coach-review`. Review data lives in `~/Documents/GymTrackCoach` and never
+  `/coach-review`. `/coach-today` (`.claude/skills/coach-today/`, `coach today`)
+  is the daily check between reviews; it never changes the plan. Review data lives in `~/Documents/GymTrackCoach` and never
   enters the repo.
 - `Services/LoadScaleBook.swift` — what each machine is marked in and what one
   step on it is worth. Every weight the app suggests must be a rung the equipment

@@ -72,6 +72,25 @@ look he wants, equipment limits, old injuries, anything not to propose), and one
 folder per review at `reviews/YYYY-MM-DD/` (suffix `-2`, `-3` for a second one
 the same day). It holds real history, so it never enters the git repo.
 
+## The daily check
+
+Between reviews, `/coach-today` gives a few lines of feedback on one training
+day, the way a coach would right after a session. `coach today` pulls the
+snapshot (only the snapshot; it reads no decisions) and writes `today.md` for
+the latest training day with a finished workout, or `--day`: each exercise
+against its previous comparable exposure and the lifter's noise, rep targets,
+effort answers, rest where a start was announced or detected (otherwise only
+the set-to-set gap, labelled as such), what the plan day asked for against what
+was done, and fractional sets per muscle for the day and the week so far.
+Sessions after that day are cut first, so a past day reads as it did that
+evening.
+
+It never proposes, pushes or names a load. Its folder is `daily/YYYY-MM-DD/`,
+never `reviews/`, so a daily check can never become the "previous review" a
+review measures its changes from. The coach's `notes.md` there ends with a
+`For the next review:` line, which the next review reads as a lead to check
+against its own stats, not as evidence.
+
 ## The reviewer
 
 The reviewer is a skeptical hypertrophy coach, run by `coach submit` as a
@@ -597,6 +616,8 @@ Still open:
   tests use synthetic fixtures; real training history never enters the repo.
 - `.claude/skills/coach-review/`: the coach's procedure and the policy above, run
   by `/coach-review`. It never contains the reviewer's prompt.
+- `.claude/skills/coach-today/`: the daily check, run by `/coach-today`. It reads
+  the policy from the coach-review skill rather than keeping a copy.
 - `GymTrack/Services/Coach/`: the phone side. Snapshot writing, inbox reading,
   validation against the live plan, the review screen, apply, undo, revert,
   and `decisions.json`. It never talks to a network.

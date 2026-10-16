@@ -47,7 +47,10 @@ exactly in that form, since the stats read it.
    `stats.json` only to look up a single key; it is large.
 4. Read the previous review folder's `notes.md`, if there is one. It holds what
    the owner said last time and when the last changes were due a look, which
-   the numbers alone cannot tell you.
+   the numbers alone cannot tell you. Then the daily check-ins since it,
+   `~/Documents/GymTrackCoach/daily/*/notes.md` (from `/coach-today`), for what
+   the owner said day to day and their `For the next review:` lines. Those are
+   leads to check against `stats.md`, never evidence on their own.
 
 ## 3. Is there anything to change?
 

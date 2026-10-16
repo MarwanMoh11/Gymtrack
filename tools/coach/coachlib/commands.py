@@ -5,10 +5,10 @@ import hashlib
 import json
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-from . import device, reviewer, stats as stats_mod
+from . import device, reviewer, stats as stats_mod, today as today_mod
 from .util import (CoachError, coach_home, format_time, new_review_folder, read_json, resolve_review,
                    review_folders, write_json)
 from .validate import validate
@@ -77,6 +77,29 @@ def _check_snapshot(path: Path) -> None:
              "them and export again.")
 
 
+def _fetch(scratch: Path, file: str | None, decisions: bool = True) -> tuple[str | None, str | None]:
+    """Copy the snapshot (and decisions.json, when asked) into `scratch`, from
+    the phone or from an exported backup. Returns the phone's id (None for a
+    file) and a note for the user, if any."""
+    phone = note = None
+    if file:
+        source = Path(file).expanduser()
+        if not source.is_file():
+            raise CoachError(f"{source} does not exist")
+        shutil.copyfile(source, scratch / "snapshot.json")
+    else:
+        phone = device.require_phone()
+        problem = device.copy_from(phone, device.SNAPSHOT_PATH, scratch / "snapshot.json")
+        if problem:
+            raise CoachError("Could not copy the snapshot off the phone: " + problem +
+                             "\nThe app writes it when a workout finishes or a plan is saved; finish or save "
+                             "something and try again, or pass an exported backup with --file PATH.")
+        if decisions and device.copy_from(phone, device.DECISIONS_PATH, scratch / "decisions.json"):
+            note = "No decisions.json on the phone yet (nothing has been proposed and decided)."
+    _check_snapshot(scratch / "snapshot.json")
+    return phone, note
+
+
 def _pull_photos(phone: str, wanted: list[dict], target: Path) -> str:
     """Copies the photos the snapshot names into `target`, under their review
     names. The whole folder comes in one devicectl call; a photo it did not
@@ -112,23 +135,8 @@ def pull(file: str | None = None, home: Path | None = None) -> int:
     home = home or coach_home()
     with tempfile.TemporaryDirectory(prefix="coach-pull-") as scratch:
         scratch = Path(scratch)
-        decisions_note = None
+        phone, decisions_note = _fetch(scratch, file)
         photos_note = None
-        if file:
-            source = Path(file).expanduser()
-            if not source.is_file():
-                raise CoachError(f"{source} does not exist")
-            shutil.copyfile(source, scratch / "snapshot.json")
-        else:
-            phone = device.require_phone()
-            problem = device.copy_from(phone, device.SNAPSHOT_PATH, scratch / "snapshot.json")
-            if problem:
-                raise CoachError("Could not copy the snapshot off the phone: " + problem +
-                                 "\nThe app writes it when a workout finishes or a plan is saved; finish or save "
-                                 "something and try again, or use `coach pull --file PATH`.")
-            if device.copy_from(phone, device.DECISIONS_PATH, scratch / "decisions.json"):
-                decisions_note = "No decisions.json on the phone yet (nothing has been proposed and decided)."
-        _check_snapshot(scratch / "snapshot.json")
         wanted = stats_mod.photo_files(read_json(scratch / "snapshot.json"))
         if wanted and file:
             photos_note = (f"This export names {len(wanted)} progress photo{'s' if len(wanted) != 1 else ''}; a "
@@ -201,6 +209,40 @@ def stats(arg: str | None = None, home: Path | None = None) -> int:
     (folder / "stats.md").write_text(stats_mod.render_markdown(result), encoding="utf-8")
     _say(f"{folder / 'stats.md'}")
     _say(result["review"]["summary"])
+    return 0
+
+
+# --- today ------------------------------------------------------------------
+
+def today(file: str | None = None, day: str | None = None, home: Path | None = None,
+          now: datetime | None = None) -> int:
+    """The daily check: one training day read against its own history. It
+    writes under daily/, never reviews/, so a daily check can never become the
+    "previous review" a periodic review measures its changes from. The coach's
+    notes.md in that folder is left alone on a re-run."""
+    home = home or coach_home()
+    wanted = None
+    if day:
+        try:
+            wanted = date.fromisoformat(day)
+        except ValueError:
+            raise CoachError(f"--day takes YYYY-MM-DD, not {day!r}")
+    with tempfile.TemporaryDirectory(prefix="coach-today-") as scratch:
+        scratch = Path(scratch)
+        _fetch(scratch, file, decisions=False)
+        result = today_mod.compute_day(read_json(scratch / "snapshot.json"), wanted, now)
+    folder = home / "daily" / result["day"]
+    write_json(folder / "today.json", result)
+    (folder / "today.md").write_text(today_mod.render_markdown(result), encoding="utf-8")
+    _say(str(folder / "today.md"))
+    if (folder / "notes.md").exists():
+        _say(f"This day's notes so far: {folder / 'notes.md'}")
+    reviews = [f / "notes.md" for f in review_folders(home) if (f / "notes.md").exists()]
+    if reviews:
+        _say(f"Last review's notes: {reviews[-1]}")
+    earlier = sorted(p for p in (home / "daily").glob("*/notes.md") if p.parent.name < result["day"])
+    for path in earlier[-3:]:
+        _say(f"Earlier daily notes: {path}")
     return 0
 
 
