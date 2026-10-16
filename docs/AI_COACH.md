@@ -354,10 +354,12 @@ to a stall.
 
 **Adherence.** For a session started from a plan day, working sets logged
 against the slots the day held (`plannedItems`, or today's plan for a session
-from before it was recorded) and the rep targets the sets recorded. The export
-does not say which slot a set filled, so repeated slots of one exercise are read
-as one total and each logged set counts once. For a week, plan days trained
-against plan days due.
+from before it was recorded) and the rep targets the sets recorded. A set of a
+repeated exercise counts toward the slot whose rep range matches the target it
+was logged against, up to that slot's planned sets; sets with no target or an
+ambiguous one fill whatever capacity is left. Each logged set counts once, and
+with equal rep ranges the slots are read as one total. For a week, plan days
+trained against plan days due.
 
 **Size.** GymTrack measures performance, not muscle. Comparable performance in
 the six-to-fifteen-rep range, at comparable effort, is the working proxy for
