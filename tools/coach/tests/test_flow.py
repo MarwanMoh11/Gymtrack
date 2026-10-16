@@ -86,6 +86,66 @@ class InitAndPull(CoachTestCase):
         self.assertFalse((self.home / "reviews").exists())
 
 
+    @staticmethod
+    def _export_with_photos():
+        export = fixture.export()
+        export["bodyMeasurements"][0]["photos"] = [
+            {"id": "00000000-0000-0000-0000-0000000000A1", "pose": "frontRelaxed", "takenAt": "2026-09-01T07:01:00Z"},
+            {"id": "00000000-0000-0000-0000-0000000000A2", "pose": "back", "takenAt": "2026-09-01T07:02:00Z"},
+        ]
+        # Photos alone, taken late in the UTC evening: already the next day in Cairo.
+        export["bodyMeasurements"].append({"id": "00000000-0000-0000-0000-0000000000B1",
+                                           "date": "2026-10-01T22:30:00Z", "photos": [
+            {"id": "00000000-0000-0000-0000-0000000000A3", "pose": "frontRelaxed", "takenAt": "2026-10-01T22:30:00Z"},
+        ]})
+        return export
+
+    def test_pull_copies_the_photos_the_snapshot_names_and_reports_the_missing(self):
+        coach_dir = self.phone / "phone" / "Documents" / "Coach"
+        coach_dir.mkdir(parents=True)
+        (coach_dir / "snapshot.json").write_text(json.dumps(self._export_with_photos()))
+        photos_dir = self.phone / "phone" / "Library" / "Application Support" / "ProgressPhotos"
+        photos_dir.mkdir(parents=True)
+        # The back photo is not on the phone; a stray file the snapshot does not name is.
+        for name in ("00000000-0000-0000-0000-0000000000A1", "00000000-0000-0000-0000-0000000000A3",
+                     "00000000-0000-0000-0000-0000000000FF"):
+            (photos_dir / f"{name}.jpg").write_bytes(name.encode())
+
+        code, out, err = self.coach("pull")
+        self.assertEqual(code, 0, err)
+        folder = self.home / "reviews" / out.strip().splitlines()[-1].rsplit("/", 1)[1]
+        pulled = sorted(path.name for path in (folder / "photos").iterdir())
+        self.assertEqual(pulled, ["2026-09-01-frontRelaxed.jpg", "2026-10-02-frontRelaxed.jpg"])
+        self.assertEqual((folder / "photos" / "2026-10-02-frontRelaxed.jpg").read_bytes(),
+                         b"00000000-0000-0000-0000-0000000000A3")
+        self.assertIn("Pulled 2 progress photos", out)
+        self.assertIn("2026-09-01-back.jpg", out)
+        self.assertFalse((folder / "photos-raw").exists())
+        calls = [json.loads(line) for line in (self.phone / "calls.log").read_text().splitlines()]
+        sources = [c[c.index("--source") + 1] for c in calls if c[:3] == ["device", "copy", "from"]]
+        self.assertIn("Library/Application Support/ProgressPhotos", sources)
+
+        code, _, err = self.coach("stats", str(folder))
+        self.assertEqual(code, 0, err)
+        markdown = (folder / "stats.md").read_text()
+        self.assertIn("## Progress photos", markdown)
+        self.assertIn("`photos/2026-10-02-frontRelaxed.jpg`", markdown)
+        self.assertIn("Not pulled", markdown)
+        stats = json.loads((folder / "stats.json").read_text())
+        self.assertEqual(stats["photos"]["count"], 3)
+        self.assertFalse([key for key in stats["metrics"] if "photo" in key.lower()],
+                         "a photo is never a metric the coach can cite")
+
+    def test_a_file_pull_says_its_photos_stay_on_the_phone(self):
+        source = self.root / "backup.json"
+        source.write_text(json.dumps(self._export_with_photos()))
+        code, out, err = self.coach("pull", "--file", str(source))
+        self.assertEqual(code, 0, err)
+        self.assertIn("names 3 progress photos", out)
+        folder = self.home / "reviews" / out.strip().splitlines()[-1].rsplit("/", 1)[1]
+        self.assertFalse((folder / "photos").exists())
+
+
 class Stats(CoachTestCase):
     def test_stats_writes_json_and_markdown_and_diffs_against_the_previous_review(self):
         previous = fixture.export()

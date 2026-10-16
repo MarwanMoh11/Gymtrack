@@ -104,6 +104,10 @@ struct GymTrackApp: App {
         // After the watch link, which must be up first. The coach loop only
         // reads and writes its own files, so nothing above waits on it.
         configureCoach(container: container)
+
+        // A crash between a progress photo's file and its row leaves a picture
+        // of the lifter that no screen shows and nothing can delete.
+        CheckInRecords.sweepOrphans(context: ModelContext(container))
     }
 
     /// Brings up the coach loop: the inbox, and the snapshot the Mac pulls.

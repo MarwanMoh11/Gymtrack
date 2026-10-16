@@ -89,7 +89,7 @@ final class CoachSnapshot {
     /// sets and exercise notes are decided separately, because most of their
     /// saves are a live workout that is not exported until it finishes.
     private static let alwaysExported: Set<String> = [
-        "Plan", "PlanDay", "PlanItem", "BodyMetric", "BodyMeasurement", "CustomExerciseRecord",
+        "Plan", "PlanDay", "PlanItem", "BodyMetric", "BodyMeasurement", "ProgressPhoto", "CustomExerciseRecord",
         "ExerciseLoadPreference", "HiddenExerciseRecord", "FormVideoRecord", "MachineSetupRecord",
     ]
 

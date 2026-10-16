@@ -724,6 +724,57 @@ def tape_checkins(snapshot: dict) -> list[dict]:
     return rows
 
 
+# --- progress photos --------------------------------------------------------
+
+PHOTO_POSES = ("frontRelaxed", "side", "back", "frontLatSpread")
+
+
+def photo_files(snapshot: dict) -> list[dict]:
+    """Every progress photo the export names, oldest first, with the file name
+    a review keeps it under: `<local date>-<pose>.jpg`, and `-2`, `-3` for a
+    second of the same pose that day.
+
+    The export lists photos on their check-in (`bodyMeasurements[].photos`):
+    an id, a pose and when the shutter fired, never the image or anything read
+    off it. The image is `<id>.jpg` on the phone, which `coach pull` copies.
+    """
+    tz = _timezone(snapshot)
+    rows = []
+    for entry in snapshot.get("bodyMeasurements") or []:
+        for photo in (entry.get("photos") if isinstance(entry, dict) else None) or []:
+            try:
+                at = parse_time(photo["takenAt"])
+                photo_id = str(photo["id"])
+                pose = str(photo["pose"])
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+            rows.append({"id": photo_id, "pose": pose, "takenAt": photo["takenAt"], "at": at})
+    order = {pose: n for n, pose in enumerate(PHOTO_POSES)}
+    rows.sort(key=lambda row: (row["at"], order.get(row["pose"], len(order)), row["id"]))
+    used: set[str] = set()
+    out = []
+    for row in rows:
+        stem = f"{row['at'].astimezone(tz).date().isoformat()}-{re.sub(r'[^A-Za-z0-9]', '', row['pose']) or 'photo'}"
+        name, n = f"{stem}.jpg", 2
+        while name in used:
+            name, n = f"{stem}-{n}.jpg", n + 1
+        used.add(name)
+        out.append({"id": row["id"], "pose": row["pose"], "takenAt": row["takenAt"], "file": name})
+    return out
+
+
+def photos(snapshot: dict, pulled: set[str] | None = None) -> dict:
+    """The photos by pose, oldest first, each marked with whether the review
+    folder holds its file. Not metrics: a photo is looked at, never cited as
+    evidence or turned into a number."""
+    by_pose: dict = {}
+    for row in photo_files(snapshot):
+        entry = {"takenAt": row["takenAt"], "file": f"photos/{row['file']}",
+                 "pulled": pulled is not None and row["file"] in pulled}
+        by_pose.setdefault(row["pose"], []).append(entry)
+    return {"count": sum(len(rows) for rows in by_pose.values()), "byPose": by_pose}
+
+
 def tape(snapshot: dict, now: datetime, tz) -> dict:
     """Per part, the latest girth and how far it moved since the previous
     check-in that measured that part. A check-in that skipped the part is
@@ -903,7 +954,7 @@ def parse_profile(text: str | None) -> dict:
 
 def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None = None,
             proposals: dict | None = None, profile_text: str | None = None,
-            previous_exported_at: str | None = None) -> dict:
+            previous_exported_at: str | None = None, pulled_photos: set[str] | None = None) -> dict:
     proposals = proposals or {}
     tz = _timezone(snapshot)
     now = _now(snapshot)
@@ -1008,7 +1059,8 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
         "lastDecision": decision, "exercises": exercises,
         "muscles": muscles, "volumeWeeks": volume["weeks"], "adherence": adhere,
         "plannedVsDone": deviations, "recentSets": recent,
-        "body": body, "tape": girth, "notes": notes[:25], "profile": profile,
+        "body": body, "tape": girth, "photos": photos(snapshot, pulled_photos),
+        "notes": notes[:25], "profile": profile,
         **({"mergedInto": merged_ids(catalog)} if merged_ids(catalog) else {}),
     }
 
@@ -1099,6 +1151,27 @@ def _measurements_section(girth: dict) -> list[str]:
     days = girth["daysSinceLast"]
     out += ["", f"Last check-in {days} day{'s' if days != 1 else ''} before this export"
             + (", none in the last four weeks." if days > 28 else "."), ""]
+    return out
+
+
+def _photos_section(found: dict | None) -> list[str]:
+    out = ["## Progress photos", ""]
+    if not found or not found["count"]:
+        return out + ["No progress photos on the phone. Photos are the owner's to take; absence is not a miss.", ""]
+    out += ["From the owner's check-ins, oldest first, in `photos/` beside this file. Open them and compare each "
+            "pose's latest with the one before and the first. Read lightly: lighting, pump, time of day and posture "
+            "change a photo more than a month of training does. Never cite a photo as evidence or turn it into a "
+            "number.", ""]
+    missing = []
+    for pose in sorted(found["byPose"], key=lambda p: PHOTO_POSES.index(p) if p in PHOTO_POSES else len(PHOTO_POSES)):
+        rows = found["byPose"][pose]
+        shown = [f"{row['takenAt'][:10]} (`{row['file']}`)" for row in rows if row["pulled"]]
+        missing += [row["file"] for row in rows if not row["pulled"]]
+        if shown:
+            out.append(f"- {pose}: " + ", ".join(shown))
+    if missing:
+        out.append("- Not pulled (pull from the phone to get them): " + ", ".join(f"`{m}`" for m in missing))
+    out.append("")
     return out
 
 
@@ -1254,6 +1327,7 @@ def render_markdown(stats: dict) -> str:
         out += ["## Body weight", "", f"Latest {body['latestKg']} kg{change}. Performance can rise from bodyweight "
                 "gained as fat; read the two together.", ""]
     out += _measurements_section(stats["tape"])
+    out += _photos_section(stats.get("photos"))
 
     out += ["## Notes and tags (last 90 days, newest first)", ""]
     if not stats["notes"]:

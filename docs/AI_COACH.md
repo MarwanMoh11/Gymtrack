@@ -38,9 +38,10 @@ has one lifter, and everything here is sized for that.
 
 1. The lifter runs `/coach-review`. The Claude Code session that answers is
    "the coach".
-2. `coach pull` copies the app's snapshot and decisions off the phone with
-   `xcrun devicectl` into a new review folder. When the phone is out of reach,
-   `coach pull --file` takes a manual export instead.
+2. `coach pull` copies the app's snapshot, decisions and progress photos off
+   the phone with `xcrun devicectl` into a new review folder. When the phone is
+   out of reach, `coach pull --file` takes a manual export instead, which holds
+   no photos.
 3. `coach stats` computes the numbers the definitions below describe. Arithmetic
    belongs to code: in Google's evaluation of LLM agents over wearable data, a
    model reasoning over numbers in text answered 22% of objective numerical
@@ -51,8 +52,8 @@ has one lifter, and everything here is sized for that.
 4. The coach reads the stats and notes, first checking the outcome of every
    change applied since the last review (see "How we will know it helps"). It
    asks the lifter about anything the data cannot explain, may ask for this
-   month's tape measurements (skippable), and drafts at most three changes plus
-   any advice.
+   month's tape measurements (skippable), looks at the progress photos when
+   there are any, and drafts at most three changes plus any advice.
 5. `coach submit` validates the draft, then hands it to the reviewer, a separate
    process (next section), for two rounds. A change still disputed after round 2
    is flagged, and the coach decides whether to keep it and tells the lifter
@@ -152,16 +153,17 @@ On the phone, in the app's Documents directory:
 | `Documents/Coach/snapshot.json` | app | The full backup archive, the same bytes and format as Settings, "Export a backup" (`BackupService.Archive`, version 2). |
 | `Documents/Coach/decisions.json` | app | Decisions (below). |
 | `Documents/Coach/Inbox/proposal.json` | Mac, `coach push` | The proposal awaiting a decision. The app creates `Inbox/` at launch so the destination always exists. |
+| `Library/Application Support/ProgressPhotos/<id>.jpg` | app | One JPEG per progress photo, at most 1600 px on the long side, with no metadata. Not in `Documents`, which the app shares with the Files app. `coach pull` copies the ones the snapshot names into the review's `photos/` as `<local date>-<pose>.jpg`. |
 
 The app writes `snapshot.json` atomically, debounced, after any save that
 changes what the export carries (a finished workout, its sets, notes or late
-Health vitals, a plan, a weigh-in, a tape check-in, a custom exercise, a
+Health vitals, a plan, a weigh-in, a tape check-in or progress photo, a custom exercise, a
 machine, a load correction), when a proposal is applied or reverted, and once
 at every launch so a stale file cannot outlive the data it came from. While a
 workout is open, saves that touch only it, machine-setup changes and the launch
 write are all skipped, so the logging path stays clear; finishing or discarding
-the workout writes. Erase all data removes the snapshot, the decisions and any
-pushed proposal along with the records. `xcrun devicectl` reaches the container on
+the workout writes. Erase all data removes the snapshot, the decisions, any
+pushed proposal and the progress photos along with the records. `xcrun devicectl` reaches the container on
 development-signed builds, which is all a free Apple ID makes:
 
 ```
@@ -211,6 +213,15 @@ turn into false detail:
   not measured has no key, so a check-in that took only the waist has no
   `armCm`, not a zero. Read each part as its own series by date, and never carry
   a part's last value forward into a check-in that skipped it.
+- A check-in can also carry `photos`: one entry per progress photo, with its
+  `id`, its `pose` (`frontRelaxed`, `side`, `back` or `frontLatSpread`) and
+  `takenAt`, when the shutter fired, which can be later than a backdated
+  check-in's `date`. The key is absent when the check-in has no photos, and a
+  check-in can be photos alone, with no part keys at all. The image is never in
+  the file, and nothing is ever read off it and stored: the camera's pose
+  guidance is worked out live and thrown away. A photo deleted on the phone
+  leaves no entry and no file. A restore keeps a photo only where its file is
+  still on the phone, since a backup carries no images.
 - Notes carry the tags `pain`, `formBreakdown`, `substitution`, `feltStrong` and
   `feltFlat`. `hiddenExercises` are exercises the lifter trimmed because the gym
   lacks them, and are never proposed. Dates are UTC; `timeZone` gives the local day.
@@ -370,7 +381,9 @@ fat, so body-weight history is read beside it. A direct measure is optional and
 never on the phone: the coach may ask for this month's tape measurements (arm,
 chest, waist, thigh), which the lifter can skip. They stay in the review folder,
 weighed lightly because a tape is noisy, and a skipped month is absent, never
-carried forward. The waist tells lean gain from fat gain.
+carried forward. The waist tells lean gain from fat gain. Progress photos from
+the same check-ins are looked at, not measured: nothing is read off them as a
+number.
 
 ## Coaching policy
 
@@ -492,6 +505,17 @@ what is wanted, and a waist rising as fast as the rest says the weight is going
 on as fat, which is a prompt to look at food and total volume rather than at one
 change. A part with no reading is left out; the coach never fills the gap.
 
+**3. Progress photos, looked at and not measured.** A check-in can hold four
+photos (front relaxed, side, back, front lat spread), each taken with the last
+one of its pose laid over the camera so the framing repeats. They show what the
+tape cannot: whether the look the lifter trains for is changing. The coach opens
+each pose's latest beside the one before and the first, and says what it sees.
+Lighting, pump, time of day and posture change a photo more than a month of
+training, so a photo is read like the tape, as a direction across several
+check-ins, and never as a result on its own. It is never cited as `evidence`,
+no girth, body-fat figure or score is estimated from it, and the reviewer never
+sees it.
+
 Whether the reviewer earns its place is a separate question, answered over time
 from each review: how often it objected in round 1 (a reviewer that never
 objects does no work), how often the lifter accepted a change it endorsed, and
@@ -550,11 +574,21 @@ Decided on 2026-10-03, by the owner:
   were rejected earlier: they assume the watch is always worn and ask for daily
   discipline. Do not propose them again.
 
+Decided on 2026-10-16, by the owner:
+
+- Optional progress photos ride on the tape check-in, taken with the last photo
+  of the pose laid over the camera and advice on lining up that never blocks
+  the shutter. The images stay files on the phone; the export lists each one's
+  pose and time and nothing read off it. `coach pull` copies them for the coach
+  to look at, which sends images of the owner's body to the model provider
+  when the coach opens them; the owner approved that with the design.
+
 Still open:
 
 - Sending the export (training history, body weight, notes) to the model provider
   is implied by choosing Claude Code and has not been said outright. The reviewer
-  runs through the same provider, so it adds no new recipient.
+  runs through the same provider, so it adds no new recipient. Progress photos
+  were agreed outright (above).
 
 ## Where the code lives
 
@@ -567,7 +601,10 @@ Still open:
   validation against the live plan, the review screen, apply, undo, revert,
   and `decisions.json`. It never talks to a network.
 - `GymTrack/Services/BackupService.swift`: the export, with the optional `id` on
-  plans, days and slots.
+  plans, days and slots, and the photos on each check-in.
+- `GymTrack/Services/ProgressPhotoStore.swift`: the photo files and the rule
+  that a file lives exactly as long as its row. The camera, its pose guidance and
+  the comparison are in `GymTrack/Features/Progress/`.
 
 ## What research currently supports
 

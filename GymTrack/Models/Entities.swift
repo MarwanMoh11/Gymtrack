@@ -1281,6 +1281,9 @@ final class BodyMetric {
 ///
 /// Check-ins are never edited after the fact. A wrong one is deleted, and the
 /// row goes with nothing left behind.
+///
+/// A check-in can also hold progress photos, or only photos. One with neither
+/// a girth nor a photo records nothing and is never kept.
 @Model
 final class BodyMeasurement {
     var id: UUID = UUID()
@@ -1290,6 +1293,11 @@ final class BodyMeasurement {
     var shouldersCm: Double?
     var waistCm: Double?
     var thighCm: Double?
+    /// The photos taken at this check-in. Deleting the check-in deletes their
+    /// rows; their files go through `CheckInRecords`, which deletes them once
+    /// the save has gone through.
+    @Relationship(deleteRule: .cascade, inverse: \ProgressPhoto.checkIn)
+    var photos: [ProgressPhoto] = []
 
     init(date: Date = .now) {
         self.id = UUID()
@@ -1350,13 +1358,74 @@ final class BodyMeasurement {
         self[keyPath: part.keyPath] = cm
     }
 
-    /// A check-in with no part in it records nothing, so it is never kept.
+    /// True when at least one girth was measured.
     var hasAnyPart: Bool { Part.allCases.contains { value(for: $0) != nil } }
+
+    /// A check-in with no girth and no photo records nothing, so it is never kept.
+    var hasAnything: Bool { hasAnyPart || !photos.isEmpty }
 
     /// What a tape reading can plausibly be, in centimetres. A typed "380"
     /// for a 38 cm arm is a slip, and storing it would put a spike in the
     /// history the coach reads, so the check-in refuses what falls outside.
     static let plausibleCm: ClosedRange<Double> = 10...300
+}
+
+// MARK: - Progress photo
+
+/// One progress photo: which pose, and when the shutter fired.
+///
+/// The image is a file, never a blob in the store (`ProgressPhotoStore`, named
+/// by `id`). This row is what makes the file part of the record. A file with
+/// no row is a leftover that the launch sweep deletes, and deleting a row
+/// deletes its file.
+///
+/// Nothing measured from the image is ever stored here: the camera's pose
+/// guidance is worked out live and discarded, because a girth or a "match"
+/// guessed from a picture would read as something measured.
+@Model
+final class ProgressPhoto {
+    var id: UUID = UUID()
+    /// A `Pose` raw value.
+    var poseRaw: String = Pose.frontRelaxed.rawValue
+    /// When the shutter fired. A check-in's own date can be set earlier than
+    /// the day it is saved, and that date is not when the photo was taken.
+    var takenAt: Date = Date()
+    var checkIn: BodyMeasurement?
+
+    init(id: UUID = UUID(), pose: Pose, takenAt: Date) {
+        self.id = id
+        self.poseRaw = pose.rawValue
+        self.takenAt = takenAt
+    }
+
+    var pose: Pose? { Pose(rawValue: poseRaw) }
+
+    /// The four poses, in the order the check-in and the camera offer them.
+    /// The raw value is the name the export and the coach use, so it must not
+    /// be reworded.
+    enum Pose: String, CaseIterable, Identifiable, Sendable {
+        case frontRelaxed, side, back, frontLatSpread
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .frontRelaxed: "Front relaxed"
+            case .side: "Side"
+            case .back: "Back"
+            case .frontLatSpread: "Front lat spread"
+            }
+        }
+
+        var shortTitle: String {
+            switch self {
+            case .frontRelaxed: "Front"
+            case .side: "Side"
+            case .back: "Back"
+            case .frontLatSpread: "Lat spread"
+            }
+        }
+    }
 }
 
 // MARK: - Per-exercise load scale

@@ -38,6 +38,9 @@
 	     no longer sit together. -->
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- Asked only when a progress photo is first taken at a check-in. -->
+	<key>NSCameraUsageDescription</key>
+	<string>GymTrack uses the camera for the progress photos you take at a check-in, and shows your last photo over the view so the new one lines up.</string>
 	<!-- Health. Reading covers heart rate and energy for a session, plus body
 	     weight; writing puts finished sessions in Health as strength workouts. -->
 	<key>NSHealthShareUsageDescription</key>

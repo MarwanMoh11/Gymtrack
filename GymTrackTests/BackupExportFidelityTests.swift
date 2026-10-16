@@ -161,6 +161,51 @@ struct BackupExportFidelityTests {
         #expect(!String(decoding: empty, as: UTF8.self).contains("bodyMeasurements"))
     }
 
+    // MARK: - Progress photos
+
+    /// A photo is written as its pose and the moment it was taken, on its
+    /// check-in, never the image or anything read off it; a check-in can be
+    /// photos alone, and one with none has no `photos` key.
+    @Test func photosAreWrittenOnTheirCheckInAsPoseAndTimeOnly() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let uuid = PersistenceFixtures.uuid
+        let context = try TestStore.context()
+        let both = BodyMeasurement(date: base)
+        both.id = uuid(0x711)
+        both.set(84, for: .waist)
+        let photosOnly = BodyMeasurement(date: base.addingTimeInterval(60))
+        photosOnly.id = uuid(0x712)
+        let tapeOnly = BodyMeasurement(date: base.addingTimeInterval(120))
+        tapeOnly.id = uuid(0x713)
+        tapeOnly.set(37, for: .arm)
+        for check in [both, photosOnly, tapeOnly] { context.insert(check) }
+        let rows: [(BodyMeasurement, ProgressPhoto.Pose, Int)] = [
+            (both, .back, 0x721), (both, .frontRelaxed, 0x722), (photosOnly, .side, 0x723),
+        ]
+        for (check, pose, n) in rows {
+            let photo = ProgressPhoto(id: uuid(n), pose: pose, takenAt: base.addingTimeInterval(Double(n)))
+            context.insert(photo)
+            photo.checkIn = check
+        }
+        try context.save()
+
+        let data = try BackupService.exportData(context: context, stamp: stamp)
+
+        let checks = try #require(PersistenceFixtures.object(data)["bodyMeasurements"] as? [[String: Any]])
+        let expected: [Set<String>] = [["id", "date", "waistCm", "photos"], ["id", "date", "photos"],
+                                       ["id", "date", "armCm"]]
+        #expect(checks.map { Set($0.keys) } == expected)
+        let photos = try #require(checks.first?["photos"] as? [[String: Any]])
+        #expect(photos.map { $0["pose"] as? String } == ["frontRelaxed", "back"], "photos are in pose order")
+        #expect(photos.allSatisfy { Set($0.keys) == ["id", "pose", "takenAt"] })
+        #expect(photos.first?["id"] as? String == uuid(0x722).uuidString)
+
+        let archive = try BackupService.decodedArchive(from: data)
+        #expect(archive.bodyMeasurements?[1].photos?.first?.takenAt == base.addingTimeInterval(Double(0x723)))
+        #expect(!String(decoding: data, as: UTF8.self).contains("null"))
+    }
+
     // MARK: - What a reader can cite
 
     @Test func everySetCarriesItsStoredIDAndOnlyAPlannedSessionItsDay() throws {

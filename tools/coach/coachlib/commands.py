@@ -77,11 +77,43 @@ def _check_snapshot(path: Path) -> None:
              "them and export again.")
 
 
+def _pull_photos(phone: str, wanted: list[dict], target: Path) -> str:
+    """Copies the photos the snapshot names into `target`, under their review
+    names. The whole folder comes in one devicectl call; a photo it did not
+    bring is asked for on its own. A photo still missing is reported, not
+    fatal: the tape and the lifts are still worth reviewing."""
+    raw = target.parent / "photos-raw"
+    raw.mkdir()
+    # A destination that does not exist yet, so the folder lands the same way
+    # whether devicectl copies a folder's contents or the folder itself.
+    device.copy_from(phone, device.PHOTOS_PATH, raw / "ProgressPhotos")
+    found = {path.name.upper(): path for path in raw.rglob("*") if path.is_file()}
+    target.mkdir()
+    missing = []
+    for photo in wanted:
+        name = f"{photo['id'].upper()}.jpg"
+        source = found.get(name)
+        if source is None:
+            single = raw / name
+            if device.copy_from(phone, f"{device.PHOTOS_PATH}/{name}", single) is None:
+                source = single
+        if source is None:
+            missing.append(photo["file"])
+            continue
+        shutil.copyfile(source, target / photo["file"])
+    pulled = len(wanted) - len(missing)
+    note = f"Pulled {pulled} progress photo{'s' if pulled != 1 else ''} into photos/."
+    if missing:
+        note += " Not on the phone: " + ", ".join(missing) + "."
+    return note
+
+
 def pull(file: str | None = None, home: Path | None = None) -> int:
     home = home or coach_home()
     with tempfile.TemporaryDirectory(prefix="coach-pull-") as scratch:
         scratch = Path(scratch)
         decisions_note = None
+        photos_note = None
         if file:
             source = Path(file).expanduser()
             if not source.is_file():
@@ -97,12 +129,22 @@ def pull(file: str | None = None, home: Path | None = None) -> int:
             if device.copy_from(phone, device.DECISIONS_PATH, scratch / "decisions.json"):
                 decisions_note = "No decisions.json on the phone yet (nothing has been proposed and decided)."
         _check_snapshot(scratch / "snapshot.json")
+        wanted = stats_mod.photo_files(read_json(scratch / "snapshot.json"))
+        if wanted and file:
+            photos_note = (f"This export names {len(wanted)} progress photo{'s' if len(wanted) != 1 else ''}; a "
+                           "backup file holds no images, so pull from the phone to see them.")
+        elif wanted:
+            photos_note = _pull_photos(phone, wanted, scratch / "photos")
         folder = new_review_folder(home)
         for name in ("snapshot.json", "decisions.json"):
             if (scratch / name).exists():
                 shutil.copyfile(scratch / name, folder / name)
+        if (scratch / "photos").exists():
+            shutil.copytree(scratch / "photos", folder / "photos")
     if decisions_note:
         _say(decisions_note)
+    if photos_note:
+        _say(photos_note)
     _say(str(folder))
     return 0
 
@@ -144,9 +186,11 @@ def compute_stats(folder: Path, home: Path) -> dict:
     previous = read_json(previous_folder / "snapshot.json") if previous_folder else None
     profile_path = home / "profile.md"
     profile = profile_path.read_text(encoding="utf-8") if profile_path.exists() else None
+    photos_dir = folder / "photos"
+    pulled = {path.name for path in photos_dir.iterdir() if path.is_file()} if photos_dir.is_dir() else set()
     return stats_mod.compute(
         snapshot, decisions=decisions, previous=previous, proposals=_proposal_index(home), profile_text=profile,
-        previous_exported_at=(previous or {}).get("exportedAt"))
+        previous_exported_at=(previous or {}).get("exportedAt"), pulled_photos=pulled)
 
 
 def stats(arg: str | None = None, home: Path | None = None) -> int:

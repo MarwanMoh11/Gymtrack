@@ -18,6 +18,9 @@ BUNDLE_ID = "com.marwanmohamed.gymtrack"
 SNAPSHOT_PATH = "Documents/Coach/snapshot.json"
 DECISIONS_PATH = "Documents/Coach/decisions.json"
 INBOX_PATH = "Documents/Coach/Inbox/proposal.json"
+# Progress photos, `<id>.jpg` each. Not in Documents, which the app shares
+# with the Files app.
+PHOTOS_PATH = "Library/Application Support/ProgressPhotos"
 TIMEOUT = 120
 
 NOT_REACHABLE = ("The phone is not reachable (unlock it and connect it by cable or on the same Wi-Fi, "

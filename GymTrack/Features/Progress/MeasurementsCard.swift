@@ -12,12 +12,17 @@ import SwiftData
 /// A wrong check-in is deleted from the history sheet and leaves nothing
 /// behind. It is never edited, because an edited reading would claim a
 /// measurement that was never taken.
+///
+/// Progress photos are taken in the same check-in, and only there. Until the
+/// first one exists the card shows nothing of them.
 struct MeasurementsCard: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \BodyMeasurement.date, order: .reverse) private var checkIns: [BodyMeasurement]
+    @Query private var photos: [ProgressPhoto]
 
     @State private var isCheckingIn = false
     @State private var isReviewing = false
+    @State private var isComparing = false
     @State private var settings = AppSettings.shared
 
     private var unit: WeightUnit { settings.weightUnit }
@@ -36,10 +41,13 @@ struct MeasurementsCard: View {
             content.gtCard()
         }
         .sheet(isPresented: $isCheckingIn) {
-            MeasurementCheckInSheet { date, parts in try record(parts, on: date) }
+            MeasurementCheckInSheet { date, parts, photos in try record(parts, photos: photos, on: date) }
         }
         .sheet(isPresented: $isReviewing) {
             PastCheckInsSheet { delete($0) }
+        }
+        .sheet(isPresented: $isComparing) {
+            ProgressPhotosSheet()
         }
     }
 
@@ -48,13 +56,41 @@ struct MeasurementsCard: View {
     @ViewBuilder
     private var content: some View {
         if readings.isEmpty {
-            emptyLine
+            VStack(alignment: .leading, spacing: 12) {
+                emptyLine
+                if !photos.isEmpty { photosRow }
+            }
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(readings) { reading in row(reading) }
+                if !photos.isEmpty { photosRow }
                 checkInButton
             }
         }
+    }
+
+    private var photosRow: some View {
+        Button {
+            Haptics.tick()
+            isComparing = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "photo.on.rectangle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text("Progress photos")
+                    .font(Theme.rounded(15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 0)
+                Text("\(photos.count)")
+                    .font(Theme.rounded(13, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                DisclosureChevron()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("measurements.photos")
     }
 
     private var emptyLine: some View {
@@ -118,30 +154,19 @@ struct MeasurementsCard: View {
 
     /// Only the parts that were measured arrive here, so a blank field has
     /// nothing to store and a skipped part keeps no value.
-    private func record(_ parts: [BodyMeasurement.Part: Double], on date: Date) throws {
-        let check = BodyMeasurement(date: date)
-        for (part, cm) in parts { check.set(cm, for: part) }
-        guard check.hasAnyPart else { return }
-        context.insert(check)
-        do {
-            try context.save()
-        } catch {
-            context.rollback()
-            throw error
-        }
+    private func record(_ parts: [BodyMeasurement.Part: Double], photos: [PendingPhoto], on date: Date) throws {
+        guard try CheckInRecords.record(parts, photos: photos, on: date, context: context) != nil else { return }
         Haptics.success()
     }
 
-    /// A hard delete: a mis-taken or mistyped check-in is not data, and a
-    /// copy left anywhere would still reach the coach.
+    /// A hard delete, photos and all: a mis-taken or mistyped check-in is not
+    /// data, and a copy left anywhere would still reach the coach.
     private func delete(_ check: BodyMeasurement) {
-        context.delete(check)
         do {
-            try context.save()
+            try CheckInRecords.delete(check, context: context)
         } catch {
             // The row stays on screen, which says plainly that it wasn't
             // deleted; there is nothing else to tell.
-            context.rollback()
             return
         }
         Haptics.tick()
@@ -204,8 +229,12 @@ private struct PastCheckInsSheet: View {
     }
 
     private func summary(of check: BodyMeasurement) -> String {
-        let measured = BodyMeasurement.Part.allCases.compactMap { part in
+        var measured = BodyMeasurement.Part.allCases.compactMap { part in
             check.value(for: part).map { "\(part.title) \(MeasurementTrend.length($0, unit: unit))" }
+        }
+        let poses = ProgressPhoto.Pose.allCases.filter { pose in check.photos.contains { $0.pose == pose } }
+        if !poses.isEmpty {
+            measured.append("Photos: " + poses.map(\.shortTitle).joined(separator: ", "))
         }
         return measured.joined(separator: " · ")
     }
@@ -213,19 +242,27 @@ private struct PastCheckInsSheet: View {
 
 // MARK: - Check-in sheet
 
-/// The check-in: a date and up to five girths, each optional. Save waits for
-/// at least one, and a blank field stores nothing.
+/// The check-in: a date, up to five girths and up to four photos, each
+/// optional. Save waits for at least one girth or photo, and a blank field
+/// stores nothing.
 ///
 /// Each field says where the tape goes, because a girth only means something
 /// against the last one if it was taken the same way. Fields are text rather
 /// than steppers: these are values read off a tape, not a load to nudge, and
 /// a stepper would start every field at a number nobody measured.
+///
+/// A photo is on disk from the moment it is taken, so one that is not saved
+/// with the check-in is deleted, whether the sheet is cancelled or swiped
+/// away (`PendingPhotos`).
 private struct MeasurementCheckInSheet: View {
-    let onSave: (Date, [BodyMeasurement.Part: Double]) throws -> Void
+    let onSave: (Date, [BodyMeasurement.Part: Double], [PendingPhoto]) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \ProgressPhoto.takenAt) private var savedPhotos: [ProgressPhoto]
     @State private var date: Date = .now
     @State private var texts: [BodyMeasurement.Part: String] = [:]
+    @State private var pending = PendingPhotos()
+    @State private var cameraPose: ProgressPhoto.Pose?
     @State private var settings = AppSettings.shared
     @State private var saveError: String?
     @FocusState private var focused: BodyMeasurement.Part?
@@ -251,7 +288,17 @@ private struct MeasurementCheckInSheet: View {
         BodyMeasurement.Part.allCases.contains { entry($0) == .invalid }
     }
 
-    private var canSave: Bool { !measured.isEmpty && !hasInvalidField }
+    private var canSave: Bool { (!measured.isEmpty || !pending.isEmpty) && !hasInvalidField }
+
+    /// The newest saved photo of each pose, which the camera lays over the
+    /// preview so the new one lines up with it.
+    private var references: [ProgressPhoto.Pose: URL] {
+        var latest: [ProgressPhoto.Pose: URL] = [:]
+        for photo in savedPhotos {
+            if let pose = photo.pose { latest[pose] = ProgressPhotoStore.shared.url(for: photo.id) }
+        }
+        return latest
+    }
 
     var body: some View {
         NavigationStack {
@@ -271,6 +318,15 @@ private struct MeasurementCheckInSheet: View {
                     Text("Fill in only what you measured.")
                 }
                 .listRowBackground(Theme.surface)
+
+                Section {
+                    photoTiles
+                } header: {
+                    Text("Photos")
+                } footer: {
+                    Text("Optional. Each one lines up with your last photo in the same pose.")
+                }
+                .listRowBackground(Theme.surface)
             }
             .scrollContentBackground(.hidden)
             .gtScreenBackground()
@@ -278,8 +334,11 @@ private struct MeasurementCheckInSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(Theme.textSecondary)
+                    Button("Cancel") {
+                        pending.discard()
+                        dismiss()
+                    }
+                    .foregroundStyle(Theme.textSecondary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { save() }
@@ -293,6 +352,9 @@ private struct MeasurementCheckInSheet: View {
             }
         }
         .gtSheetBackground()
+        .fullScreenCover(item: $cameraPose) { pose in
+            ProgressCameraView(startingAt: pose, pending: pending, references: references)
+        }
         .alert("Couldn't save check-in", isPresented: Binding(
             get: { saveError != nil },
             set: { if !$0 { saveError = nil } }
@@ -336,9 +398,54 @@ private struct MeasurementCheckInSheet: View {
         .padding(.vertical, 2)
     }
 
+    /// One tile per pose: the photo taken in this sheet, or a camera to take it.
+    private var photoTiles: some View {
+        HStack(spacing: 8) {
+            ForEach(ProgressPhoto.Pose.allCases) { pose in
+                Button {
+                    Haptics.tick()
+                    focused = nil
+                    cameraPose = pose
+                } label: {
+                    VStack(spacing: 6) {
+                        tile(for: pose)
+                            .aspectRatio(3 / 4, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        Text(pose.shortTitle)
+                            .font(Theme.rounded(11, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(pending.byPose[pose] == nil ? "Take \(pose.title) photo" : "Retake \(pose.title) photo")
+                .accessibilityIdentifier("checkIn.photo.\(pose.rawValue)")
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func tile(for pose: ProgressPhoto.Pose) -> some View {
+        if let photo = pending.byPose[pose] {
+            PhotoImage(url: ProgressPhotoStore.shared.url(for: photo.id), thumbnail: CGSize(width: 180, height: 240))
+        } else {
+            Rectangle()
+                .fill(Theme.surfaceRaised)
+                .overlay {
+                    Image(systemName: "camera")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+        }
+    }
+
     private func save() {
         do {
-            try onSave(date, measured)
+            try onSave(date, measured, pending.all)
+            pending.commit()
             dismiss()
         } catch {
             saveError = error.localizedDescription

@@ -40,6 +40,13 @@ enum SettingsKey {
     /// Whether the watch reads its own movement for a set nobody started or
     /// logged, and offers to log it.
     static let watchMotionSets = "settings.watchMotionSets"
+
+    // Progress photos
+    /// The camera the last progress photo was taken with, so a phone propped
+    /// the same way every month opens on the same lens.
+    static let progressCameraFront = "settings.progressCameraFront"
+    /// Whether the progress camera waits ten seconds before taking the photo.
+    static let progressCameraTimer = "settings.progressCameraTimer"
 }
 
 /// When the phone is kept from locking.

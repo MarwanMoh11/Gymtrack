@@ -59,6 +59,11 @@ a proxy: reps can rise from skill or from bodyweight gained as fat. Read body
 weight beside it. Tape measurements come from the owner's check-ins on the
 phone's Progress tab; they are noisy and weighed lightly, and the waist tells
 lean gain from fat gain. A skipped month is absent, never carried forward.
+Progress photos from the same check-ins show what neither number can: whether
+the look is moving. Lighting, pump, time of day and posture change a photo
+more than a month of training does, so they are read like the tape, lightly
+and as a direction across several check-ins. A photo is never `evidence` and
+is never turned into a number (no girth, body fat or score read off it).
 
 ## The intervention ladder
 

@@ -294,7 +294,7 @@ struct SettingsView: View {
                 Button("Choose a backup", role: .destructive) { showingImporter = true }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Every routine, session and record on this device is replaced by the backup's, and sessions the backup doesn't have are deleted. Workouts in Apple Health are left as they are.")
+                Text("Every routine, session and record on this device is replaced by the backup's, and sessions the backup doesn't have are deleted. Backups hold no images, so progress photos stay only for check-ins the backup lists. Workouts in Apple Health are left as they are.")
             }
             // Removing from Health is its own button, never a side effect of
             // erasing: it reaches every device on the account, and the backup
@@ -327,7 +327,7 @@ struct SettingsView: View {
     }
 
     private var wipeMessage: String {
-        let local = "Every routine, session and record on this device is deleted. Export a backup first if you might want it back."
+        let local = "Every routine, session, record and progress photo on this device is deleted. Export a backup first if you might want it back; it holds no photos."
         guard linkedHealthWorkouts > 0 else { return local }
         return local + "\n\n\"Erase all data\" keeps the workouts GymTrack saved to Apple Health. Removing them from Health as well deletes them on every device that shares your Health data through iCloud, and no backup can bring them back."
     }

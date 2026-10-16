@@ -415,6 +415,21 @@ enum BackupService {
         var shouldersCm: Double?
         var waistCm: Double?
         var thighCm: Double?
+        /// The progress photos taken at this check-in, absent when there are
+        /// none. A check-in can hold photos and no girth, and then has no part
+        /// keys at all. Optional like the rest.
+        var photos: [ProgressPhotoDTO]?
+    }
+
+    /// One progress photo, without the image: the file stays on the phone,
+    /// named `<id>.jpg` in `Library/Application Support/ProgressPhotos`, where
+    /// the coach's pull finds it. `pose` is a `ProgressPhoto.Pose` raw value,
+    /// and `takenAt` is when the shutter fired. Nothing worked out from the
+    /// picture is written, because nothing is stored.
+    struct ProgressPhotoDTO: Codable {
+        var id: UUID
+        var pose: String
+        var takenAt: Date
     }
 
     /// A replacement link that travels with the lifter's backup.
@@ -755,13 +770,24 @@ enum BackupService {
     }
 
     /// Nil for no check-ins, so the key is left out of the file. A check-in
-    /// with no part measured can't exist through the app, but one that did
-    /// would only be a date with nothing on it, so it is left out too.
+    /// with neither a part nor a photo can't exist through the app, but one
+    /// that did would only be a date with nothing on it, so it is left out too.
     private static func measurementDTOs(_ rows: [BodyMeasurement]) -> [BodyMeasurementDTO]? {
-        let dtos = rows.filter(\.hasAnyPart).map {
+        let dtos = rows.filter(\.hasAnything).map {
             BodyMeasurementDTO(id: $0.id, date: $0.date, armCm: $0.armCm, chestCm: $0.chestCm,
-                               shouldersCm: $0.shouldersCm, waistCm: $0.waistCm, thighCm: $0.thighCm)
+                               shouldersCm: $0.shouldersCm, waistCm: $0.waistCm, thighCm: $0.thighCm,
+                               photos: photoDTOs($0.photos))
         }
+        return dtos.isEmpty ? nil : dtos
+    }
+
+    /// In pose order, then by time, so an unchanged store writes the same bytes.
+    private static func photoDTOs(_ photos: [ProgressPhoto]) -> [ProgressPhotoDTO]? {
+        let order = Dictionary(uniqueKeysWithValues: ProgressPhoto.Pose.allCases.enumerated().map { ($1.rawValue, $0) })
+        let dtos = photos
+            .sorted { (order[$0.poseRaw] ?? .max, $0.takenAt, $0.id.uuidString)
+                    < (order[$1.poseRaw] ?? .max, $1.takenAt, $1.id.uuidString) }
+            .map { ProgressPhotoDTO(id: $0.id, pose: $0.poseRaw, takenAt: $0.takenAt) }
         return dtos.isEmpty ? nil : dtos
     }
 
@@ -1151,19 +1177,21 @@ enum BackupService {
     /// every device on the account and nothing brings it back, which is not
     /// something to do as a side effect of picking a file.
     @MainActor
-    static func restore(from url: URL, context: ModelContext, beforeCommit: () throws -> Void = {}) throws {
+    static func restore(from url: URL, context: ModelContext, photos: ProgressPhotoStore = .shared,
+                        beforeCommit: () throws -> Void = {}) throws {
         let needsScope = url.startAccessingSecurityScopedResource()
         defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
         let data = try Data(contentsOf: url)
-        try restore(data: data, context: context, beforeCommit: beforeCommit)
+        try restore(data: data, context: context, photos: photos, beforeCommit: beforeCommit)
     }
 
     /// The importer reads the security-scoped file while its callback is live,
     /// then hands these bytes to the restore.
     @MainActor
-    static func restore(data: Data, context: ModelContext, beforeCommit: () throws -> Void = {}) throws {
+    static func restore(data: Data, context: ModelContext, photos: ProgressPhotoStore = .shared,
+                        beforeCommit: () throws -> Void = {}) throws {
         try requireNoOpenWorkout(context)
-        try apply(try decodedArchive(from: data), context: context, beforeCommit: beforeCommit)
+        try apply(try decodedArchive(from: data), context: context, photos: photos, beforeCommit: beforeCommit)
     }
 
     /// `restore(from:)` with the reading, decoding and validating moved off
@@ -1187,7 +1215,7 @@ enum BackupService {
     ///
     /// `progress` runs on the main actor with a fraction from 0 to 1.
     @MainActor
-    static func restoreOffMain(from url: URL, context: ModelContext,
+    static func restoreOffMain(from url: URL, context: ModelContext, photos: ProgressPhotoStore = .shared,
                                beforeCommit: () throws -> Void = {},
                                sliceMilliseconds: Double = Pacer.restoreSliceMilliseconds,
                                progress: @escaping @MainActor (Double) -> Void = { _ in }) async throws {
@@ -1197,13 +1225,13 @@ enum BackupService {
             defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
             return try decodedArchive(from: try Data(contentsOf: url))
         }.value
-        try await applyPaced(archive, context: context, beforeCommit: beforeCommit,
+        try await applyPaced(archive, context: context, photos: photos, beforeCommit: beforeCommit,
                              sliceMilliseconds: sliceMilliseconds, progress: progress)
     }
 
     /// The same, for bytes already in memory.
     @MainActor
-    static func restoreOffMain(data: Data, context: ModelContext,
+    static func restoreOffMain(data: Data, context: ModelContext, photos: ProgressPhotoStore = .shared,
                                beforeCommit: () throws -> Void = {},
                                sliceMilliseconds: Double = Pacer.restoreSliceMilliseconds,
                                progress: @escaping @MainActor (Double) -> Void = { _ in }) async throws {
@@ -1211,7 +1239,7 @@ enum BackupService {
         let archive = try await Task.detached(priority: .userInitiated) {
             try decodedArchive(from: data)
         }.value
-        try await applyPaced(archive, context: context, beforeCommit: beforeCommit,
+        try await applyPaced(archive, context: context, photos: photos, beforeCommit: beforeCommit,
                              sliceMilliseconds: sliceMilliseconds, progress: progress)
     }
 
@@ -1237,10 +1265,10 @@ enum BackupService {
 
     /// The wipe and the inserts on the main context.
     @MainActor
-    private static func apply(_ archive: Archive, context: ModelContext,
+    private static func apply(_ archive: Archive, context: ModelContext, photos: ProgressPhotoStore,
                               beforeCommit: () throws -> Void) throws {
-        try applyStore(archive, context: context, beforeCommit: beforeCommit)
-        finishRestore(archive, context: context)
+        try applyStore(archive, context: context, photos: photos, beforeCommit: beforeCommit)
+        finishRestore(archive, context: context, photos: photos)
     }
 
     /// True while a paced restore is between its first delete and its save.
@@ -1250,7 +1278,7 @@ enum BackupService {
     /// session deleted, one for each restored and one for the save, since the
     /// sessions are where the time goes.
     @MainActor
-    private static func applyPaced(_ archive: Archive, context: ModelContext,
+    private static func applyPaced(_ archive: Archive, context: ModelContext, photos: ProgressPhotoStore,
                                    beforeCommit: () throws -> Void, sliceMilliseconds: Double,
                                    progress: @escaping @MainActor (Double) -> Void) async throws {
         guard !pacedRestoreRunning else { throw RestoreError.alreadyRunning }
@@ -1279,7 +1307,7 @@ enum BackupService {
                 insertSession(dto, keepingLinks: links, context: context)
                 await pacer.pauseIfDue(fraction: Double(oldSessions + n + 1) / total)
             }
-            insertRemainder(archive, keepingBodyLinks: bodyLinks, context: context)
+            insertRemainder(archive, keepingBodyLinks: bodyLinks, photos: photos, context: context)
 
             try beforeCommit()
             progress((total - 1) / total)
@@ -1288,7 +1316,7 @@ enum BackupService {
             context.rollback()
             throw error
         }
-        finishRestore(archive, context: context)
+        finishRestore(archive, context: context, photos: photos)
         progress(1)
     }
 
@@ -1297,7 +1325,7 @@ enum BackupService {
     /// would be deleted from under the logger. Then the wipe and the inserts,
     /// under one save; a failure rolls the lot back.
     @MainActor
-    private static func applyStore(_ archive: Archive, context: ModelContext,
+    private static func applyStore(_ archive: Archive, context: ModelContext, photos: ProgressPhotoStore,
                                    beforeCommit: () throws -> Void) throws {
         try requireNoOpenWorkout(context)
         do {
@@ -1305,7 +1333,7 @@ enum BackupService {
             let localLinks = try deleteStoredRecords(context: context)
 
             insertArchive(archive, keepingLinks: linksBySession(localLinks), keepingBodyLinks: bodyLinks,
-                          context: context)
+                          photos: photos, context: context)
 
             try beforeCommit()
             try context.save()
@@ -1318,7 +1346,7 @@ enum BackupService {
     /// What follows a committed restore, and needs the main actor: the
     /// settings the file carries and the caches built from the store.
     @MainActor
-    private static func finishRestore(_ archive: Archive, context: ModelContext) {
+    private static func finishRestore(_ archive: Archive, context: ModelContext, photos: ProgressPhotoStore) {
         AppSettings.shared.weightUnit = WeightUnit(rawValue: archive.settings.weightUnit) ?? .kg
         AppSettings.shared.userName = archive.settings.userName
         AppSettings.shared.defaultRestSeconds = archive.settings.defaultRestSeconds
@@ -1331,6 +1359,9 @@ enum BackupService {
         // the library listing the ones just wiped and missing the ones just
         // restored, and their sets resolving to nothing, until a relaunch.
         context.refreshCustomExercises()
+        // The backup holds no images, so a photo file it does not name, or
+        // whose check-in it dropped, has no record left and is deleted.
+        CheckInRecords.sweepOrphans(context: context, store: photos)
     }
 
     /// A session's link to its Health workout, remembered across the wipe so a
@@ -1534,10 +1565,11 @@ enum BackupService {
     }
 
     private static func insertArchive(_ archive: Archive, keepingLinks localLinks: [UUID: UUID],
-                                      keepingBodyLinks bodyLinks: [UUID: UUID], context: ModelContext) {
+                                      keepingBodyLinks bodyLinks: [UUID: UUID], photos: ProgressPhotoStore,
+                                      context: ModelContext) {
         insertExercisesAndPlans(archive, context: context)
         for dto in archive.sessions { insertSession(dto, keepingLinks: localLinks, context: context) }
-        insertRemainder(archive, keepingBodyLinks: bodyLinks, context: context)
+        insertRemainder(archive, keepingBodyLinks: bodyLinks, photos: photos, context: context)
     }
 
     /// The user's own exercises and the plans, the small part of a restore.
@@ -1711,7 +1743,7 @@ enum BackupService {
 
     /// Body weights, tape measurements, load corrections and hidden exercises.
     private static func insertRemainder(_ archive: Archive, keepingBodyLinks bodyLinks: [UUID: UUID],
-                                        context: ModelContext) {
+                                        photos: ProgressPhotoStore, context: ModelContext) {
         for dto in archive.bodyMetrics ?? [] {
             let metric = BodyMetric(date: dto.date, weightKg: dto.weightKg)
             metric.id = dto.id
@@ -1723,6 +1755,7 @@ enum BackupService {
             context.insert(metric)
         }
 
+        var restoredPhotos: Set<UUID> = []
         for dto in archive.bodyMeasurements ?? [] {
             let check = BodyMeasurement(date: dto.date)
             check.id = dto.id
@@ -1731,8 +1764,22 @@ enum BackupService {
             check.set(dto.shouldersCm, for: .shoulders)
             check.set(dto.waistCm, for: .waist)
             check.set(dto.thighCm, for: .thigh)
+            // A backup carries no images, so a photo comes back only where its
+            // file is still on this phone; a row for a file that isn't here
+            // would name a picture nobody can see. A pose this build doesn't
+            // know is left out rather than guessed.
+            let kept = (dto.photos ?? []).compactMap { photo -> ProgressPhoto? in
+                guard let pose = ProgressPhoto.Pose(rawValue: photo.pose), photos.contains(photo.id),
+                      restoredPhotos.insert(photo.id).inserted else { return nil }
+                return ProgressPhoto(id: photo.id, pose: pose, takenAt: photo.takenAt)
+            }
             // An empty one is dropped for the reason export drops it.
-            if check.hasAnyPart { context.insert(check) }
+            guard check.hasAnyPart || !kept.isEmpty else { continue }
+            context.insert(check)
+            for photo in kept {
+                context.insert(photo)
+                photo.checkIn = check
+            }
         }
 
         for dto in archive.loadScales ?? [] {
@@ -1787,6 +1834,7 @@ enum BackupService {
         context: ModelContext,
         coachInbox: CoachInbox = .shared,
         coachSnapshot: CoachSnapshot = .shared,
+        photos: ProgressPhotoStore = .shared,
         removingHealthWorkouts: Bool = false,
         deletingHealthWorkout: ((UUID) async -> Bool)? = nil,
         deletingHealthWorkouts: (([UUID]) async -> [UUID])? = nil,
@@ -1819,6 +1867,7 @@ enum BackupService {
         // about to go, so that write is dropped too.
         await coachSnapshot.cancelWrites()
         coachInbox.erase()
+        photos.deleteAll()
         LoadScaleBook.shared.reload()
         ExerciseVisibility.reload(context: context)
         context.refreshCustomExercises()
@@ -1871,6 +1920,7 @@ enum BackupService {
         for note in try context.fetch(FetchDescriptor<ExerciseNote>()) { context.delete(note) }
         for session in sessions { context.delete(session) }
         for metric in try context.fetch(FetchDescriptor<BodyMetric>()) { context.delete(metric) }
+        for photo in try context.fetch(FetchDescriptor<ProgressPhoto>()) { context.delete(photo) }
         for check in try context.fetch(FetchDescriptor<BodyMeasurement>()) { context.delete(check) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }
@@ -1914,6 +1964,7 @@ enum BackupService {
             context.delete(metric)
             await pacer.pauseIfDue(fraction: deleted)
         }
+        for photo in try context.fetch(FetchDescriptor<ProgressPhoto>()) { context.delete(photo) }
         for check in try context.fetch(FetchDescriptor<BodyMeasurement>()) { context.delete(check) }
         for record in try context.fetch(FetchDescriptor<CustomExerciseRecord>()) { context.delete(record) }
         for scale in try context.fetch(FetchDescriptor<ExerciseLoadPreference>()) { context.delete(scale) }

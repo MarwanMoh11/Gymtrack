@@ -809,6 +809,112 @@ struct BackupRestoreTests {
         #expect(try context.fetchCount(FetchDescriptor<WorkoutSession>()) == 0)
     }
 
+    // MARK: - Progress photos
+
+    /// A folder of its own per test, so no test reads another's photos.
+    private func photoFolder() -> ProgressPhotoStore {
+        ProgressPhotoStore(directory: FileManager.default.temporaryDirectory
+            .appending(path: "BackupRestoreTests-\(UUID().uuidString)"))
+    }
+
+    /// A backup carries no images, so a photo comes back only where its file
+    /// is still on this phone, a check-in left with nothing is dropped, and a
+    /// file the restored check-ins don't name is deleted.
+    @Test func aRestoreKeepsOnlyThePhotosWhoseFilesAreOnThisPhone() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let uuid = PersistenceFixtures.uuid
+        let store = photoFolder()
+        defer { store.deleteAll() }
+        let source = try TestStore.context()
+        let base = TestClock.at("2026-03-05T07:35:00")
+        let withTape = BodyMeasurement(date: base)
+        withTape.id = uuid(0x501)
+        withTape.set(84, for: .waist)
+        let photosOnlyKept = BodyMeasurement(date: base.addingTimeInterval(60))
+        photosOnlyKept.id = uuid(0x502)
+        let photosOnlyLost = BodyMeasurement(date: base.addingTimeInterval(120))
+        photosOnlyLost.id = uuid(0x503)
+        for check in [withTape, photosOnlyKept, photosOnlyLost] { source.insert(check) }
+        let rows: [(BodyMeasurement, ProgressPhoto.Pose, Int)] = [
+            (withTape, .frontRelaxed, 0x511), (withTape, .back, 0x512),
+            (photosOnlyKept, .side, 0x513), (photosOnlyLost, .frontLatSpread, 0x514),
+        ]
+        for (check, pose, n) in rows {
+            let photo = ProgressPhoto(id: uuid(n), pose: pose, takenAt: base.addingTimeInterval(Double(n)))
+            source.insert(photo)
+            photo.checkIn = check
+        }
+        try source.save()
+        let data = try BackupService.exportData(context: source)
+
+        // On this phone: two of the four photos, and one nothing names.
+        let jpeg = Data("jpeg".utf8)
+        for id in [uuid(0x511), uuid(0x513), uuid(0x5FF)] { try store.write(jpeg, as: id) }
+
+        let target = try TestStore.context()
+        try BackupService.restore(data: data, context: target, photos: store)
+
+        let checks = try target.fetch(FetchDescriptor<BodyMeasurement>(sortBy: [SortDescriptor(\.date)]))
+        #expect(checks.map(\.id) == [uuid(0x501), uuid(0x502)], "a check-in whose only photo is gone is not kept")
+        #expect(checks.first?.waistCm == 84)
+        #expect(checks.first?.photos.map(\.id) == [uuid(0x511)])
+        #expect(checks.last?.photos.map(\.id) == [uuid(0x513)])
+        #expect(checks.last?.photos.first?.pose == .side)
+        #expect(checks.last?.photos.first?.takenAt == base.addingTimeInterval(Double(0x513)))
+        #expect(store.contains(uuid(0x511)) && store.contains(uuid(0x513)))
+        #expect(!store.contains(uuid(0x5FF)), "a file no restored photo names must not stay on the phone")
+    }
+
+    /// A newer build's pose is left out rather than guessed at.
+    @Test func aPoseThisBuildDoesNotKnowIsLeftOut() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let uuid = PersistenceFixtures.uuid
+        let store = photoFolder()
+        defer { store.deleteAll() }
+        let source = try TestStore.context()
+        let check = BodyMeasurement(date: TestClock.reference)
+        check.set(37, for: .arm)
+        source.insert(check)
+        let photo = ProgressPhoto(id: uuid(0x521), pose: .side, takenAt: TestClock.reference)
+        source.insert(photo)
+        photo.checkIn = check
+        try source.save()
+        try store.write(Data("jpeg".utf8), as: uuid(0x521))
+
+        var root = try PersistenceFixtures.object(try BackupService.exportData(context: source))
+        var checks = try #require(root["bodyMeasurements"] as? [[String: Any]])
+        var photos = try #require(checks[0]["photos"] as? [[String: Any]])
+        photos[0]["pose"] = "frontDoubleBiceps"
+        checks[0]["photos"] = photos
+        root["bodyMeasurements"] = checks
+        let edited = try JSONSerialization.data(withJSONObject: root)
+
+        let target = try TestStore.context()
+        try BackupService.restore(data: edited, context: target, photos: store)
+
+        #expect(try target.fetchCount(FetchDescriptor<ProgressPhoto>()) == 0)
+        #expect(try target.fetch(FetchDescriptor<BodyMeasurement>()).map(\.armCm) == [37])
+    }
+
+    @Test func eraseDeletesProgressPhotosAndTheirFiles() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let store = photoFolder()
+        defer { store.deleteAll() }
+        let context = try TestStore.context()
+        let photo = PendingPhoto(id: UUID(), pose: .back, takenAt: TestClock.reference)
+        try store.write(Data("jpeg".utf8), as: photo.id)
+        try CheckInRecords.record([:], photos: [photo], on: TestClock.reference, context: context)
+
+        try await BackupService.wipe(context: context, photos: store)
+
+        #expect(try context.fetchCount(FetchDescriptor<ProgressPhoto>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<BodyMeasurement>()) == 0)
+        #expect(!FileManager.default.fileExists(atPath: store.directory.path))
+    }
+
     // MARK: - Fixtures
 
     private struct Populated {

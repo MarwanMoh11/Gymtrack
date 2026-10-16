@@ -31,16 +31,20 @@ exactly in that form, since the stats read it.
 
 1. `tools/coach/coach status`. If a proposal is still waiting on the phone,
    say so and stop: a second one on top of an undecided one only confuses.
-2. `tools/coach/coach pull`. It prints the new review folder. If the phone is
-   not reachable, ask the owner to export a backup (Settings, Export a backup)
-   and run `tools/coach/coach pull --file PATH`.
+2. `tools/coach/coach pull`. It prints the new review folder, and copies the
+   owner's progress photos into its `photos/` folder as
+   `<date>-<pose>.jpg`. If the phone is not reachable, ask the owner to export
+   a backup (Settings, Export a backup) and run
+   `tools/coach/coach pull --file PATH`; a backup holds no images, so that
+   review has no photos.
 3. `tools/coach/coach stats <folder>`, then read `stats.md` in that folder. It
    has the active plan with every id you will need, the weekly sets per muscle,
    each exercise's current comparable series, each plan lift's recent sets set by
    set, adherence, what each session skipped or added against its plan day as it
    stood then, the plan changes since
-   the previous review, the outcome of the last applied proposal, and the
-   owner's notes. Read `stats.json` only to look up a single key; it is large.
+   the previous review, the outcome of the last applied proposal, the tape
+   check-ins, the progress photos by pose, and the owner's notes. Read
+   `stats.json` only to look up a single key; it is large.
 4. Read the previous review folder's `notes.md`, if there is one. It holds what
    the owner said last time and when the last changes were due a look, which
    the numbers alone cannot tell you.
@@ -64,6 +68,15 @@ Progress tab; never ask for them or write them into the profile. If none were
 logged in the last four weeks, you may mention once, in plain words, that a
 check-in helps tell lean gain from fat. Never press: a skipped month is just
 absent.
+
+Progress photos come from the same check-ins. When `stats.md` lists any, open
+the latest of each pose with the Read tool beside the one before it and the
+first one, and say in plain words what you see changing, if anything. Read
+them lightly (see `policy.md`): they inform what you ask and the advice you
+give, never a change's `evidence`, and you never estimate a girth, body fat or
+any other number from them. Never ask for photos; at most, if there are none,
+mention once that a check-in can hold them. The reviewer never sees them, and
+nothing from them goes into the profile.
 
 ## 5. Draft at most three changes
 

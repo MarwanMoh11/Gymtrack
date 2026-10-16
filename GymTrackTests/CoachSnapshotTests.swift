@@ -63,6 +63,33 @@ struct CoachSnapshotTests {
         #expect(try rig.archive().bodyMeasurements?.first?.armCm == 37, "The coach must receive the just-saved check-in")
     }
 
+    /// A photo added to or taken off a check-in changes what the coach pulls,
+    /// so the snapshot follows it.
+    @Test func aProgressPhotoReachesTheSnapshotAndItsDeleteLeavesIt() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = await Rig.started(try TestStore.container())
+        defer { rig.finish() }
+        let check = BodyMeasurement()
+        check.waistCm = 82
+        rig.context.insert(check)
+        try rig.context.save()
+        await rig.writer.settled()
+        #expect(try rig.archive().bodyMeasurements?.first?.photos == nil)
+
+        let photo = ProgressPhoto(pose: .side, takenAt: TestClock.reference)
+        rig.context.insert(photo)
+        photo.checkIn = check
+        try rig.context.save()
+        await rig.writer.settled()
+        #expect(try rig.archive().bodyMeasurements?.first?.photos?.map(\.id) == [photo.id])
+
+        rig.context.delete(photo)
+        try rig.context.save()
+        await rig.writer.settled()
+        #expect(try rig.archive().bodyMeasurements?.first?.photos == nil, "a deleted photo must leave the coach's copy")
+    }
+
     @Test func aDeletedWorkoutLeavesTheSnapshot() async throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }

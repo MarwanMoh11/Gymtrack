@@ -33,6 +33,10 @@ can neither build nor drive a simulator, don't pay for them each time.
   step on it is worth. Every weight the app suggests must be a rung the equipment
   actually has.
 - `Services/HealthKitService.swift` — workout writing and vitals backfill.
+- `Services/ProgressPhotoStore.swift` — progress photo files in Application
+  Support, each living exactly as long as its `ProgressPhoto` row. A simulator
+  has no camera, so its builds swap in a drawn stand-in (`ProgressCamera`) and
+  the check-in, camera and comparison still run end to end there.
 - `Services/WatchCommandCenter.swift`, `WatchBridge.swift`,
   `GymTrackShared/WatchLink.swift` — the phone↔wrist link. Note the **headless**
   path: iOS wakes a terminated app to hand it a watch message, so commands must
