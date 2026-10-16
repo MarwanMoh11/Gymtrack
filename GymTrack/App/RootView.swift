@@ -417,7 +417,7 @@ struct RootView: View {
 
         case .finishSession(let batch, _):
             if let workout = activeWorkout, workout.session.id == batch.sessionID {
-                workout.session.applyWatchFinish(batch)
+                workout.session.applyWatchFinish(batch) { workout.takeBack(replayed: $0) }
                 try? context.save()
                 finishSession(at: workout.session.wristFinishMoment(batch.endedAt))
                 return true

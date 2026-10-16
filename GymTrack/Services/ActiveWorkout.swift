@@ -628,37 +628,25 @@ final class ActiveWorkout {
     ///
     /// What the answer replaced is kept, so that undoing the set puts the offer
     /// and the record back exactly as they were — see `takeBackAnswer`.
+    ///
+    /// `NudgeLedger.settle` is the one place that is worked out, because the
+    /// wrist's log applies it to the stored memory when no logger is running.
     private func settleOffer(answeredBy set: SetLog) {
-        let standing = pendingNudge(for: set.catalogID).flatMap { offer($0, covers: set) ? $0 : nil }
-        let taken = takenNudge(for: set.catalogID).flatMap { offer($0.nudge, covers: set) ? $0 : nil }
-        guard standing != nil || taken != nil else { return }
-
-        var answer = SettledOffer(loggedSetID: set.id, standing: standing, taken: taken)
-        if let standing, let subject = subject(of: standing) {
-            answer.priorOutcome = subject.loadNudgeOutcome
-            answer.priorToKg = subject.loadNudgeToKg
-            let outcome: LoadNudgeOutcome = isOfferedRung(set.weightKg, of: standing, on: set)
-                ? .taken : .declined
-            subject.recordLoadNudge(outcome, toKg: standing.toKg)
-            answer.recorded = outcome
-            standingOffers.removeAll { $0.setID == standing.setID }
+        updateLedger { ledger in
+            ledger.settle(answeredBy: set, among: Array(session.sets)) { subject in
+                SessionFactory.laterRowsInSlot(of: subject, in: session, layout: slotLayout(of: subject.catalogID))
+            }
         }
-        // The chance to undo a take ends where the sets it moved start being
-        // lifted: undoing it after that would move a weight off a finished set.
-        if let taken { openTakes.removeAll { $0.nudge.setID == taken.nudge.setID } }
-
-        let subjectID = (standing ?? taken?.nudge)?.setID
-        settledOffers.removeAll { ($0.standing ?? $0.taken?.nudge)?.setID == subjectID }
-        settledOffers.append(answer)
     }
 
-    /// Whether a logged weight is the rung an offer named. Compared on the
-    /// equipment's own scale, so a load typed in pounds and one stepped to by
-    /// the offer are the same rung even where the kilogram conversions differ
-    /// in the last bit.
-    private func isOfferedRung(_ kg: Double, of nudge: LoadNudge, on set: SetLog) -> Bool {
-        let scale = set.loadScale
-        return abs(scale.display(kg) - scale.display(nudge.toKg)) < 0.001
+    /// Runs `change` on the offers, takes and answers as one ledger, the shape
+    /// the wrist's headless path holds them in too.
+    private func updateLedger(_ change: (inout NudgeLedger) -> Void) {
+        var ledger = NudgeLedger(standing: standingOffers, takes: openTakes, answers: settledOffers)
+        change(&ledger)
+        standingOffers = ledger.standing
+        openTakes = ledger.takes
+        settledOffers = ledger.answers
     }
 
     /// An offer the logger settled without a tap, and what it overwrote.
@@ -800,12 +788,19 @@ final class ActiveWorkout {
         // and an offer it answered by being logged, which is unanswered again.
         // `NudgeLedger` is the one place that is worked out, because the wrist's
         // undo applies it to the stored memory when no logger is running.
-        var ledger = NudgeLedger(standing: standingOffers, takes: openTakes, answers: settledOffers)
-        ledger.takeBack(set, among: Array(session.sets)) { subject, _ in nudge(after: subject) }
-        standingOffers = ledger.standing
-        openTakes = ledger.takes
-        settledOffers = ledger.answers
+        updateLedger { ledger in
+            ledger.takeBack(set, among: Array(session.sets)) { subject, _ in nudge(after: subject) }
+        }
         restorePrefill(carriedBy: set)
+    }
+
+    /// An undo the wrist made out of range, replayed from its Finish batch: the
+    /// rows `uncomplete` would take, drops first and then the set. They take
+    /// back what logging them changed, as an undo tapped here does, so an
+    /// answer the undone set gave an earlier set's offer is not left on the
+    /// record with its only evidence erased.
+    func takeBack(replayed rows: [SetLog]) {
+        for row in rows { takeBack(row) }
     }
 
     func isPR(_ set: SetLog) -> Bool { recentPRs.contains(set.id) }
@@ -1162,11 +1157,9 @@ final class ActiveWorkout {
     /// each slot its own load, and an offer read off the top set's answer must
     /// not move the back-off's sets, nor be answered by lifting one.
     private func offer(_ nudge: LoadNudge, covers row: SetLog) -> Bool {
-        guard row.catalogID == nudge.catalogID, !row.isContinuation, row.setIndex > nudge.fromIndex,
-              let subject = subject(of: nudge) else { return false }
-        return SessionFactory.laterRowsInSlot(of: subject, in: session,
-                                              layout: slotLayout(of: nudge.catalogID))
-            .contains { $0.id == row.id }
+        NudgeLedger.offer(nudge, covers: row, among: Array(session.sets)) { subject in
+            SessionFactory.laterRowsInSlot(of: subject, in: session, layout: slotLayout(of: nudge.catalogID))
+        }
     }
 
     // MARK: - Acting on the answer
@@ -2276,6 +2269,61 @@ struct NudgeLedger {
            let subject = subject(of: taken.nudge), subject.isCompleted {
             takes.append(taken)
         }
+    }
+
+    /// Logging `set` answers the offer standing over its exercise, or closes
+    /// the undo of one taken, when the set is one the offer was about; see
+    /// `ActiveWorkout.settleOffer` for why nothing else does. Lifted at the
+    /// offered rung the offer was taken, at any other weight declined, and what
+    /// the record said before is kept on the answer for `takeBackAnswer`.
+    ///
+    /// `laterRows` gives the rows after a subject in its plan slot: the logger
+    /// reads them off the slots it holds, the wrist's headless path off the
+    /// store.
+    mutating func settle(answeredBy set: SetLog, among rows: [SetLog],
+                         laterRows: (_ subject: SetLog) -> [SetLog]) {
+        func answered(_ nudge: ActiveWorkout.LoadNudge) -> Bool {
+            Self.offer(nudge, covers: set, among: rows, laterRows: laterRows)
+        }
+        let standing = self.standing.first { $0.catalogID == set.catalogID }.flatMap { answered($0) ? $0 : nil }
+        let taken = takes.first { $0.nudge.catalogID == set.catalogID }.flatMap { answered($0.nudge) ? $0 : nil }
+        guard standing != nil || taken != nil else { return }
+
+        var answer = ActiveWorkout.SettledOffer(loggedSetID: set.id, standing: standing, taken: taken)
+        if let standing, let subject = rows.first(where: { $0.id == standing.setID }) {
+            answer.priorOutcome = subject.loadNudgeOutcome
+            answer.priorToKg = subject.loadNudgeToKg
+            let outcome: LoadNudgeOutcome = Self.isOfferedRung(set.weightKg, of: standing, on: set)
+                ? .taken : .declined
+            subject.recordLoadNudge(outcome, toKg: standing.toKg)
+            answer.recorded = outcome
+            self.standing.removeAll { $0.setID == standing.setID }
+        }
+        // The chance to undo a take ends where the sets it moved start being
+        // lifted: undoing it after that would move a weight off a finished set.
+        if let taken { takes.removeAll { $0.nudge.setID == taken.nudge.setID } }
+
+        let subjectID = (standing ?? taken?.nudge)?.setID
+        answers.removeAll { ($0.standing ?? $0.taken?.nudge)?.setID == subjectID }
+        answers.append(answer)
+    }
+
+    /// Whether `row` is one of the rows an offer is about; see
+    /// `ActiveWorkout.offer(_:covers:)`.
+    static func offer(_ nudge: ActiveWorkout.LoadNudge, covers row: SetLog, among rows: [SetLog],
+                      laterRows: (_ subject: SetLog) -> [SetLog]) -> Bool {
+        guard row.catalogID == nudge.catalogID, !row.isContinuation, row.setIndex > nudge.fromIndex,
+              let subject = rows.first(where: { $0.id == nudge.setID }) else { return false }
+        return laterRows(subject).contains { $0.id == row.id }
+    }
+
+    /// Whether a logged weight is the rung an offer named. Compared on the
+    /// equipment's own scale, so a load typed in pounds and one stepped to by
+    /// the offer are the same rung even where the kilogram conversions differ
+    /// in the last bit.
+    private static func isOfferedRung(_ kg: Double, of nudge: ActiveWorkout.LoadNudge, on set: SetLog) -> Bool {
+        let scale = set.loadScale
+        return abs(scale.display(kg) - scale.display(nudge.toKg)) < 0.001
     }
 
     init(standing: [ActiveWorkout.LoadNudge], takes: [ActiveWorkout.TakenNudge],

@@ -111,4 +111,47 @@ struct WatchHeadlessUndoNudgeTests {
                     "The offer is unanswered again after the relaunch")
         }
     }
+
+    // MARK: A headless log answers the offers in the stored memory
+
+    @Test func aHeadlessLogAtTheTakenRungClosesTheTakeSoALaterUndoLeavesTheRowsAlone() throws {
+        try WatchCommandRig.run { rig in
+            let scene = try acceptedNudge(rig)
+            rig.send(rig.log(scene.sets[1], weight: scene.offer.toKg, at: 120))
+            try #require(scene.sets[1].isCompleted)
+            #expect(rig.loggerMemory.load(for: scene.session.id)?.takes.isEmpty ?? true,
+                    "Lifting a row the take moved ends the chance to undo it")
+
+            undoSource(scene, in: rig)
+
+            #expect(scene.sets[1].weightKg == scene.offer.toKg)
+            #expect(scene.sets[2].weightKg == scene.offer.toKg,
+                    "The row still to come stays at the weight just lifted, as on the phone")
+        }
+    }
+
+    @Test func aHeadlessLogAtTheOldWeightDeclinesAndItsUndoRestoresTheEarlierRecord() throws {
+        try WatchCommandRig.run { rig in
+            let (session, sets) = try rig.seed(setsEach: 3)
+            let logger = rig.logger(for: session)
+            logger.complete(sets[0], restSeconds: nil, at: rig.at(30))
+            logger.rate(sets[0], feel: .easy)
+            let offer = try #require(logger.pendingNudge(for: sets[0].catalogID))
+
+            rig.send(rig.log(sets[1], weight: sets[1].weightKg, at: 120))
+            try #require(sets[1].isCompleted)
+            #expect(sets[0].loadNudgeOutcome == .declined)
+            #expect(sets[0].loadNudgeToKg == offer.toKg)
+            #expect(rig.loggerMemory.load(for: session.id)?.offers.isEmpty ?? true,
+                    "An answered offer no longer stands")
+
+            rig.send(.undoSet(id: sets[1].id, completedAt: sets[1].completedAt))
+
+            #expect(!sets[1].isCompleted)
+            #expect(sets[0].loadNudgeOutcome == nil, "The decline goes with the lift that gave it")
+            let relaunched = rig.logger(for: session)
+            #expect(relaunched.pendingNudge(for: sets[0].catalogID)?.toKg == offer.toKg,
+                    "The offer is unanswered again after the relaunch")
+        }
+    }
 }

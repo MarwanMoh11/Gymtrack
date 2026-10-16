@@ -223,4 +223,80 @@ struct WatchFinishBatchReplayTests {
             #expect(rows[0].machineID == (stamped ? machine.id : nil))
         }
     }
+
+    // MARK: An undo in the batch takes back what logging the set did
+
+    /// Three 60 kg sets: the first logged and rated Easy, so an offer stands,
+    /// and the second logged on the phone, at the offered rung or at 60, which
+    /// answers it.
+    private func answeredOffer(_ rig: WatchCommandRig, liftingTheOffer: Bool) throws
+        -> (session: WorkoutSession, sets: [SetLog], logger: ActiveWorkout, offer: ActiveWorkout.LoadNudge) {
+        let (session, sets) = try rig.seed(setsEach: 3)
+        let logger = rig.logger(for: session)
+        logger.complete(sets[0], restSeconds: nil, at: rig.at(30))
+        logger.rate(sets[0], feel: .easy)
+        let offer = try #require(logger.pendingNudge(for: sets[0].catalogID))
+        if liftingTheOffer { sets[1].weightKg = offer.toKg }
+        logger.complete(sets[1], restSeconds: nil, at: rig.at(200))
+        try #require(sets[0].loadNudgeOutcome == (liftingTheOffer ? .taken : .declined))
+        return (session, sets, logger, offer)
+    }
+
+    private func undoBatch(of set: SetLog, stamped stamp: Date?, in session: WorkoutSession) -> WatchFinishBatch {
+        var batch = WatchFinishBatch(sessionID: session.id, logs: [], undos: [set.id], starts: [:],
+                                     cancels: [], ratings: [])
+        batch.undoStamps = stamp.map { [set.id: $0] }
+        return batch
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func aFinishBatchUndoTakesBackTheAnswerItsSetGave(liftingTheOffer: Bool, loggerRunning: Bool) throws {
+        try WatchCommandRig.run { rig in
+            let scene = try answeredOffer(rig, liftingTheOffer: liftingTheOffer)
+            let batch = undoBatch(of: scene.sets[1], stamped: scene.sets[1].completedAt, in: scene.session)
+
+            if loggerRunning {
+                scene.session.applyWatchFinish(batch) { scene.logger.takeBack(replayed: $0) }
+                #expect(!scene.sets[1].isCompleted)
+                #expect(scene.logger.pendingNudge(for: scene.sets[0].catalogID)?.toKg == scene.offer.toKg,
+                        "The offer is unanswered again")
+            } else {
+                rig.send(.finishSession(batch, metrics: nil))
+                #expect(!scene.session.isActive)
+            }
+            #expect(scene.sets[0].loadNudgeOutcome == nil,
+                    "An answer whose only evidence the batch erased must not stay on the record")
+            #expect(scene.sets[0].loadNudgeToKg == nil)
+        }
+    }
+
+    @Test func aRefusedFinishBatchUndoLeavesTheAnswerOnTheRecord() throws {
+        try WatchCommandRig.run { rig in
+            let scene = try answeredOffer(rig, liftingTheOffer: false)
+            let stale = undoBatch(of: scene.sets[1], stamped: rig.at(100), in: scene.session)
+
+            scene.session.applyWatchFinish(stale) { scene.logger.takeBack(replayed: $0) }
+
+            #expect(scene.sets[1].isCompleted, "A stale undo keeps the newer log")
+            #expect(scene.sets[0].loadNudgeOutcome == .declined, "and the answer that log gave")
+        }
+    }
+
+    @Test func aFinishBatchUndoTakesTheLoggedDropBeneathWithIt() throws {
+        try WatchCommandRig.run { rig in
+            let (session, sets) = try rig.seed(setsEach: 3)
+            sets[2].continuesPreviousSet = true
+            let logger = rig.logger(for: session)
+            logger.complete(sets[1], restSeconds: nil, at: rig.at(60))
+            logger.complete(sets[2], restSeconds: nil, at: rig.at(75))
+            try #require(session.loggedContinuations(below: sets[1]).map(\.id) == [sets[2].id])
+
+            session.applyWatchFinish(undoBatch(of: sets[1], stamped: sets[1].completedAt, in: session)) {
+                logger.takeBack(replayed: $0)
+            }
+
+            #expect(!sets[1].isCompleted)
+            #expect(!sets[2].isCompleted, "A drop off a set that was taken back is not a lift either")
+        }
+    }
 }

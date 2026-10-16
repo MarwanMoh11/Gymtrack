@@ -216,6 +216,7 @@ final class WatchCommandCenter {
             // abandoned for another exercise is exactly what the queue delivers
             // minutes before the log that used to close it.
             set.session?.settleStarts(afterLogging: set, at: loggedMoment)
+            settleNudges(answeredBy: set, in: context)
             carryLoadForward(from: set, in: context)
             set.stampWristMachine(loggedAt: loggedMoment, context: context)
             save(context)
@@ -286,10 +287,9 @@ final class WatchCommandCenter {
             // into the record as lifts taken without rest off a set that was
             // never done, whenever the phone was asleep for the undo.
             let carried = set.isCompleted ? (set.session?.loggedContinuations(below: set) ?? []) : []
-            for row in carried.reversed() { row.unlog() }
-            set.unlog()
-            takeBackNudges(of: carried.reversed() + [set])
-            restorePrefill(carriedBy: set)
+            let going = carried.reversed() + [set]
+            for row in going { row.unlog() }
+            takeBack(unlogged: going)
             save(context)
             pushMirror(context: context)
 
@@ -337,7 +337,7 @@ final class WatchCommandCenter {
                 return
             }
             guard activeSession(in: context)?.id == batch.sessionID else { return }
-            session.applyWatchFinish(batch)
+            session.applyWatchFinish(batch) { takeBack(unlogged: $0) }
             finish(session, metrics: metrics, at: session.wristFinishMoment(batch.endedAt), context: context)
 
         case .finish(let metrics):
@@ -574,6 +574,31 @@ final class WatchCommandCenter {
         let memory = carriedPrefills.removeValue(forKey: set.id) ?? storedPrefill(carriedBy: set, in: session)
         guard let memory else { return }
         ActiveWorkout.Prefill.restore(memory, onto: Array(session.sets))
+    }
+
+    /// What logging these rows changed beyond the rows, once they are
+    /// unlogged: the offers and the carry, as the phone's own undo takes them.
+    /// Rows come drops first, then the set; only the set carried anything.
+    private func takeBack(unlogged rows: [SetLog]) {
+        takeBackNudges(of: rows)
+        if let set = rows.last { restorePrefill(carriedBy: set) }
+    }
+
+    /// The answer this log gives an offer the phone's logger left standing, or
+    /// the close of a take it left open, written to the memory the logger
+    /// stored, as `ActiveWorkout.settleOffer` writes it live (`NudgeLedger`).
+    /// Without it a take outlived the lifting of the rows it moved, and a later
+    /// undo of its source set put the rows still to come back under the weight
+    /// just lifted.
+    private func settleNudges(answeredBy set: SetLog, in context: ModelContext) {
+        guard let session = set.session,
+              var stored = loggerMemory.load(for: session.id) else { return }
+        var ledger = NudgeLedger(stored)
+        ledger.settle(answeredBy: set, among: Array(session.sets)) { subject in
+            SessionFactory.laterRowsInSlot(of: subject, in: session, context: context)
+        }
+        ledger.write(into: &stored)
+        loggerMemory.save(stored, for: session.id)
     }
 
     /// Everything the offers did on account of these rows, taken back in the

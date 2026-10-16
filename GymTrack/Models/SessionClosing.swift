@@ -21,11 +21,17 @@ extension WorkoutSession {
     /// untouched rows. A live Finish can overtake queued log and undo messages;
     /// replaying the wrist's latest state here makes either arrival order end
     /// with the same record. The set IDs are looked up only in this session.
+    ///
+    /// - Parameter takeBack: what logging the rows of an admitted undo changed
+    ///   beyond the rows themselves, taken back as an undo sent alone takes it:
+    ///   the running logger's offers, or with none running the stored memory.
+    ///   It gets the rows in the logger's order, drops first, already unlogged.
     @discardableResult
-    func applyWatchFinish(_ batch: WatchFinishBatch) -> Bool {
+    func applyWatchFinish(_ batch: WatchFinishBatch,
+                          takingBack takeBack: (_ rows: [SetLog]) -> Void = { _ in }) -> Bool {
         guard isActive, batch.sessionID == id else { return false }
         let rows = Dictionary(sets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        replayWatchActions(batch, on: rows)
+        replayWatchActions(batch, on: rows, takingBack: takeBack)
         // The batch is the wrist's final word on this session, so a row it
         // leaves unlogged is one the wrist itself does not count. A queued log
         // for it that turns up later was overtaken by an undo, and remembering
@@ -34,7 +40,8 @@ extension WorkoutSession {
         return true
     }
 
-    private func replayWatchActions(_ batch: WatchFinishBatch, on rows: [UUID: SetLog]) {
+    private func replayWatchActions(_ batch: WatchFinishBatch, on rows: [UUID: SetLog],
+                                    takingBack takeBack: (_ rows: [SetLog]) -> Void) {
         for (id, moment) in batch.starts where WatchCommand.isBelievableStart(moment) {
             guard let set = rows[id], set.startedAt == nil else { continue }
             if let completedAt = set.completedAt, moment > completedAt { continue }
@@ -61,7 +68,19 @@ extension WorkoutSession {
         let refused = Set(batch.undos.filter {
             rows[$0]?.admitsWristUndo(of: batch.undoStamps?[$0]) == false
         })
-        for id in batch.undos where !refused.contains(id) { rows[id]?.unlog() }
+        //
+        // An admitted undo erases what the same undo sent alone erases: the
+        // logged drops beneath the set, last one first, and through `takeBack`
+        // what logging them changed. Unlogging the row alone left an earlier
+        // set's offer filed as declined or taken on the strength of a lift
+        // that no longer exists.
+        for id in batch.undos where !refused.contains(id) {
+            guard let set = rows[id] else { continue }
+            let carried = set.isCompleted ? loggedContinuations(below: set) : []
+            let going = carried.reversed() + [set]
+            for row in going { row.unlog() }
+            takeBack(going)
+        }
         for id in batch.cancels where !refused.contains(id) { rows[id]?.startedAt = nil }
         settleStarts(replayedFrom: batch, on: rows)
         for rating in batch.ratings where rating.sessionID == id && rating.isValid {
@@ -362,7 +381,9 @@ extension WorkoutSession {
                                               in: context) else { continue }
             restored[set.id] = set
         }
-        replayWatchActions(batch, on: restored)
+        // Nothing to take back beyond the rows: the logger's memory went with
+        // the close, and an undone row is never among those put back.
+        replayWatchActions(batch, on: restored) { _ in }
         return withdrew || !restored.isEmpty
     }
 }
