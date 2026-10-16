@@ -114,7 +114,10 @@ final class CoachInbox {
     /// Forgets every proposal and decision, in memory and on disk. Called when
     /// the lifter erases all data, so a reload or a relaunch finds nothing.
     func erase() {
-        store.erase()
+        // Only an inbox that launch or a test configured owns a folder. The
+        // unconfigured `shared` of a unit-test host still points at the app's
+        // real Documents/Coach, and a test erasing data must not delete that.
+        if context != nil { store.erase() }
         review = nil
         unreadableReason = nil
         decisions = []

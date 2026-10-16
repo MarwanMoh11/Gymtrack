@@ -152,9 +152,14 @@ On the phone, in the app's Documents directory:
 | `Documents/Coach/decisions.json` | app | Decisions (below). |
 | `Documents/Coach/Inbox/proposal.json` | Mac, `coach push` | The proposal awaiting a decision. The app creates `Inbox/` at launch so the destination always exists. |
 
-The app writes `snapshot.json` atomically when a workout finishes, when a plan
-is saved, when a proposal is applied or reverted, and at launch if the file is
-missing, never on the logging path. `xcrun devicectl` reaches the container on
+The app writes `snapshot.json` atomically, debounced, after any save that
+changes what the export carries (a finished workout, its sets, notes or late
+Health vitals, a plan, a weigh-in, a tape check-in, a custom exercise, a
+machine, a load correction), when a proposal is applied or reverted, and once
+at every launch so a stale file cannot outlive the data it came from. Saves
+that touch only the workout in progress never reach it, so the logging path
+stays clear. Erase all data removes the snapshot, the decisions and any
+pushed proposal along with the records. `xcrun devicectl` reaches the container on
 development-signed builds, which is all a free Apple ID makes:
 
 ```
