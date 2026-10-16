@@ -791,6 +791,11 @@ final class SetLog {
     /// which is most sets.
     var detectedStartedAt: Date?
     var detectedEndedAt: Date?
+    /// What read that window: a `DetectedWindowSource` raw value, written
+    /// only for `.motion`. Absent means the heart rate, which is what every
+    /// window stored before the wrist watched movement was read from, so an
+    /// older store and an older backup mean the same thing they always did.
+    var detectedWindowSourceRaw: String?
 
     // MARK: The offer this set's answer produced
 
@@ -959,16 +964,38 @@ final class SetLog {
     /// How long the set lasted by the heart rate's account.
     var detectedDuration: TimeInterval? { detectedWindow?.duration }
 
+    /// What read the detected window, where there is one.
+    var detectedWindowSource: DetectedWindowSource? {
+        guard detectedWindow != nil else { return nil }
+        return detectedWindowSourceRaw.flatMap(DetectedWindowSource.init(rawValue:)) ?? .heartRate
+    }
+
     /// Files where the trace put the set, both ends at once, so a reader never
-    /// finds a detected start with nothing to pair it with.
-    func recordDetectedWindow(_ window: DetectedSetWindow) {
+    /// finds a detected start with nothing to pair it with, together with what
+    /// read it.
+    func recordDetectedWindow(_ window: DetectedSetWindow, source: DetectedWindowSource = .heartRate) {
         detectedStartedAt = window.start
         detectedEndedAt = window.end
+        detectedWindowSourceRaw = source == .motion ? source.rawValue : nil
     }
 
     func clearDetectedWindow() {
         detectedStartedAt = nil
         detectedEndedAt = nil
+        detectedWindowSourceRaw = nil
+    }
+
+    /// Files the window the wrist's motion showed for this log, if it can be
+    /// this set's: a set whose start somebody announced keeps that instead,
+    /// because a measurement is not improved by a reading, and a window that
+    /// does not end before the log, ended too long before it or runs longer
+    /// than any set the detector accepts is not a reading of this log at all.
+    /// Called after `completedAt` is written, on every path a wrist log
+    /// reaches the phone by. Nothing arrives, nothing is written.
+    func takeMotionWindow(_ window: WatchMotionWindow?) {
+        guard let window, startedAt == nil, let completedAt,
+              window.describes(logAt: completedAt) else { return }
+        recordDetectedWindow(DetectedSetWindow(start: window.start, end: window.end), source: .motion)
     }
 
     // MARK: The load offer

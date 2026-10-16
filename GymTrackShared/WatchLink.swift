@@ -190,6 +190,10 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
     /// Optional so a mirror from an older phone still decodes; absent means on,
     /// and the phone leaves the key out while the setting is on.
     var heartRateCue: Bool?
+    /// Whether the wrist may watch its own movement for a set nobody started
+    /// or logged. Absent from an older phone, which reads as on: the setting
+    /// defaults to on, and an older phone simply has no switch for it.
+    var motionSetDetection: Bool?
     /// True while the phone thinks a rest is running.
     var isResting: Bool { restEndsAt != nil }
 
@@ -396,6 +400,38 @@ struct WatchWorkoutMetrics: Codable, Hashable, Sendable {
     }
 }
 
+/// Where the wrist's movement showed a set began and ended, for a set nobody
+/// announced: a bout of rep-like motion the watch saw end shortly before the
+/// log. A reading, never a stamp: the phone files it as a detected window,
+/// not as `startedAt`, which means somebody said so.
+struct WatchMotionWindow: Codable, Hashable, Sendable {
+    var start: Date
+    var end: Date
+
+    /// How long after the movement stopped a log may still claim it. Long
+    /// enough for the lifter who racks, sits, gets their breath and then logs,
+    /// or who answers the wrist's "Log set?" near the end of its minute;
+    /// short enough that a bout from before a walk to the water fountain is
+    /// not handed to whatever gets logged on the way back.
+    static let claimLimit: TimeInterval = 90
+    /// Longer than any set the motion detector accepts, so a window that
+    /// arrives longer than that was not one of its readings.
+    static let longestSet: TimeInterval = 150
+
+    /// Whether this window can be the set logged at `moment`, whose gap opened
+    /// at `previous` (the log before it) where that is known: running
+    /// forwards, over by the log, not too long ago, and wholly inside the gap.
+    /// A window reaching back past the previous log would hand this set the
+    /// tail of the one before.
+    func describes(logAt moment: Date, after previous: Date? = nil) -> Bool {
+        guard start < end, end <= moment,
+              moment.timeIntervalSince(end) <= Self.claimLimit,
+              end.timeIntervalSince(start) <= Self.longestSet else { return false }
+        if let previous, start <= previous { return false }
+        return true
+    }
+}
+
 /// One set the wrist has logged but the phone has not yet echoed.
 struct WatchPendingLog: Codable, Hashable, Sendable {
     var setID: UUID
@@ -403,6 +439,9 @@ struct WatchPendingLog: Codable, Hashable, Sendable {
     var reps: Int
     var seconds: Int
     var completedAt: Date
+    /// The set as the wrist's motion showed it, where it saw one. Optional so
+    /// a log queued by an older watch still decodes; absent on most logs.
+    var detected: WatchMotionWindow? = nil
 }
 
 /// The wrist's unconfirmed work at the instant it asks to finish a session.
@@ -450,7 +489,12 @@ enum WatchCommand: Codable, Hashable, Sendable {
     ///
     /// Optional only so a command already queued when the apps are updated
     /// still decodes; see `loggedMoment` for what a command without one gets.
-    case logSet(id: UUID, weightKg: Double, reps: Int, seconds: Int, at: Date?)
+    ///
+    /// `detected` is the set as the wrist's motion showed it, for a set nobody
+    /// announced. Optional, like the moment, so a log queued by an older watch
+    /// still decodes; absent on most logs.
+    case logSet(id: UUID, weightKg: Double, reps: Int, seconds: Int, at: Date?,
+                detected: WatchMotionWindow? = nil)
     /// Takes a set back, naming the completion being taken back.
     ///
     /// The stamp is the `completedAt` of the log the lifter undid. Log and undo

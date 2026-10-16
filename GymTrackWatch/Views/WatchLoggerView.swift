@@ -115,7 +115,13 @@ struct WatchLoggerView: View {
                         plateCaption(exercise)
                         targetLine(set, exercise: exercise)
                         stepperRow
-                        startStrip(for: set)
+                        // In Start set's slot, so nothing below moves. See
+                        // `WatchMotionOfferRow`.
+                        if let offer = motionOffer(on: set) {
+                            WatchMotionOfferRow(offer: offer) { log(set: set, exercise: exercise) }
+                        } else {
+                            startStrip(for: set)
+                        }
                         logButton(set: set, exercise: exercise)
                     } else {
                         allDone
@@ -628,6 +634,14 @@ struct WatchLoggerView: View {
     }
 
     // MARK: - Logging
+
+    /// The wrist's "Log set?" for this set, while it stands: never on a set
+    /// already logged or under way by somebody's say-so.
+    private func motionOffer(on set: WatchSetSnapshot) -> MotionSetOffer? {
+        guard !set.isCompleted, set.startedAt == nil,
+              let offer = WatchMotionSetWatcher.shared.offer, offer.setID == set.id else { return nil }
+        return offer
+    }
 
     private func logButton(set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) -> some View {
         Button {

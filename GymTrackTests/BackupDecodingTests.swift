@@ -600,7 +600,7 @@ struct BackupDecodingTests {
         let set = try #require(PersistenceFixtures.sets(in: root, sessionIndex: 0).first)
 
         for key in ["rpe", "effort", "startedAt", "averageHeartRate", "maxHeartRate", "heartRateWindow",
-                    "detectedStartedAt", "detectedEndedAt", "loadNudge", "continues", "isWarmup",
+                    "detectedStartedAt", "detectedEndedAt", "detectedBy", "loadNudge", "continues", "isWarmup",
                     "targetRepsLow", "targetRepsHigh", "seconds", "tracking"] {
             #expect(!set.keys.contains(key), "\(key) was written for a set with nothing to say")
         }

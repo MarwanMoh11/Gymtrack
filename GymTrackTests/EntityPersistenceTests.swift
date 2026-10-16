@@ -88,7 +88,7 @@ struct EntityPersistenceTests {
 
         // Absent, not null and not zero: the keys must not be there at all.
         for key in ["rpe", "effort", "startedAt", "completedAt", "averageHeartRate", "maxHeartRate",
-                    "heartRateWindow", "detectedStartedAt", "detectedEndedAt", "loadNudge", "continues"] {
+                    "heartRateWindow", "detectedStartedAt", "detectedEndedAt", "detectedBy", "loadNudge", "continues"] {
             #expect(!exported.keys.contains(key), "\(key) survived an undone set")
         }
         #expect(exported["isCompleted"] as? Bool == false)

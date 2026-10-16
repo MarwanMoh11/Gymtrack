@@ -37,6 +37,9 @@ enum SettingsKey {
     static let watchAutoLaunch = "settings.watchAutoLaunch"
     /// Whether the watch taps when the heart rate has settled during a rest.
     static let heartRateReadyCue = "settings.heartRateReadyCue"
+    /// Whether the watch reads its own movement for a set nobody started or
+    /// logged, and offers to log it.
+    static let watchMotionSets = "settings.watchMotionSets"
 }
 
 /// When the phone is kept from locking.
@@ -133,6 +136,11 @@ final class AppSettings {
     var heartRateReadyCue: Bool {
         didSet { defaults.set(heartRateReadyCue, forKey: SettingsKey.heartRateReadyCue) }
     }
+    /// Let the watch notice a set from the wrist's movement. Off, its motion
+    /// sensor is never read for this and nothing is offered.
+    var watchMotionSets: Bool {
+        didSet { defaults.set(watchMotionSets, forKey: SettingsKey.watchMotionSets) }
+    }
 
     /// True once any part of the Health integration is switched on.
     var healthEnabled: Bool { healthWriteWorkouts || healthReadVitals || healthBodyWeight }
@@ -151,6 +159,7 @@ final class AppSettings {
             SettingsKey.healthBodyWeight: false,
             SettingsKey.watchAutoLaunch: true,
             SettingsKey.heartRateReadyCue: true,
+            SettingsKey.watchMotionSets: true,
         ])
         weightUnit = WeightUnit(rawValue: defaults.string(forKey: SettingsKey.weightUnit) ?? "kg") ?? .kg
         barWeight = BarWeight(rawValue: defaults.string(forKey: SettingsKey.barWeight) ?? "") ?? .standard
@@ -165,6 +174,7 @@ final class AppSettings {
         healthBodyWeight = defaults.bool(forKey: SettingsKey.healthBodyWeight)
         watchAutoLaunch = defaults.bool(forKey: SettingsKey.watchAutoLaunch)
         heartRateReadyCue = defaults.bool(forKey: SettingsKey.heartRateReadyCue)
+        watchMotionSets = defaults.bool(forKey: SettingsKey.watchMotionSets)
     }
 
     // MARK: - Formatting helpers

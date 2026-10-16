@@ -238,7 +238,7 @@ struct BackupRestoreTests {
         let document = try PersistenceFixtures.object(first)
         let sessions = try PersistenceFixtures.sessions(in: document)
         let setKeys = Set(sessions.flatMap { ($0["sets"] as? [[String: Any]] ?? []).flatMap(\.keys) })
-        for key in ["id", "startedAt", "completedAt", "detectedStartedAt", "detectedEndedAt", "rpe", "effort",
+        for key in ["id", "startedAt", "completedAt", "detectedStartedAt", "detectedEndedAt", "detectedBy", "rpe", "effort",
                     "averageHeartRate", "maxHeartRate", "heartRateWindow", "loadNudge", "continues",
                     "seconds", "reps", "targetRepsLow", "targetRepsHigh", "tracking"] {
             #expect(setKeys.contains(key), "The fixture never writes the set field \(key)")
@@ -277,7 +277,7 @@ struct BackupRestoreTests {
         // a null, a zero or an empty string.
         let restoredSets = try PersistenceFixtures.sessions(in: again).flatMap { $0["sets"] as? [[String: Any]] ?? [] }
         let bare = try #require(restoredSets.first { $0["id"] as? String == PersistenceFixtures.uuid(0x103).uuidString })
-        let optional: Set<String> = ["startedAt", "detectedStartedAt", "detectedEndedAt", "rpe", "effort",
+        let optional: Set<String> = ["startedAt", "detectedStartedAt", "detectedEndedAt", "detectedBy", "rpe", "effort",
                                      "averageHeartRate", "maxHeartRate", "heartRateWindow", "loadNudge",
                                      "continues", "isWarmup"]
         #expect(Set(bare.keys).isDisjoint(with: optional), "Gained \(Set(bare.keys).intersection(optional).sorted())")
@@ -992,8 +992,11 @@ struct BackupRestoreTests {
         _ = set(0x103, bench, order: 0, index: 2, kg: 60, reps: 5, tracking: .weightReps, in: full, loggedAfter: 480)
         _ = set(0x104, plank, order: 1, index: 0, kg: 0, reps: 0, seconds: 75, tracking: .duration, in: full,
                 loggedAfter: 700)
-        _ = set(0x105, pullUp, order: 2, index: 0, kg: 0, reps: 9, tracking: .bodyweightReps, in: full,
-                loggedAfter: 900)
+        // Placed by the wrist's motion as it was logged, not by the heart rate.
+        let pull = set(0x105, pullUp, order: 2, index: 0, kg: 0, reps: 9, tracking: .bodyweightReps, in: full,
+                       loggedAfter: 900)
+        pull.recordDetectedWindow(DetectedSetWindow(start: full.startedAt.addingTimeInterval(862),
+                                                    end: full.startedAt.addingTimeInterval(894)), source: .motion)
         // Planned and never done.
         _ = set(0x106, pullUp, order: 2, index: 1, kg: 0, reps: 9, tracking: .bodyweightReps, in: full,
                 loggedAfter: nil)
@@ -1210,5 +1213,60 @@ private final class HealthDeletionRecorder {
 
     func stop() {
         HealthKitService.shared.onDeletionRequest = previous
+    }
+}
+
+// MARK: - What read a detected window
+
+extension BackupRestoreTests {
+
+    private static func exportedSets(_ data: Data) throws -> [[String: Any]] {
+        try PersistenceFixtures.sessions(in: PersistenceFixtures.object(data))
+            .flatMap { $0["sets"] as? [[String: Any]] ?? [] }
+    }
+
+    @Test func aDetectedWindowSaysWhatReadItAndARestoreKeepsTheSource() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let source = try TestStore.context()
+        try fillEveryField(source)
+        let data = try BackupService.exportData(context: source, stamp: PersistenceFixtures.stamp())
+        let sets = try Self.exportedSets(data)
+        func exported(_ id: Int) throws -> [String: Any] {
+            try #require(sets.first { $0["id"] as? String == PersistenceFixtures.uuid(id).uuidString })
+        }
+        #expect(try exported(0x102)["detectedBy"] as? String == "heartRate")
+        #expect(try exported(0x105)["detectedBy"] as? String == "motion")
+        // No window, no source: the key is absent, not null.
+        #expect(try !exported(0x103).keys.contains("detectedBy"))
+
+        let fresh = try TestStore.context()
+        try BackupService.restore(data: data, context: fresh)
+        let restored = try fresh.fetch(FetchDescriptor<SetLog>())
+        let byID = Dictionary(restored.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        #expect(byID[PersistenceFixtures.uuid(0x105)]?.detectedWindowSource == .motion)
+        #expect(byID[PersistenceFixtures.uuid(0x102)]?.detectedWindowSource == .heartRate)
+        // A heart-rate window stores no source at all, as it always has.
+        #expect(byID[PersistenceFixtures.uuid(0x102)]?.detectedWindowSourceRaw == nil)
+    }
+
+    @Test func aWindowFromAFileWrittenBeforeTheSourceWasRecordedReadsAsTheHeartRates() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let source = try TestStore.context()
+        try fillEveryField(source)
+        let data = try BackupService.exportData(context: source, stamp: PersistenceFixtures.stamp())
+        // The same file as an older build wrote it: windows, but no `detectedBy`.
+        let text = String(decoding: data, as: UTF8.self)
+            .replacingOccurrences(of: #"\"detectedBy\"\s*:\s*\"[a-zA-Z]+\"\s*,?"#, with: "",
+                                  options: .regularExpression)
+        let older = Data(text.utf8)
+        #expect(!text.contains("detectedBy"))
+
+        let fresh = try TestStore.context()
+        try BackupService.restore(data: older, context: fresh)
+        let windows = try fresh.fetch(FetchDescriptor<SetLog>()).filter { $0.detectedWindow != nil }
+        #expect(!windows.isEmpty)
+        #expect(windows.allSatisfy { $0.detectedWindowSource == .heartRate && $0.detectedWindowSourceRaw == nil })
     }
 }

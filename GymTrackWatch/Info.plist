@@ -44,5 +44,7 @@
 	<string>GymTrack reads your heart rate and the energy you burn while you train, so a session shows what it actually cost you.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>GymTrack saves your session to Health as a strength training workout, so it counts towards your rings.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>GymTrack watches your wrist's movement during a workout to notice a set you forgot to start or log, and records when it began and ended.</string>
 </dict>
 </plist>

@@ -117,7 +117,7 @@ final class WatchCommandCenter {
     /// remembers its own; see `DroppedSetMemory.rememberHeardLog`. The logger
     /// reports nothing back, so the store is asked whether the row holds it.
     private func rememberHeardLog(_ command: WatchCommand) {
-        guard case .logSet(let id, _, _, _, let loggedAt) = command, loggedAt != nil,
+        guard case .logSet(let id, _, _, _, let loggedAt, _) = command, loggedAt != nil,
               let context else { return }
         var byID = FetchDescriptor<SetLog>(predicate: #Predicate { $0.id == id })
         byID.fetchLimit = 1
@@ -167,7 +167,7 @@ final class WatchCommandCenter {
             save(context)
             pushMirror(context: context)
 
-        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected):
             // A log the wrist already took back, whose undo got here first.
             guard !DroppedSetMemory.shared.wasTakenBack(id, loggedAt: loggedAt) else { return }
             // A log this path already applied and the lifter has since undone,
@@ -183,7 +183,7 @@ final class WatchCommandCenter {
             // could reach it.
             guard let set = setLog(id: id, in: context), set.session?.isActive == true else {
                 restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
-                                  loggedAt: loggedAt, in: context)
+                                  loggedAt: loggedAt, detected: detected, in: context)
                 return
             }
             // The same log again: see `SetLog.holdsWristLog`. Its load has
@@ -216,6 +216,9 @@ final class WatchCommandCenter {
             // abandoned for another exercise is exactly what the queue delivers
             // minutes before the log that used to close it.
             set.session?.settleStarts(afterLogging: set, at: loggedMoment)
+            // After the starts are settled, so a start this log dropped no
+            // longer stands in the way; see `SetLog.takeMotionWindow`.
+            set.takeMotionWindow(detected)
             settleNudges(answeredBy: set, in: context)
             carryLoadForward(from: set, in: context)
             set.stampWristMachine(loggedAt: loggedMoment, context: context)
@@ -417,9 +420,9 @@ final class WatchCommandCenter {
     func applyToFinishedSession(_ command: WatchCommand) {
         guard let context else { return }
         switch command {
-        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected):
             restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
-                              loggedAt: loggedAt, in: context, loggerRunning: true)
+                              loggedAt: loggedAt, detected: detected, in: context, loggerRunning: true)
         case .undoSet(let id, let completion):
             DroppedSetMemory.shared.rememberTakenBack(id, completedAt: completion)
             withdrawDroppedSet(id, completedAt: completion, in: context, loggerRunning: true)
@@ -430,13 +433,14 @@ final class WatchCommandCenter {
 
     /// See `WorkoutSession.restoreDroppedSet` for when a row comes back.
     private func restoreDroppedSet(_ id: UUID, weightKg: Double, reps: Int, seconds: Int,
-                                   loggedAt: Date?, in context: ModelContext,
-                                   loggerRunning: Bool = false) {
+                                   loggedAt: Date?, detected: WatchMotionWindow? = nil,
+                                   in context: ModelContext, loggerRunning: Bool = false) {
         guard let row = DroppedSetMemory.shared.row(for: id),
               let session = session(id: row.sessionID, in: context),
-              session.restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
-                                        loggedAt: loggedAt, in: context) != nil
+              let restored = session.restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
+                                                       loggedAt: loggedAt, in: context)
         else { return }
+        restored.takeMotionWindow(detected)
         save(context)
         announceChange(context: context, loggerRunning: loggerRunning)
     }
@@ -935,7 +939,8 @@ enum WatchSnapshotFactory {
             unit: AppSettings.shared.weightUnit,
             effortEnabled: AppSettings.shared.trackRPE,
             restUnknown: restUnknown ? true : nil,
-            heartRateCue: AppSettings.shared.heartRateReadyCue ? nil : false
+            heartRateCue: AppSettings.shared.heartRateReadyCue ? nil : false,
+            motionSetDetection: AppSettings.shared.watchMotionSets
         )
         // Asked of the snapshot rather than of the session, so this answer and
         // the watch's own — made while a log of its own is still unconfirmed —

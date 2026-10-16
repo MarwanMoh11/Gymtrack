@@ -296,6 +296,14 @@ enum BackupService {
         /// Optional like the rest, so older backups still decode.
         var detectedStartedAt: Date?
         var detectedEndedAt: Date?
+        /// What read that window, written whenever there is one: `heartRate`
+        /// for the climb out of the rest, read off the watch's trace after the
+        /// session, or `motion` for a bout of rep-like movement the wrist saw
+        /// end shortly before the set was logged (sharper at both ends, since
+        /// the heart rate lags the bar by several seconds). A file written
+        /// before the wrist watched movement has a window without this key,
+        /// and every such window was read from the heart rate.
+        var detectedBy: String?
         /// The range this set was aimed at, on a reps set that had one. A
         /// continuation row's zeros mean "no target" and are left out, as is
         /// any range on a timed set. Optional so older files still decode.
@@ -799,6 +807,7 @@ enum BackupService {
                                      // reaches a reader as a set's length.
                                      detectedStartedAt: set.detectedWindow?.start,
                                      detectedEndedAt: set.detectedWindow?.end,
+                                     detectedBy: set.detectedWindowSource?.rawValue,
                                      targetRepsLow: repTarget(set.targetRepsLow, tracking: set.tracking),
                                      targetRepsHigh: repTarget(set.targetRepsHigh, tracking: set.tracking),
                                      rpe: set.rpe,
@@ -1653,7 +1662,10 @@ enum BackupService {
             // set, and stored it would be exported again as though it were.
             if let start = setDTO.detectedStartedAt, let end = setDTO.detectedEndedAt,
                let logged = setDTO.completedAt, start < end, end <= logged {
-                set.recordDetectedWindow(DetectedSetWindow(start: start, end: end))
+                // An unknown or absent source is the heart rate's: that is
+                // what every window was before the wrist read motion.
+                let source = setDTO.detectedBy.flatMap(DetectedWindowSource.init(rawValue:)) ?? .heartRate
+                set.recordDetectedWindow(DetectedSetWindow(start: start, end: end), source: source)
             }
             set.rpe = setDTO.rpe
             set.averageHeartRate = setDTO.averageHeartRate

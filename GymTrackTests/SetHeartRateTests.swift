@@ -230,3 +230,55 @@ struct SetHeartRateTests {
         #expect(heartRate.peak == inWindow.max())
     }
 }
+
+// MARK: - Beside the wrist's motion window
+
+extension SetHeartRateTests {
+
+    @Test(arguments: [
+        (announced: false, continuation: false, source: nil as DetectedWindowSource?, detects: true),
+        (announced: false, continuation: false, source: DetectedWindowSource.heartRate as DetectedWindowSource?,
+         detects: true),
+        (announced: false, continuation: false, source: DetectedWindowSource.motion as DetectedWindowSource?,
+         detects: false),
+        (announced: true, continuation: false, source: nil as DetectedWindowSource?, detects: false),
+        (announced: false, continuation: true, source: nil as DetectedWindowSource?, detects: false),
+    ])
+    func theTraceIsSearchedOnlyWhereNothingSharperPlacedTheSet(announced: Bool, continuation: Bool,
+                                                               source: DetectedWindowSource?, detects: Bool) {
+        #expect(SetHeartRateAttribution.mayDetect(startedAt: announced ? Self.at(90) : nil,
+                                                  isContinuation: continuation,
+                                                  windowSource: source) == detects)
+    }
+
+    /// The post-session pass over a set the wrist's motion placed: the heart
+    /// rate is read through the motion window and labelled `.detected`, and
+    /// no window of its own is proposed to replace it.
+    @Test func aMotionWindowIsReadThroughAndNeverReplacedByTheHeartRates() throws {
+        let clean = Effort()
+        let samples = Self.trace(to: 150, clean.bpm)
+        let motion = DetectedSetWindow(start: Self.at(104), end: Self.at(138))
+        let id = UUID()
+        func stored(detected: DetectedSetWindow?, source: DetectedWindowSource?) -> StoredSetHeartRate {
+            StoredSetHeartRate(
+                timing: SetTiming(id: id, startedAt: nil, completedAt: Self.at(150), reps: 8, heldSeconds: 0,
+                                  detected: detected),
+                hasReading: false, readFrom: nil,
+                mayDetect: SetHeartRateAttribution.mayDetect(startedAt: nil, isContinuation: false,
+                                                             windowSource: source))
+        }
+
+        let withMotion = SetHeartRateAttribution.updates(samples: samples,
+                                                         sets: [stored(detected: motion, source: .motion)],
+                                                         sessionStart: Self.at(0))
+        let update = try #require(withMotion.first)
+        #expect(update.detected == nil)
+        #expect(update.heartRate.source == .detected)
+
+        // The same trace with no motion window: the heart rate finds its own.
+        let alone = SetHeartRateAttribution.updates(samples: samples,
+                                                    sets: [stored(detected: nil, source: nil)],
+                                                    sessionStart: Self.at(0))
+        #expect(alone.first?.detected != nil)
+    }
+}

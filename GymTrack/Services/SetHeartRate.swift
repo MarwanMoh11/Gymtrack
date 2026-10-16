@@ -134,6 +134,30 @@ struct DetectedSetWindow: Equatable, Sendable {
     var duration: TimeInterval { end.timeIntervalSince(start) }
 }
 
+/// What read a set's detected window: the heart rate's climb, after the
+/// session, or the wrist's movement, as the set was logged.
+enum DetectedWindowSource: String, Sendable {
+    case heartRate
+    case motion
+}
+
+extension SetHeartRateAttribution {
+    /// Whether a pass may look for this set in the heart-rate trace.
+    ///
+    /// Not where a start was announced: that is a measurement, and nothing read
+    /// off a trace improves on one. Not for a continuation: a "set" found in a
+    /// drop's back-off row would be the tail of the row above. And not where
+    /// the wrist's motion already placed the set: the movement is the set
+    /// itself, edge to edge, while the heart rate lags the bar by several
+    /// seconds at both ends, so replacing one with the other would trade the
+    /// sharper reading for the blurrier. The heart rate is still read, through
+    /// the motion window, and labelled `.detected` like any other.
+    static func mayDetect(startedAt: Date?, isContinuation: Bool,
+                          windowSource: DetectedWindowSource?) -> Bool {
+        startedAt == nil && !isContinuation && windowSource != .motion
+    }
+}
+
 /// Finding the set inside the gap before it was logged.
 ///
 /// Most sets are never announced, so the gap from the previous set being logged

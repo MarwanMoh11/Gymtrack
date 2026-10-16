@@ -11,6 +11,7 @@ struct GymTrackWatchApp: App {
 
     init() {
         WatchConnector.shared.activate()
+        WatchMotionSetWatcher.shared.follow()
     }
 
     var body: some Scene {

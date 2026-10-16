@@ -58,6 +58,7 @@ extension WorkoutSession {
             guard !DroppedSetMemory.shared.wasHeardLog(log.setID, loggedAt: log.completedAt) else { continue }
             set.takeWristLog(weightKg: log.weightKg, reps: log.reps, seconds: log.seconds,
                              at: WatchCommand.loggedMoment(log.completedAt), context: modelContext)
+            set.takeMotionWindow(log.detected)
         }
         // An undo naming a log the row no longer holds is refused, as it is
         // when it arrives on its own (`SetLog.admitsWristUndo`): the lifter

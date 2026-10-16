@@ -205,10 +205,22 @@ struct HealthWatchSettingsView: View {
             ))
             .tint(Theme.accent)
             .disabled(!watch.isLinked)
+
+            // The wrist hears about the change with the next mirror; resent
+            // now so a session already running stops or starts reading.
+            Toggle("Notice sets from wrist movement", isOn: Binding(
+                get: { settings.watchMotionSets },
+                set: {
+                    settings.watchMotionSets = $0
+                    WatchBridge.shared.resend()
+                }
+            ))
+            .tint(Theme.accent)
+            .disabled(!watch.isLinked)
         } header: {
             Text("Apple Watch")
         } footer: {
-            Text("Start a workout on either device and it appears on the other. The watch records your heart rate and the energy you burn, and logs sets straight from your wrist.")
+            Text("Start a workout on either device and it appears on the other. The watch records your heart rate and the energy you burn, and logs sets straight from your wrist. With wrist movement on, a set you forgot to log is offered on the watch for a minute, with when it started and ended.")
         }
         .listRowBackground(Theme.surface)
     }

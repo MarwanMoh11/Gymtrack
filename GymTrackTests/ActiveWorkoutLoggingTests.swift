@@ -1609,6 +1609,23 @@ struct ActiveWorkoutLoggingTests {
 
     // MARK: Commands from the wrist
 
+    @Test func aWristLogFilesItsMotionWindowAsADetectionAndUncompleteErasesIt() throws {
+        try WorkoutBench.run { testBench in
+            let (_, rows, workout) = testBench.standard()
+            let window = WatchMotionWindow(start: at(80), end: at(114))
+            #expect(workout.apply(.logSet(id: rows[0].id, weightKg: 100, reps: 8, seconds: 0, at: at(120),
+                                          detected: window)))
+
+            #expect(rows[0].startedAt == nil)
+            #expect(rows[0].detectedWindowSource == .motion)
+            #expect(rows[0].detectedWindow == DetectedSetWindow(start: at(80), end: at(114)))
+
+            workout.uncomplete(rows[0])
+            #expect(rows[0].detectedStartedAt == nil && rows[0].detectedEndedAt == nil)
+            #expect(rows[0].detectedWindowSourceRaw == nil)
+        }
+    }
+
     @Test func aWristLogGivesTheSameRecordAsALogOnThePhone() throws {
         try WorkoutBench.run { testBench in
             let (_, rows, workout) = testBench.standard()
@@ -1758,6 +1775,7 @@ struct ActiveWorkoutLoggingTests {
         ("heartRateWindowRaw", .loggedByTheSet, { text($0.heartRateWindowRaw) }),
         ("detectedStartedAt", .loggedByTheSet, { text($0.detectedStartedAt) }),
         ("detectedEndedAt", .loggedByTheSet, { text($0.detectedEndedAt) }),
+        ("detectedWindowSourceRaw", .loggedByTheSet, { text($0.detectedWindowSourceRaw) }),
         ("loadNudgeOutcomeRaw", .loggedByTheSet, { text($0.loadNudgeOutcomeRaw) }),
         ("loadNudgeToKg", .loggedByTheSet, { text($0.loadNudgeToKg) }),
         ("machineID", .loggedByTheSet, { text($0.machineID) }),
@@ -1827,8 +1845,9 @@ struct ActiveWorkoutLoggingTests {
         set.startedAt = moment.addingTimeInterval(-40)
         set.rpe = SetFeel.hard.rawValue
         set.apply(SetHeartRate(average: 131, peak: 149, source: .measured))
+        // From the wrist's motion, so the source is written too.
         set.recordDetectedWindow(DetectedSetWindow(start: moment.addingTimeInterval(-38),
-                                                   end: moment.addingTimeInterval(-2)))
+                                                   end: moment.addingTimeInterval(-2)), source: .motion)
         set.recordLoadNudge(.taken, toKg: 62.5)
         set.stampMachine(MachineSetupRecord(catalogID: set.catalogID, machineID: "panatta-chest-press",
                                             settings: MachineSettings(["stop": 3])))

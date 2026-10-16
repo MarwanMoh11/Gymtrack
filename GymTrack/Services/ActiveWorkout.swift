@@ -1751,7 +1751,7 @@ final class ActiveWorkout {
     @discardableResult
     func apply(_ command: WatchCommand) -> Bool {
         switch command {
-        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected):
             // Not a row of this session, so possibly one the last Finish
             // deleted before the wrist's log of it could arrive. Swallowed
             // here, that lift was lost from the record; `RootView` passes it
@@ -1782,6 +1782,12 @@ final class ActiveWorkout {
             complete(set,
                      restSeconds: planItem(for: set)?.resolvedRestSeconds,
                      at: WatchCommand.loggedMoment(loggedAt), fromWrist: true)
+            // After `complete`, which settles the start this log may have
+            // dropped; saved again because `complete` already has.
+            if detected != nil {
+                set.takeMotionWindow(detected)
+                save()
+            }
             return true
 
         case .rateSet(let rating):

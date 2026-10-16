@@ -62,6 +62,8 @@ struct WatchLinkWireTests {
         .requestMirror, .startToday, .startFreestyle,
         .logSet(id: setID, weightKg: 82.5, reps: 5, seconds: 0, at: t0),
         .logSet(id: setID, weightKg: 0, reps: 12, seconds: 45, at: nil),
+        .logSet(id: setID, weightKg: 82.5, reps: 5, seconds: 0, at: t0,
+                detected: WatchMotionWindow(start: t0.addingTimeInterval(-40), end: t0.addingTimeInterval(-6))),
         .undoSet(id: setID, completedAt: t0),
         .undoSet(id: setID, completedAt: nil),
         .rateSet(rating),
@@ -147,7 +149,7 @@ struct WatchLinkWireTests {
 
         let payload = command.watchPayload(key: WatchLink.commandKey)
         let decoded = try #require(WatchCommand.fromWatchPayload(payload, key: WatchLink.commandKey))
-        guard case .logSet(_, _, _, _, let back) = decoded else {
+        guard case .logSet(_, _, _, _, let back, _) = decoded else {
             Issue.record("The command decoded as something else")
             return
         }
@@ -1145,5 +1147,84 @@ struct WatchLinkWireTests {
         let keys = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any]).keys
         #expect(!keys.contains("barWeight"))
         #expect(try JSONDecoder.watchLink.decode(WatchExerciseSnapshot.self, from: data).barWeight == nil)
+    }
+}
+
+// MARK: - The wrist's motion window
+
+extension WatchLinkWireTests {
+
+    private static let motion = WatchMotionWindow(start: t0.addingTimeInterval(-40), end: t0.addingTimeInterval(-6))
+
+    @Test func aLogCarriesItsMotionWindowAcrossTheWire() throws {
+        let command = WatchCommand.logSet(id: Self.setID, weightKg: 82.5, reps: 5, seconds: 0, at: Self.t0,
+                                          detected: Self.motion)
+        let payload = command.watchPayload(key: WatchLink.commandKey)
+        let decoded = try #require(WatchCommand.fromWatchPayload(payload, key: WatchLink.commandKey))
+        guard case .logSet(_, _, _, _, _, let window) = decoded else {
+            Issue.record("The command decoded as something else")
+            return
+        }
+        #expect(window == Self.motion)
+    }
+
+    @Test func aLogFromAnOlderWatchDecodesWithNoWindowAndNoneIsWrittenWhenAbsent() throws {
+        // What a watch from before motion detection sends: no `detected` key.
+        let plain = WatchCommand.logSet(id: Self.setID, weightKg: 82.5, reps: 5, seconds: 0, at: Self.t0)
+        let data = try JSONEncoder.watchLink.encode(plain)
+        #expect(!String(decoding: data, as: UTF8.self).contains("detected"))
+        let decoded = try JSONDecoder.watchLink.decode(WatchCommand.self, from: data)
+        #expect(decoded == plain)
+        guard case .logSet(_, _, _, _, _, let window) = decoded else {
+            Issue.record("The command decoded as something else")
+            return
+        }
+        #expect(window == nil)
+    }
+
+    @Test func aPendingLogKeepsItsWindowAndOneQueuedByAnOlderWatchStillDecodes() throws {
+        let log = WatchPendingLog(setID: Self.setID, weightKg: 60, reps: 8, seconds: 0,
+                                  completedAt: Self.t0, detected: Self.motion)
+        let back = try JSONDecoder.watchLink.decode(WatchPendingLog.self,
+                                                    from: JSONEncoder.watchLink.encode(log))
+        #expect(back == log)
+
+        let old = WatchPendingLog(setID: Self.setID, weightKg: 60, reps: 8, seconds: 0, completedAt: Self.t0)
+        let oldData = try JSONEncoder.watchLink.encode(old)
+        #expect(!String(decoding: oldData, as: UTF8.self).contains("detected"))
+        #expect(try JSONDecoder.watchLink.decode(WatchPendingLog.self, from: oldData).detected == nil)
+    }
+
+    /// Seconds relative to the log at `t0`; `previous` is the log before it.
+    @Test(arguments: [
+        (start: -40.0, end: -6.0, previous: -120.0 as Double?, takes: true),
+        (start: -40.0, end: -6.0, previous: nil as Double?, takes: true),
+        (start: -130.0, end: -90.0, previous: nil as Double?, takes: true),    // exactly the claim limit
+        (start: -130.0, end: -91.0, previous: nil as Double?, takes: false),   // past it
+        (start: -40.0, end: 1.0, previous: nil as Double?, takes: false),      // ends after the log
+        (start: -6.0, end: -40.0, previous: nil as Double?, takes: false),     // runs backwards
+        (start: -40.0, end: -40.0, previous: nil as Double?, takes: false),    // no length
+        (start: -40.0, end: -6.0, previous: -40.0 as Double?, takes: false),   // starts at the previous log
+        (start: -40.0, end: -6.0, previous: -30.0 as Double?, takes: false),   // reaches back past it
+        (start: -200.0, end: -49.0, previous: nil as Double?, takes: false),   // longer than any set
+    ])
+    func aMotionWindowDescribesALogOnlyInsideItsGap(start: Double, end: Double, previous: Double?, takes: Bool) {
+        let window = WatchMotionWindow(start: Self.t0.addingTimeInterval(start), end: Self.t0.addingTimeInterval(end))
+        #expect(window.describes(logAt: Self.t0, after: previous.map { Self.t0.addingTimeInterval($0) }) == takes)
+    }
+
+    @Test func theMotionSettingTravelsAndAnOlderPhonesMirrorReadsAsUnset() throws {
+        var session = WatchSessionSnapshot(
+            sessionID: Self.sessionID, title: "Push", planName: "PPL", startedAt: Self.t0, exercises: [],
+            restTotalSeconds: 90, restAutoStart: true, volumeKg: 0, unit: .kg, effortEnabled: true,
+            restUnknown: nil, motionSetDetection: false)
+        let back = try JSONDecoder.watchLink.decode(WatchSessionSnapshot.self,
+                                                    from: JSONEncoder.watchLink.encode(session))
+        #expect(back.motionSetDetection == false)
+
+        session.motionSetDetection = nil
+        let data = try JSONEncoder.watchLink.encode(session)
+        #expect(!String(decoding: data, as: UTF8.self).contains("motionSetDetection"))
+        #expect(try JSONDecoder.watchLink.decode(WatchSessionSnapshot.self, from: data).motionSetDetection == nil)
     }
 }

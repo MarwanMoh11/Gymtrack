@@ -235,6 +235,9 @@ final class WatchConnector: NSObject {
         let moment = Date()
         guard let session else { return moment }
         pending.adopt(session.sessionID)
+        // Asked before the start is settled below: a set somebody announced
+        // has its start, and the wrist's movement is not offered in its place.
+        let announced = (pending.starts[set.id] ?? set.startedAt) != nil
         // Logged inside the count-in, so the start is dropped here exactly as
         // the phone will drop it when the log lands — see
         // `ActiveWorkout.complete`. Left in the overlay it would never be
@@ -246,9 +249,12 @@ final class WatchConnector: NSObject {
         }
         pending.forgetUndo(of: set.id)
         ratings.remove(set.id)
+        let detected = WatchMotionSetWatcher.shared.claim(forLogAt: moment, of: set, announced: announced,
+                                                          in: session)
         pending.logs[set.id] = WatchPendingLog(setID: set.id, weightKg: weightKg, reps: reps,
-                                               seconds: seconds, completedAt: moment)
-        send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds, at: moment))
+                                               seconds: seconds, completedAt: moment, detected: detected)
+        send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds, at: moment,
+                     detected: detected))
         return moment
     }
 
@@ -280,6 +286,9 @@ final class WatchConnector: NSObject {
         pending.starts.removeValue(forKey: set.id)
         pending.cancels.insert(set.id)
         send(.undoSet(id: set.id, completedAt: completion))
+        // The lifter is doing something else; an offer standing beside the
+        // undo would invite logging the set just taken back.
+        WatchMotionSetWatcher.shared.withdraw()
     }
 
     /// Says the set is about to begin. Drawn here immediately and stamped here
@@ -312,6 +321,7 @@ final class WatchConnector: NSObject {
         pending.adopt(session.sessionID)
         pending.focus = catalogID
         send(.focusExercise(catalogID: catalogID))
+        WatchMotionSetWatcher.shared.withdraw()
     }
 
     /// The latest local actions accompany Finish because queued set commands

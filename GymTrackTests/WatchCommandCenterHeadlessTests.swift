@@ -2035,3 +2035,74 @@ extension WatchCommandCenterHeadlessTests {
         }
     }
 }
+
+// MARK: - The wrist's motion window, applied with no logger
+
+extension WatchCommandCenterHeadlessTests {
+
+    private func motion(_ rig: WatchCommandRig, from start: TimeInterval, to end: TimeInterval) -> WatchMotionWindow {
+        WatchMotionWindow(start: rig.at(start), end: rig.at(end))
+    }
+
+    @Test func aHeadlessLogFilesTheWristsMotionAsADetectionAndItsUndoErasesIt() throws {
+        try withRig { rig in
+            let sets = try rig.seed().sets
+            rig.send(.logSet(id: sets[0].id, weightKg: 60, reps: 8, seconds: 0, at: rig.at(600),
+                             detected: motion(rig, from: 560, to: 594)))
+
+            let set = sets[0]
+            #expect(set.isCompleted)
+            // A detection, never a stamp: nobody announced this set.
+            #expect(set.startedAt == nil)
+            #expect(set.detectedWindowSource == .motion)
+            #expect(sameMoment(set.detectedWindow?.start, rig.at(560)))
+            #expect(sameMoment(set.detectedWindow?.end, rig.at(594)))
+
+            rig.send(.undoSet(id: set.id, completedAt: rig.at(600)))
+            #expect(!set.isCompleted)
+            #expect(set.detectedStartedAt == nil && set.detectedEndedAt == nil && set.detectedWindowSourceRaw == nil)
+        }
+    }
+
+    @Test func anAnnouncedStartKeepsItsPlaceAndTheMotionWindowIsNotFiled() throws {
+        try withRig { rig in
+            let sets = try rig.seed().sets
+            rig.send(.announceStart(id: sets[0].id, at: rig.at(550)))
+            rig.send(.logSet(id: sets[0].id, weightKg: 60, reps: 8, seconds: 0, at: rig.at(600),
+                             detected: motion(rig, from: 560, to: 594)))
+            #expect(sameMoment(sets[0].startedAt, rig.at(550)))
+            #expect(sets[0].detectedWindow == nil && sets[0].detectedWindowSourceRaw == nil)
+        }
+    }
+
+    @Test(arguments: [
+        (start: 400.0, end: 505.0),   // ended more than the claim limit before the log
+        (start: 560.0, end: 605.0),   // ends after the log
+    ])
+    func aMotionWindowThatCannotBeThisLogIsDropped(start: Double, end: Double) throws {
+        try withRig { rig in
+            let sets = try rig.seed().sets
+            rig.send(.logSet(id: sets[0].id, weightKg: 60, reps: 8, seconds: 0, at: rig.at(600),
+                             detected: motion(rig, from: start, to: end)))
+            #expect(sets[0].isCompleted)
+            #expect(sets[0].detectedWindow == nil && sets[0].detectedWindowSourceRaw == nil)
+        }
+    }
+
+    @Test func aWristFinishCarriesTheMotionWindowOfALogThePhoneNeverHeard() throws {
+        try withRig { rig in
+            let (session, sets) = try rig.seed()
+            let batch = WatchFinishBatch(
+                sessionID: session.id,
+                logs: [WatchPendingLog(setID: sets[0].id, weightKg: 80, reps: 5, seconds: 0,
+                                       completedAt: rig.at(300), detected: motion(rig, from: 260, to: 295))],
+                undos: [], starts: [:], cancels: [], ratings: [], endedAt: rig.at(500))
+
+            rig.send(.finishSession(batch, metrics: nil))
+
+            let kept = try #require(session.sets.first { $0.id == sets[0].id })
+            #expect(kept.detectedWindowSource == .motion)
+            #expect(sameMoment(kept.detectedWindow?.start, rig.at(260)))
+        }
+    }
+}

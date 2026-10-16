@@ -826,11 +826,11 @@ final class HealthKitService {
                 ),
                 hasReading: set.hasHeartRate,
                 readFrom: set.hasHeartRate ? remembered[set.id] : nil,
-                // Read only where nobody said: an announced start is a
-                // measurement, and nothing read off a trace improves on one.
-                // Not for a continuation either — a "set" found in a drop's
-                // back-off row would be the tail of the row above.
-                mayDetect: set.startedAt == nil && !set.isContinuation
+                // See `SetHeartRateAttribution.mayDetect`: not over an
+                // announced start, a continuation, or the wrist's motion.
+                mayDetect: SetHeartRateAttribution.mayDetect(startedAt: set.startedAt,
+                                                             isContinuation: set.isContinuation,
+                                                             windowSource: set.detectedWindowSource)
             )
         }
         guard stored.contains(where: \.isOpen) else { return }
@@ -857,7 +857,11 @@ final class HealthKitService {
                   SetHeartRateAttribution.mayReplace(hasReading: set.hasHeartRate, readFrom: current[update.id],
                                                      samples: update.samples)
             else { continue }
-            if let window = update.detected { set.recordDetectedWindow(window) }
+            // Checked again here as well as in `mayDetect`: the wrist's
+            // window is never overwritten by the heart rate's.
+            if let window = update.detected, set.detectedWindowSource != .motion {
+                set.recordDetectedWindow(window)
+            }
             set.apply(update.heartRate)
             written[update.id] = update.samples
         }
