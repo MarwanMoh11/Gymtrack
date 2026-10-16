@@ -558,7 +558,11 @@ final class ActiveWorkout {
     ///   because a log sent out of range waits in a queue until the phone is
     ///   nearby again and stamping it on arrival would report a set that
     ///   finished on the walk back rather than under the bar.
-    func complete(_ set: SetLog, restSeconds: Int?, at moment: Date = .now) {
+    /// - Parameter fromWrist: true for a log the watch made. The setup on
+    ///   screen is the one a phone tap was done on, but a wrist log can land
+    ///   after the setup changed, so it takes only one from before it; see
+    ///   `SetLog.stampWristMachine`.
+    func complete(_ set: SetLog, restSeconds: Int?, at moment: Date = .now, fromWrist: Bool = false) {
         set.isCompleted = true
         set.completedAt = moment
         // Logged inside the count-in, so the start it was counting towards
@@ -582,7 +586,11 @@ final class ActiveWorkout {
         restCancelledByStart = nil
         restCancelledByContinuation = nil
         carryLoadForward(from: set)
-        set.stampMachine(MachineSetups.setup(for: set.catalogID, context: context))
+        if fromWrist {
+            set.stampWristMachine(loggedAt: moment, context: context)
+        } else {
+            set.stampMachine(MachineSetups.setup(for: set.catalogID, context: context))
+        }
         save()
 
         if isPersonalRecord(set) {
@@ -1762,7 +1770,7 @@ final class ActiveWorkout {
             if set.tracking == .duration { set.seconds = seconds }
             complete(set,
                      restSeconds: planItem(for: set)?.resolvedRestSeconds,
-                     at: WatchCommand.loggedMoment(loggedAt))
+                     at: WatchCommand.loggedMoment(loggedAt), fromWrist: true)
             return true
 
         case .rateSet(let rating):

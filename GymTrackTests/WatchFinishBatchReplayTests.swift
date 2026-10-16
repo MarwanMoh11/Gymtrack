@@ -203,4 +203,24 @@ struct WatchFinishBatchReplayTests {
             #expect(restored.machineID == expected)
         }
     }
+
+    /// A wrist log that reaches the logger on screen can still be late, so it
+    /// is held to the same rule; a tap on the phone is not (`MachineSetupTests`).
+    @Test(arguments: [(60.0, true), (600.0, false)])
+    func aWristLogThroughTheLoggerStampsOnlyASetupFromBeforeIt(chosenAfter: Double, stamped: Bool) throws {
+        try WorkoutBench.run { bench in
+            let session = bench.session()
+            let rows = bench.addRows(to: session, count: 2, weightKg: 60, low: 6, high: 10)
+            let workout = bench.open(session)
+            let machine = try #require(MachineCatalog.all.first)
+            MachineSetups.choose(machine.id, for: rows[0].catalogID, context: bench.context,
+                                 at: WorkoutBench.t0.addingTimeInterval(chosenAfter))
+
+            #expect(workout.apply(.logSet(id: rows[0].id, weightKg: 60, reps: 8, seconds: 0,
+                                          at: WorkoutBench.t0.addingTimeInterval(300))))
+
+            #expect(rows[0].isCompleted)
+            #expect(rows[0].machineID == (stamped ? machine.id : nil))
+        }
+    }
 }
