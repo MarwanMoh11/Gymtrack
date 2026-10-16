@@ -73,6 +73,14 @@ struct WatchSetSnapshot: Codable, Hashable, Identifiable, Sendable {
     var completedAt: Date?
     /// Absent until the lifter explicitly answers; never inferred from the load or reps.
     var rpe: Double?
+    /// Which of the plan day's slots for this exercise the row belongs to,
+    /// counted from 0 in session order; a continuation carries its parent's.
+    ///
+    /// The phone's carry-forward stops where a slot ends, and the wrist cannot
+    /// work that boundary out itself: the rep ranges don't say it when two
+    /// slots share one. Absent from a phone that predates it, in which case
+    /// the wrist carries to the end of the exercise as it always did.
+    var slot: Int?
 
     /// A continuation's weight was chosen for that row alone, so it neither
     /// carries forward onto the sets still to come nor accepts a load carried

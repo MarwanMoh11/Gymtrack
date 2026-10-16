@@ -93,7 +93,7 @@ final class WatchConnector: NSObject {
         if let focus = pending.focus { session.preferredExerciseID = focus }
         guard hasPendingChanges else { return session }
 
-        session.exercises = session.exercises.map(folding)
+        session.exercises = session.exercises.map { Self.folding($0, pending: pending, ratings: ratings) }
         // The current set moves on as soon as the last one is logged, rather
         // than when the phone says so — and it has to move to the set the phone
         // is about to name, which is the one on the exercise the lifter chose.
@@ -116,7 +116,11 @@ final class WatchConnector: NSObject {
     /// just changed, and logging that row writes the old weight back over the
     /// phone's. Dropping a plate on the wrist undid itself for the rest of the
     /// exercise.
-    private func folding(_ exercise: WatchExerciseSnapshot) -> WatchExerciseSnapshot {
+    ///
+    /// Static, over the overlay it is handed, so the tests can fold without the
+    /// singleton's `UserDefaults` behind it.
+    static func folding(_ exercise: WatchExerciseSnapshot, pending: WatchPendingActions,
+                        ratings: WatchRatingOutbox) -> WatchExerciseSnapshot {
         var exercise = exercise
         exercise.sets = exercise.sets.map { set in
             var set = set
@@ -147,6 +151,10 @@ final class WatchConnector: NSObject {
             exercise.sets = exercise.sets.map { other in
                 var other = other
                 guard !other.isCompleted, !other.isContinuation, other.index > logged.index else { return other }
+                // The phone stops the load at the end of the plan slot, so a
+                // heavy set's weight doesn't reach the back-off sets after it.
+                // A mirror from a phone that doesn't name slots carries on.
+                if let from = logged.slot, let to = other.slot, from != to { return other }
                 other.weightKg = logged.weightKg
                 if exercise.tracking == .duration { other.seconds = logged.seconds }
                 return other

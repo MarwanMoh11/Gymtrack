@@ -830,6 +830,13 @@ enum WatchSnapshotFactory {
                          restSeconds: (String) -> Int,
                          lastTimeLabel: (String) -> String?) -> WatchSessionSnapshot {
         let groups = session.exerciseGroups
+        let day = session.planDayID.flatMap { dayID in
+            session.modelContext.flatMap { context -> PlanDay? in
+                var byID = FetchDescriptor<PlanDay>(predicate: #Predicate { $0.id == dayID })
+                byID.fetchLimit = 1
+                return (try? context.fetch(byID))?.first
+            }
+        }
 
         var snapshot = WatchSessionSnapshot(
             sessionID: session.id,
@@ -837,7 +844,8 @@ enum WatchSnapshotFactory {
             planName: session.planName,
             startedAt: session.startedAt,
             exercises: groups.map { group in
-                WatchExerciseSnapshot(
+                let slots = slotNumbers(of: group, in: session, day: day)
+                return WatchExerciseSnapshot(
                     id: group.catalogID,
                     name: group.name,
                     order: group.order,
@@ -856,7 +864,8 @@ enum WatchSnapshotFactory {
                             continuation: set.isContinuation,
                             startedAt: set.startedAt,
                             completedAt: set.completedAt,
-                            rpe: set.rpe
+                            rpe: set.rpe,
+                            slot: slots[set.id]
                         )
                     },
                     lastTimeLabel: lastTimeLabel(group.catalogID),
@@ -882,6 +891,27 @@ enum WatchSnapshotFactory {
             snapshot.currentSetID = snapshot.focusedExercise?.sets.first { !$0.isCompleted }?.id
         }
         return snapshot
+    }
+
+    /// The plan slot each row of one exercise belongs to, named the way the
+    /// phone's carry-forward counts them (`SessionFactory.slotPositions`), so
+    /// the wrist can stop a carried load where the phone does. A drop or
+    /// cluster row is part of the slot of the set it continues. A session with
+    /// no day behind it has one slot per exercise, as logging assumes.
+    @MainActor
+    static func slotNumbers(of group: SessionExerciseGroup, in session: WorkoutSession,
+                            day: PlanDay?) -> [UUID: Int] {
+        let layout = day?.orderedItems.filter { $0.catalogID == group.catalogID } ?? []
+        let working = group.sets.filter { !$0.isContinuation }
+        let positions = SessionFactory.slotPositions(of: working, layout: layout)
+        var numbers: [UUID: Int] = [:]
+        var current = 0
+        var next = positions.makeIterator()
+        for set in group.sets {
+            if !set.isContinuation { current = next.next() ?? current }
+            numbers[set.id] = current
+        }
+        return numbers
     }
 
     /// "60 × 8" — last time's best set, for the hint under the exercise name.

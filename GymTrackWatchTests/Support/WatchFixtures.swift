@@ -53,11 +53,11 @@ func watchTestDefaults(_ name: String = #function) -> UserDefaults {
 /// One set on the wrist, unlogged unless `completedAt` says when it was.
 func watchSet(_ id: UUID = UUID(), index: Int = 0, weightKg: Double = 60, reps: Int = 5,
               completedAt: Date? = nil, startedAt: Date? = nil, rpe: Double? = nil,
-              continuation: Bool? = nil) -> WatchSetSnapshot {
+              continuation: Bool? = nil, slot: Int? = nil) -> WatchSetSnapshot {
     WatchSetSnapshot(id: id, index: index, weightKg: weightKg, reps: reps, seconds: 0,
                      targetRepsLow: reps, targetRepsHigh: reps,
                      isCompleted: completedAt != nil, continuation: continuation,
-                     startedAt: startedAt, completedAt: completedAt, rpe: rpe)
+                     startedAt: startedAt, completedAt: completedAt, rpe: rpe, slot: slot)
 }
 
 /// An exercise holding the given sets, in plan position `order`.
