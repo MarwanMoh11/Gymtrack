@@ -142,10 +142,10 @@ class FixtureNumbers(unittest.TestCase):
         self.assertEqual(self.m["lats.maxSessionFractionalSets"], 6.0)
         self.assertEqual(self.stats["volumeWeeks"], ["2026-08-31", "2026-09-07", "2026-09-14", "2026-09-21"])
 
-    def test_a_late_sunday_session_counts_in_the_lifters_monday(self):
+    def test_a_session_after_four_on_monday_counts_in_the_lifters_monday(self):
         snap = fixture.export()
-        snap["sessions"] = [{"id": "s", "title": "Push A", "planName": "x", "startedAt": "2026-09-27T22:30:00Z",
-                             "endedAt": "2026-09-27T23:30:00Z",
+        snap["sessions"] = [{"id": "s", "title": "Push A", "planName": "x", "startedAt": "2026-09-28T01:30:00Z",
+                             "endedAt": "2026-09-28T02:30:00Z",
                              "sets": [{"catalogID": "barbell-bench-press", "exerciseName": "x", "exerciseOrder": 0,
                                        "setIndex": 0, "weightKg": 80, "reps": 8, "isCompleted": True}]}]
         result = stats.compute(snap)

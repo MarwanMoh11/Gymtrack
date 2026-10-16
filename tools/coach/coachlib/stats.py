@@ -14,7 +14,7 @@ import math
 import re
 import statistics
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from .util import format_time, parse_time, same_id
 
@@ -25,6 +25,9 @@ PLATEAU_MIN_DAYS = 21
 NOISE_WINDOW = 12
 VOLUME_WEEKS = 4
 NOTE_DAYS = 90
+# The wall-clock hour a training day begins; the small hours before it still
+# belong to the night before. Mirrors `TrainingDay.cutoffHour` in the app.
+TRAINING_DAY_CUTOFF_HOUR = 4
 EFFORT_ORDINAL = {"easy": 1, "solid": 2, "hard": 3, "allOut": 4}
 EFFORT_WORD = {1: "easy", 2: "solid", 3: "hard", 4: "allOut"}
 RPE_TO_EFFORT = {6.0: "easy", 8.0: "solid", 9.0: "hard", 10.0: "allOut"}
@@ -111,7 +114,49 @@ def catalog_index(snapshot: dict) -> dict:
             muscles = _unique(muscle_from_label(m) for m in entry.get("muscleRaw", []))
         index[entry["catalogID"]] = {"name": entry["name"], "muscles": muscles,
                                      "tracking": entry.get("trackingRaw")}
+        # Present only on a retired ID the app folded into a survivor; absent
+        # on every other entry and in older exports, where nothing merges.
+        if entry.get("mergedInto"):
+            index[entry["catalogID"]]["mergedInto"] = entry["mergedInto"]
     return index
+
+
+def canonical_id(catalog: dict, catalog_id: str) -> str:
+    """The movement an exercise ID stands for: the survivor a retired catalog
+    ID was merged into, or the ID itself. Sets, notes and slots keep the ID
+    they were logged under so a citation still points at the real record;
+    only grouping goes through this. Custom exercises never carry the field,
+    so two of them sharing a display name stay apart."""
+    seen = set()
+    while catalog_id not in seen:
+        seen.add(catalog_id)
+        survivor = (catalog.get(catalog_id) or {}).get("mergedInto")
+        if not survivor:
+            break
+        catalog_id = survivor
+    return catalog_id
+
+
+def catalog_entry(catalog: dict, catalog_id: str) -> dict:
+    """The catalog entry for a movement: the survivor's when the export has
+    it, else the entry of the ID as logged."""
+    return catalog.get(canonical_id(catalog, catalog_id)) or catalog.get(catalog_id) or {}
+
+
+def merged_ids(catalog: dict) -> dict[str, str]:
+    """retired ID -> survivor, for every entry that was merged."""
+    return {cid: canonical_id(catalog, cid) for cid, entry in catalog.items() if entry.get("mergedInto")}
+
+
+def training_day(moment: datetime, tz) -> date:
+    """The training day a moment counts for, as the app's `TrainingDay.key`:
+    its local calendar day, except that before 04:00 it is still the night
+    before. The wall-clock hour is compared, not four hours subtracted, which
+    is wrong on the day Cairo's clocks move."""
+    local = moment.astimezone(tz)
+    if local.hour < TRAINING_DAY_CUTOFF_HOUR:
+        return local.date() - timedelta(days=1)
+    return local.date()
 
 
 def _unique(items) -> list:
@@ -205,9 +250,30 @@ def _set_text(s: dict, tracking: str) -> str:
     return f"{text} {word}" if word else text
 
 
+def prescribed_sets(session: dict, plan_days: dict, catalog: dict) -> dict[str, int] | None:
+    """Movement -> sets the session's plan day asked for, summed over repeated
+    slots of the same exercise; None when no prescription is known. The
+    prescription frozen on the session (`plannedItems`) is the one that
+    applied. Only a session from before the app froze it falls back to the
+    live plan day, which may have been edited since, and to nothing when that
+    day or slot is gone. The export gives no per-set slot, so repeated slots
+    can only be read together."""
+    planned = session.get("plannedItems")
+    if planned is None:
+        day = plan_days.get(str(session.get("planDayID") or "").lower())
+        if not day:
+            return None
+        planned = day.get("items", [])
+    totals: dict[str, int] = defaultdict(int)
+    for slot in planned:
+        totals[canonical_id(catalog, slot["catalogID"])] += slot["targetSets"]
+    return totals
+
+
 def build_exposures(snapshot: dict, catalog: dict) -> dict[str, list[dict]]:
-    """catalogID -> exposures, oldest first. Non-comparable ones are kept and
-    flagged, because the plateau test needs to know a swap happened."""
+    """movement -> exposures, oldest first, keyed by the canonical ID so a
+    retired ID and its survivor share one series. Non-comparable ones are
+    kept and flagged, because the plateau test needs to know a swap happened."""
     plan_days = {}
     for plan in snapshot.get("plans", []):
         for day in plan.get("days", []):
@@ -216,13 +282,13 @@ def build_exposures(snapshot: dict, catalog: dict) -> dict[str, list[dict]]:
     for session in finished_sessions(snapshot):
         by_exercise: dict[str, list[dict]] = defaultdict(list)
         for s in working_sets(session):
-            by_exercise[s["catalogID"]].append(s)
+            by_exercise[canonical_id(catalog, s["catalogID"])].append(s)
         notes: dict[str, list[dict]] = defaultdict(list)
         for note in session.get("exerciseNotes") or []:
-            notes[note["catalogID"]].append(note)
-        day = plan_days.get(str(session.get("planDayID") or "").lower())
+            notes[canonical_id(catalog, note["catalogID"])].append(note)
+        prescribed = prescribed_sets(session, plan_days, catalog)
         for catalog_id, sets in by_exercise.items():
-            tracking = (sets[0].get("tracking") or catalog.get(catalog_id, {}).get("tracking")
+            tracking = (sets[0].get("tracking") or catalog_entry(catalog, catalog_id).get("tracking")
                         or ("duration" if all(s.get("reps") is None for s in sets) else "weightReps"))
             perf = _performance(sets, tracking)
             if perf is None:
@@ -237,11 +303,9 @@ def build_exposures(snapshot: dict, catalog: dict) -> dict[str, list[dict]]:
             # more; the rest are kept so a high-rep slot still has a reading.
             efforts = [e for s, e in answers if e is not None and (s.get("reps") is None or s["reps"] <= EPLEY_REP_CAP)]
             last_answer = next((effort_ordinal(s) for s in reversed(sets) if effort_ordinal(s) is not None), None)
-            target = None
-            if day:
-                slot = next((i for i in day.get("items", []) if i["catalogID"] == catalog_id), None)
-                target = slot["targetSets"] if slot else None
+            target = (prescribed or {}).get(catalog_id)
             shortened = target is not None and len(sets) < max(1, math.ceil(target / 2))
+            logged_as = sorted({s["catalogID"] for s in sets} - {catalog_id})
             out[catalog_id].append({
                 "date": session["startedAt"],
                 "sessionID": session["id"],
@@ -262,6 +326,7 @@ def build_exposures(snapshot: dict, catalog: dict) -> dict[str, list[dict]]:
                 "shortened": shortened,
                 "comparable": "substitution" not in tags,
                 "detail": [_set_text(s, tracking) for s in sets],
+                **({"loggedAs": logged_as} if logged_as else {}),
             })
     return out
 
@@ -378,8 +443,11 @@ def analyse_exercise(catalog_id: str, exposures: list[dict], name: str) -> dict:
 # --- weekly volume --------------------------------------------------------
 
 def _week_start(moment: datetime, tz) -> datetime:
-    local = moment.astimezone(tz).date()
-    return datetime.combine(local - timedelta(days=local.weekday()), datetime.min.time())
+    """The Monday of the training day's week. Resolved through the training
+    day, not the calendar date: a set at 00:30 on a Monday is still Sunday's,
+    so it belongs to the week before."""
+    day = training_day(moment, tz)
+    return datetime.combine(day - timedelta(days=day.weekday()), datetime.min.time())
 
 
 def fractional_sets(muscles: list[str]) -> dict[str, float]:
@@ -387,7 +455,7 @@ def fractional_sets(muscles: list[str]) -> dict[str, float]:
 
 
 def muscle_volume(snapshot: dict, catalog: dict, now: datetime, tz) -> dict:
-    """Fractional working sets per muscle per local (Monday-first) week."""
+    """Fractional working sets per muscle per Monday-first training week (a day starts at 04:00 local time)."""
     per_week: dict[str, dict[datetime, float]] = defaultdict(lambda: defaultdict(float))
     per_session_max: dict[str, float] = defaultdict(float)
     sessions = finished_sessions(snapshot)
@@ -401,7 +469,7 @@ def muscle_volume(snapshot: dict, catalog: dict, now: datetime, tz) -> dict:
         week = _week_start(started, tz)
         in_session: dict[str, float] = defaultdict(float)
         for s in working_sets(session):
-            for muscle, weight in fractional_sets(catalog.get(s["catalogID"], {}).get("muscles", [])).items():
+            for muscle, weight in fractional_sets(catalog_entry(catalog, s["catalogID"]).get("muscles", [])).items():
                 per_week[muscle][week] += weight
                 in_session[muscle] += weight
         if week >= window_start:
@@ -428,8 +496,12 @@ def muscle_volume(snapshot: dict, catalog: dict, now: datetime, tz) -> dict:
 
 # --- adherence, notes, body -----------------------------------------------
 
-def adherence(snapshot: dict, now: datetime, tz) -> dict:
-    """Only sessions started from a plan day can be measured against a plan."""
+def adherence(snapshot: dict, now: datetime, tz, catalog: dict | None = None) -> dict:
+    """Only sessions started from a plan day can be measured against a plan.
+    Each logged working set counts toward the prescription at most once: the
+    export names no slot per set, so a repeated exercise's slots are summed
+    and the sets logged for it measured against that total."""
+    catalog = catalog_index(snapshot) if catalog is None else catalog
     days = {}
     for plan in snapshot.get("plans", []):
         for day in plan.get("days", []):
@@ -444,17 +516,16 @@ def adherence(snapshot: dict, now: datetime, tz) -> dict:
         # The day as it stood when the session began, where the phone kept
         # it. Today's version of the day is the fallback for older sessions,
         # and it is wrong for any slot edited since.
-        planned = session.get("plannedItems")
-        day = days.get(str(session.get("planDayID") or "").lower())
-        if planned is None and not day:
+        prescribed = prescribed_sets(session, days, catalog)
+        if prescribed is None:
             continue
         from_plan += 1
-        as_planned += planned is not None
+        as_planned += session.get("plannedItems") is not None
         sets = working_sets(session)
-        for slot in planned if planned is not None else day.get("items", []):
-            logged = len([s for s in sets if s["catalogID"] == slot["catalogID"]])
-            done += min(logged, slot["targetSets"])
-            target += slot["targetSets"]
+        logged = Counter(canonical_id(catalog, s["catalogID"]) for s in sets)
+        for cid, total in prescribed.items():
+            done += min(logged[cid], total)
+            target += total
         for s in sets:
             low = s.get("targetRepsLow")
             if low and s.get("reps") is not None:
@@ -489,12 +560,13 @@ def adherence(snapshot: dict, now: datetime, tz) -> dict:
     return out
 
 
-def planned_vs_done(snapshot: dict, now: datetime, tz) -> list[dict]:
+def planned_vs_done(snapshot: dict, now: datetime, tz, catalog: dict | None = None) -> list[dict]:
     """Sessions in the last four weeks where what was done differed from what
     the day prescribed at the time: planned slots with no working set, and
     exercises worked that were not planned. Only sessions that carry their
     plan record are read; pairing a skipped slot with its stand-in is left to
     the reader, since the file cannot say which replaced which."""
+    catalog = catalog_index(snapshot) if catalog is None else catalog
     since = now - timedelta(days=28)
     out = []
     for session in finished_sessions(snapshot):
@@ -503,30 +575,38 @@ def planned_vs_done(snapshot: dict, now: datetime, tz) -> list[dict]:
             continue
         worked = {}
         for s in working_sets(session):
-            worked.setdefault(s["catalogID"], s.get("exerciseName") or s["catalogID"])
-        planned_ids = {slot["catalogID"] for slot in planned}
-        skipped = [slot["name"] for slot in planned if slot["catalogID"] not in worked]
+            worked.setdefault(canonical_id(catalog, s["catalogID"]), s.get("exerciseName") or s["catalogID"])
+        planned_ids = {canonical_id(catalog, slot["catalogID"]) for slot in planned}
+        skipped = [slot["name"] for slot in planned if canonical_id(catalog, slot["catalogID"]) not in worked]
         extra = [name for cid, name in worked.items() if cid not in planned_ids]
         if skipped or extra:
-            out.append({"date": parse_time(session["startedAt"]).astimezone(tz).strftime("%Y-%m-%d"),
+            out.append({"date": training_day(parse_time(session["startedAt"]), tz).strftime("%Y-%m-%d"),
                         "title": session.get("title", ""), "skipped": skipped, "notPlanned": extra})
     return out
 
 
-def recent_sets(snapshot: dict, catalog_ids: list[str], tz, sessions_each: int = 4) -> dict[str, list[dict]]:
+def recent_sets(snapshot: dict, catalog_ids: list[str], tz, sessions_each: int = 4,
+                catalog: dict | None = None) -> dict[str, list[dict]]:
     """The last few sessions of each exercise, set by set, so a claim about a
     lift's recent history can be checked against what was logged. A
     comparable series restarts whenever the load changes on a long set, and
-    on its own hides a lift that is climbing."""
-    out = {cid: [] for cid in catalog_ids}
+    on its own hides a lift that is climbing. Keyed by the canonical ID; a
+    row that holds sets logged under a retired ID says so in `loggedAs`."""
+    catalog = catalog_index(snapshot) if catalog is None else catalog
+    out = {canonical_id(catalog, cid): [] for cid in catalog_ids}
     for session in reversed(finished_sessions(snapshot)):
         by_exercise = defaultdict(list)
         for s in working_sets(session):
-            if s["catalogID"] in out and len(out[s["catalogID"]]) < sessions_each:
-                by_exercise[s["catalogID"]].append(s)
+            cid = canonical_id(catalog, s["catalogID"])
+            if cid in out and len(out[cid]) < sessions_each:
+                by_exercise[cid].append(s)
         for cid, sets in by_exercise.items():
-            out[cid].append({"date": parse_time(session["startedAt"]).astimezone(tz).strftime("%m-%d"),
-                             "sets": [_logged_set_text(s) for s in sets]})
+            row = {"date": training_day(parse_time(session["startedAt"]), tz).strftime("%m-%d"),
+                   "sets": [_logged_set_text(s) for s in sets]}
+            logged_as = sorted({s["catalogID"] for s in sets} - {cid})
+            if logged_as:
+                row["loggedAs"] = logged_as
+            out[cid].append(row)
     return {cid: list(reversed(rows)) for cid, rows in out.items() if rows}
 
 
@@ -549,7 +629,7 @@ def collect_notes(snapshot: dict, catalog: dict, now: datetime) -> list[dict]:
             continue
         for note in session.get("exerciseNotes") or []:
             notes.append({"date": session["startedAt"], "catalogID": note["catalogID"],
-                          "exercise": note.get("exerciseName") or catalog.get(note["catalogID"], {}).get("name"),
+                          "exercise": note.get("exerciseName") or catalog_entry(catalog, note["catalogID"]).get("name"),
                           "text": note.get("text", "")[:240], "tags": note.get("tags", [])})
         if session.get("notes") or session.get("noteTags"):
             notes.append({"date": session["startedAt"], "session": session.get("title"),
@@ -717,13 +797,13 @@ def last_decision_outcome(decisions: dict | None, exposures: dict[str, list[dict
                         if same_id(it.get("id"), entry.get("itemID")):
                             cid = it["catalogID"]
         if cid:
-            catalogs[cid] = True
+            catalogs[canonical_id(catalog, cid)] = True
     proposal = proposals.get(str(decision.get("proposalID", "")).lower())
     kinds = {}
     for change in (proposal or {}).get("changes", []):
         to_id = (change.get("to") or {}).get("catalogID")
         if to_id:
-            catalogs[to_id] = True
+            catalogs[canonical_id(catalog, to_id)] = True
         accepted = any(c.get("id") == change["id"] and c.get("decision") == "accepted"
                        for c in decision.get("changes", []))
         if accepted:
@@ -736,7 +816,7 @@ def last_decision_outcome(decisions: dict | None, exposures: dict[str, list[dict
         series, _ = _series(exposures.get(cid, []))
         before = [e for e in series if parse_time(e["date"]) < applied_at]
         after = [e for e in series if parse_time(e["date"]) >= applied_at]
-        item = {"name": catalog.get(cid, {}).get("name", cid), "exposuresSince": len(after)}
+        item = {"name": catalog_entry(catalog, cid).get("name", cid), "exposuresSince": len(after)}
         if before:
             item["performanceBefore"] = max(e["value"] for e in before[-4:])
         if after:
@@ -791,7 +871,7 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
 
     exercises = {}
     for cid, rows in exposures.items():
-        exercises[cid] = analyse_exercise(cid, rows, catalog.get(cid, {}).get("name", cid))
+        exercises[cid] = analyse_exercise(cid, rows, catalog_entry(catalog, cid).get("name", cid))
     notes = collect_notes(snapshot, catalog, now)
     pain = Counter()
     pain_entries = 0
@@ -799,11 +879,11 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
         if "pain" in n["tags"]:
             pain_entries += 1
             if n.get("catalogID"):
-                pain[n["catalogID"]] += 1
+                pain[canonical_id(catalog, n["catalogID"])] += 1
     for cid, info in exercises.items():
         info["painNotes90d"] = pain.get(cid, 0)
     for cid, count in pain.items():
-        exercises.setdefault(cid, {"name": catalog.get(cid, {}).get("name", cid), "exposures": 0,
+        exercises.setdefault(cid, {"name": catalog_entry(catalog, cid).get("name", cid), "exposures": 0,
                                    "painNotes90d": count})
     for cid, info in exercises.items():
         base = f"ex.{cid}"
@@ -824,7 +904,7 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
     plan_muscles = set()
     for day in (plan or {}).get("days", []):
         for item in day["items"]:
-            plan_muscles.update(catalog.get(item["catalogID"], {}).get("muscles", []))
+            plan_muscles.update(catalog_entry(catalog, item["catalogID"]).get("muscles", []))
     for muscle in plan_muscles | set(profile["priorityMuscles"]):
         muscles.setdefault(muscle, {"weeklyFractionalSets": 0.0 if volume["weeks"] else None,
                                     "lastWeekFractionalSets": 0.0 if volume["weeks"] else None,
@@ -836,10 +916,10 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
             if info.get(key) is not None:
                 metrics[f"{muscle}.{key}"] = info[key]
 
-    adhere = adherence(snapshot, now, tz)
-    deviations = planned_vs_done(snapshot, now, tz)
+    adhere = adherence(snapshot, now, tz, catalog)
+    deviations = planned_vs_done(snapshot, now, tz, catalog)
     plan_ids = list(dict.fromkeys(item["catalogID"] for day in (plan or {}).get("days", []) for item in day["items"]))
-    recent = recent_sets(snapshot, plan_ids, tz)
+    recent = recent_sets(snapshot, plan_ids, tz, catalog=catalog)
     for key, value in adhere.items():
         metrics[f"adherence.{key}"] = value
     body = body_weight(snapshot, now)
@@ -885,6 +965,7 @@ def compute(snapshot: dict, decisions: dict | None = None, previous: dict | None
         "muscles": muscles, "volumeWeeks": volume["weeks"], "adherence": adhere,
         "plannedVsDone": deviations, "recentSets": recent,
         "body": body, "tape": girth, "notes": notes[:25], "profile": profile,
+        **({"mergedInto": merged_ids(catalog)} if merged_ids(catalog) else {}),
     }
 
 
@@ -912,7 +993,7 @@ _HEADER = """\
 Every number below is computed by `coach stats` and is the only source for
 `evidence.metric` in a proposal. Keys in stats.json under `metrics`:
 
-- `<muscle>.weeklyFractionalSets`: mean fractional working sets per local week
+- `<muscle>.weeklyFractionalSets`: mean fractional working sets per training week (Monday-first, days start at 04:00 local)
   over the last four complete weeks (muscle names as in the app: chest,
   shoulders, rearDelts, biceps, triceps, lats, upperBack, quads, ...). Siblings:
   `.lastWeekFractionalSets`, `.thisWeekFractionalSets` (partial),
@@ -1009,7 +1090,8 @@ def render_markdown(stats: dict) -> str:
     out += ["## Exercises (current comparable series)", "",
             "| exercise | n | latest | best | noise | vs last | plateau | effort mean | easy share | pain 90d |",
             "|---|---|---|---|---|---|---|---|---|---|"]
-    plan_ids = {i["catalogID"] for d in (plan or {"days": []})["days"] for i in d["items"]}
+    merged = stats.get("mergedInto", {})
+    plan_ids = {merged.get(i["catalogID"], i["catalogID"]) for d in (plan or {"days": []})["days"] for i in d["items"]}
     shown = {cid: info for cid, info in stats["exercises"].items()
              if info["exposures"] and (cid in plan_ids or _recent(info, stats["asOf"]))}
     for cid, info in sorted(shown.items(), key=lambda kv: kv[1]["name"]):
@@ -1034,7 +1116,7 @@ def render_markdown(stats: dict) -> str:
     for info in unplanned:
         out.append(f"- {info['name']}: pain notes with no comparable series.")
 
-    names = {item["catalogID"]: item["name"] for day in (stats["plan"] or {}).get("days", []) for item in day["items"]}
+    names = {merged.get(item["catalogID"], item["catalogID"]): item["name"] for day in (stats["plan"] or {}).get("days", []) for item in day["items"]}
     out += ["## Recent sets (active plan, last four sessions each)", "",
             "Load x reps, with the effort answer where one was given; `bw` is no added load.", ""]
     for cid, rows in stats.get("recentSets", {}).items():
@@ -1049,7 +1131,8 @@ def render_markdown(stats: dict) -> str:
                    f"{adhere.get('sessionsWithPlanRecord', 0)} of them measured against the day as it stood "
                    "then; the rest against today's version of the day, which may have been edited since")
         if "slotSetsShare" in adhere:
-            out.append(f"- Working sets logged against the slots' targets: {adhere['slotSetsShare']:.0%}")
+            out.append(f"- Working sets logged against the slots' targets: {adhere['slotSetsShare']:.0%} "
+                       "(a set counts once, however many slots the plan gives its exercise)")
         if "repTargetHitShare" in adhere:
             out.append(f"- Sets at or above the lower rep target: {adhere['repTargetHitShare']:.0%}")
         if "weekDaysTrainedShare" in adhere:

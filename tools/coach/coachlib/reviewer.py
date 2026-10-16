@@ -17,7 +17,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .stats import active_plan, catalog_index
+from .stats import active_plan, canonical_id, catalog_entry, catalog_index
 from .util import CoachError, same_id
 
 PROMPT_FILE = Path(__file__).resolve().parent.parent / "reviewer_prompt.md"
@@ -252,8 +252,8 @@ def build_prompt(profile: str, stats_md: str, stats: dict | None, snapshot: dict
             day_lines.append(f"  - {item['name']}: {item['targetSets']} sets, {reps}, rest {rest} s")
     history = []
     for cid in touched_exercises(changes, plan):
-        info = ((stats or {}).get("exercises") or {}).get(cid)
-        name = catalog.get(cid, {}).get("name", cid)
+        info = ((stats or {}).get("exercises") or {}).get(canonical_id(catalog, cid))
+        name = catalog_entry(catalog, cid).get("name", cid)
         if not info or not info.get("recent"):
             history.append(f"{name}: no history in the log.")
             continue
