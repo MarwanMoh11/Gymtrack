@@ -7,9 +7,11 @@ import SwiftData
 ///
 /// The file is the backup archive, byte for byte: the same `makeArchivePaced`
 /// and `encoded` the Settings export uses, so the coach and a restore read one
-/// format. It is rewritten after a workout finishes, after the plan is saved,
-/// after a proposal is applied, undone or reverted, and at launch when there is
-/// none.
+/// format. It is rewritten after any save that changes something the export
+/// carries (finished sessions and their sets, notes and vitals, weigh-ins,
+/// tape measurements, exercise notes, plans, custom exercises, load scales,
+/// machines), after a workout finishes, after a proposal is applied, undone or
+/// reverted, and once at every launch.
 ///
 /// Nothing here may cost the lifter a tap or a frame mid-set. A request only
 /// sets a flag; the write waits for things to go quiet, reads the store in
@@ -31,28 +33,44 @@ final class CoachSnapshot {
 
     private var store = CoachStore.standard
     private var context: ModelContext?
+    private var container: ModelContainer?
     private var requested = false
     private var running: Task<Void, Never>?
     private var saveObserver: NSObjectProtocol?
+    /// Bumped by an erase. A write that began under an earlier value read the
+    /// store before the erase and must not put that data back on disk.
+    private var generation = 0
 
-    /// Starts watching for plan edits, makes sure the inbox folder exists, and
-    /// asks for a snapshot if the file is missing.
+    /// Starts watching for saves, makes sure the inbox folder exists, and asks
+    /// for a snapshot.
     func start(container: ModelContainer, store: CoachStore = .standard) {
         self.store = store
         context = container.mainContext
+        self.container = container
         store.prepare()
         if let saveObserver { NotificationCenter.default.removeObserver(saveObserver) }
-        // Plan edits are saved from several screens and by a restore, so the
-        // store is watched rather than each of them asked to say so.
+        // Exported records are saved from many screens, from Health and from a
+        // restore, so the store is watched rather than each of them asked to
+        // say so.
         saveObserver = NotificationCenter.default.addObserver(
             forName: ModelContext.didSave, object: nil, queue: .main
         ) { [weak self] note in
             MainActor.assumeIsolated {
-                guard Self.touchesPlan(note) || Self.insertsFinishedSession(note) else { return }
-                self?.request()
+                // Another store's saves (a second container in a check, or a
+                // separate context on this one, as Health's backfill uses) are
+                // told apart by container, not by context.
+                guard let self, let saved = note.object as? ModelContext,
+                      saved.container === self.container, Self.changesExport(note) else { return }
+                self.request()
             }
         }
-        if !store.hasSnapshot { request() }
+        // An existing file is refreshed too. It can be stale from a save the
+        // app was killed before the debounce wrote, or from a build that did not
+        // watch every record, and nothing else would correct it for a lifter
+        // who then neither trains nor edits. One write per launch, after the
+        // quiet period, costs far less than a file that stays wrong; telling a
+        // stale file from a current one would take the same read of the store.
+        request()
     }
 
     /// Stops watching for saves. The app never calls this; a check that starts
@@ -63,32 +81,68 @@ final class CoachSnapshot {
         saveObserver = nil
     }
 
-    /// True when a save inserted, changed or deleted a plan, a day or a slot.
+    /// The entities the export carries whose every change matters. Sessions,
+    /// sets and exercise notes are decided separately, because most of their
+    /// saves are a live workout that is not exported until it finishes.
+    private static let alwaysExported: Set<String> = [
+        "Plan", "PlanDay", "PlanItem", "BodyMetric", "BodyMeasurement", "CustomExerciseRecord",
+        "ExerciseLoadPreference", "HiddenExerciseRecord", "FormVideoRecord", "MachineSetupRecord",
+    ]
+
+    /// True when a save inserted, changed or deleted something the export carries.
     ///
-    /// A save that touches only sets and sessions is ignored: logging saves
-    /// after every set, and none of it is a reason to rewrite the file while
-    /// the lifter is mid-workout. The workout's own end asks for a snapshot.
-    nonisolated static func touchesPlan(_ note: Notification) -> Bool {
-        let planEntities: Set<String> = ["Plan", "PlanDay", "PlanItem"]
-        return [ModelContext.NotificationKey.insertedIdentifiers,
-                .updatedIdentifiers, .deletedIdentifiers].contains { key in
-            let identifiers = note.userInfo?[key.rawValue] as? [PersistentIdentifier] ?? []
-            return identifiers.contains { planEntities.contains($0.entityName) }
+    /// Logging saves after every set, and none of it is a reason to rewrite the
+    /// file while the lifter is mid-workout: a set, note or session that belongs
+    /// to the workout in progress is skipped, and its finish asks for a
+    /// snapshot. A change to a finished session (a correction, a note, a late
+    /// Health vital) is not skipped.
+    ///
+    /// A deleted row can no longer be asked which session it belonged to. A
+    /// deleted session, set or note therefore counts unless a workout is in
+    /// progress; then it is most likely part of that workout, and anything
+    /// older that went with it is picked up when the workout finishes.
+    static func changesExport(_ note: Notification) -> Bool {
+        guard let context = note.object as? ModelContext else { return true }
+        var unresolvableRemoval = false
+        let keys: [ModelContext.NotificationKey] = [.insertedIdentifiers, .updatedIdentifiers, .deletedIdentifiers]
+        for key in keys {
+            let ids = note.userInfo?[key.rawValue] as? [PersistentIdentifier] ?? []
+            for id in ids {
+                if alwaysExported.contains(id.entityName) { return true }
+                switch id.entityName {
+                case "WorkoutSession", "SetLog", "ExerciseNote":
+                    if key == .deletedIdentifiers { unresolvableRemoval = true; continue }
+                    if belongsToFinishedSession(id, in: context) { return true }
+                default:
+                    continue
+                }
+            }
+        }
+        return unresolvableRemoval && !hasActiveSession(context)
+    }
+
+    /// True for a finished session, or a set or note of one. The row is looked
+    /// up rather than taken from the objects the context happens to hold: the
+    /// context keeps saved models only as long as something else does. A row
+    /// that still cannot be resolved is assumed to count: refreshing once too
+    /// often is cheaper than serving a stale file.
+    private static func belongsToFinishedSession(_ id: PersistentIdentifier, in context: ModelContext) -> Bool {
+        switch id.entityName {
+        case "WorkoutSession":
+            guard let session = context.model(for: id) as? WorkoutSession else { return true }
+            return !session.isActive
+        case "SetLog":
+            guard let set = context.model(for: id) as? SetLog else { return true }
+            return set.session.map { !$0.isActive } ?? false
+        default:
+            guard let note = context.model(for: id) as? ExerciseNote else { return true }
+            return note.session.map { !$0.isActive } ?? false
         }
     }
 
-    /// True when a save inserted a session that is already finished: a workout
-    /// logged afterwards, or one a restore brought back. A session the logger
-    /// starts is inserted open, and its end is announced by the finish itself.
-    static func insertsFinishedSession(_ note: Notification) -> Bool {
-        guard let context = note.object as? ModelContext else { return false }
-        let key = ModelContext.NotificationKey.insertedIdentifiers.rawValue
-        let inserted = note.userInfo?[key] as? [PersistentIdentifier] ?? []
-        return inserted.contains { id in
-            guard id.entityName == "WorkoutSession",
-                  let session: WorkoutSession = context.registeredModel(for: id) else { return false }
-            return !session.isActive
-        }
+    private static func hasActiveSession(_ context: ModelContext) -> Bool {
+        let open = FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.endedAt == nil })
+        return ((try? context.fetchCount(open)) ?? 0) > 0
     }
 
     /// Asks for a fresh snapshot. Cheap, safe to call from anywhere on the main
@@ -104,9 +158,22 @@ final class CoachSnapshot {
         await running?.value
     }
 
+    /// Drops any write that is waiting and waits out one that is running, so
+    /// that nothing written afterwards can come from data read before an
+    /// erase. A write already in the middle of reading the store is told its
+    /// data is stale and writes nothing. Called by the erase after its records
+    /// are gone, ahead of the coach files being removed.
+    func cancelWrites() async {
+        generation += 1
+        requested = false
+        running?.cancel()
+        await running?.value
+    }
+
     private func drain() async {
-        while requested {
+        while requested && !Task.isCancelled {
             try? await Task.sleep(for: quietPeriod)
+            guard !Task.isCancelled else { break }
             requested = false
             await writeNow()
         }
@@ -119,8 +186,10 @@ final class CoachSnapshot {
     func writeNow(stamp: BackupService.ExportStamp = .current()) async {
         guard let context else { return }
         let store = store
+        let started = generation
         do {
             let archive = try await BackupService.makeArchivePaced(context: context, stamp: stamp)
+            guard started == generation else { return }
             try await Task.detached(priority: .utility) {
                 try store.writeSnapshot(try BackupService.encoded(archive))
             }.value

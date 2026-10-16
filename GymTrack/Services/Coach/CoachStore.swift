@@ -44,6 +44,15 @@ struct CoachStore: Sendable {
         try? FileManager.default.removeItem(at: leftoverRatingsURL)
     }
 
+    /// Removes everything the app keeps for the coach (snapshot, decisions,
+    /// any unreadable decision file set aside, and a pushed proposal), then
+    /// recreates the empty inbox so the Mac's next push has somewhere to land.
+    /// Part of erasing all data: the decisions hold the lifter's own notes.
+    func erase() {
+        try? FileManager.default.removeItem(at: root)
+        prepare()
+    }
+
     // MARK: Proposal
 
     func proposalData() -> Data? {

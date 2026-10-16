@@ -1762,10 +1762,17 @@ enum BackupService {
     /// held the sheet on an empty store for as long as the history was long.
     /// `deletingHealthWorkouts` returns the IDs it could not remove; the
     /// per-ID closure remains for callers that only know one at a time.
+    ///
+    /// The coach's decisions, proposal and snapshot go with the records, but
+    /// only once the local erase has saved: a refused or failed erase leaves
+    /// them alone. A snapshot write that was waiting or running is cancelled
+    /// first, so it cannot put pre-erase history back on disk.
     @MainActor
     @discardableResult
     static func wipe(
         context: ModelContext,
+        coachInbox: CoachInbox = .shared,
+        coachSnapshot: CoachSnapshot = .shared,
         removingHealthWorkouts: Bool = false,
         deletingHealthWorkout: ((UUID) async -> Bool)? = nil,
         deletingHealthWorkouts: (([UUID]) async -> [UUID])? = nil
@@ -1782,6 +1789,8 @@ enum BackupService {
             context.rollback()
             throw error
         }
+        await coachSnapshot.cancelWrites()
+        coachInbox.erase()
         LoadScaleBook.shared.reload()
         ExerciseVisibility.reload(context: context)
         context.refreshCustomExercises()

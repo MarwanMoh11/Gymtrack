@@ -111,6 +111,16 @@ final class CoachInbox {
         review = CoachValidator.review(proposal, plans: plans)
     }
 
+    /// Forgets every proposal and decision, in memory and on disk. Called when
+    /// the lifter erases all data, so a reload or a relaunch finds nothing.
+    func erase() {
+        store.erase()
+        review = nil
+        unreadableReason = nil
+        decisions = []
+        decidedThisLaunch = nil
+    }
+
     // MARK: - Deciding
 
     /// Applies the changes in `accepted` and records the decision. Every other

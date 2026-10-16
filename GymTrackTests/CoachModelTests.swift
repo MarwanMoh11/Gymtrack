@@ -244,20 +244,21 @@ struct CoachModelTests {
         defer { quiet.stop() }
         quiet.start(container: container, store: store)
         await quiet.settled()
-        #expect(quiet.lastWrittenAt == nil, "A launch with a snapshot already on disk writes none")
+        let launched = quiet.lastWrittenAt
+        #expect(launched != nil, "A launch with a snapshot already on disk refreshes it")
 
         // Logging saves after every set; none of it should rewrite the file.
         context.insert(WorkoutSession(title: "Push", planDayID: F.uuid(0x200), startedAt: t0))
         try context.save()
         await quiet.settled()
-        #expect(quiet.lastWrittenAt == nil, "Starting a workout does not ask for a snapshot")
+        #expect(quiet.lastWrittenAt == launched, "Starting a workout does not ask for a snapshot")
 
         let bench = try F.item(F.bench, context)
         bench?.targetSets = 5
         bench?.targetRepsHigh = 10
         try context.save()
         await quiet.settled()
-        #expect(quiet.lastWrittenAt != nil, "Saving a plan edit asks for a snapshot")
+        #expect(quiet.lastWrittenAt != launched, "Saving a plan edit asks for a snapshot")
 
         // A session that is already finished when it is inserted, as one
         // logged afterwards is.
@@ -267,13 +268,14 @@ struct CoachModelTests {
         later.start(container: container, store: store)
         quiet.stop()
         await later.settled()
-        #expect(later.lastWrittenAt == nil)
+        let relaunched = later.lastWrittenAt
+        #expect(relaunched != nil)
         let past = WorkoutSession(title: "Pull", planDayID: F.uuid(0x201), startedAt: t0.addingTimeInterval(-86_400))
         past.endedAt = past.startedAt
         context.insert(past)
         try context.save()
         await later.settled()
-        #expect(later.lastWrittenAt != nil, "Saving a finished session asks for a snapshot")
+        #expect(later.lastWrittenAt != relaunched, "Saving a finished session asks for a snapshot")
     }
 
     // MARK: - Fixtures
