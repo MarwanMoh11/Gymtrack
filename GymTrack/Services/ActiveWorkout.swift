@@ -653,39 +653,8 @@ final class ActiveWorkout {
         return abs(scale.display(kg) - scale.display(nudge.toKg)) < 0.001
     }
 
-    /// The other half of `settleOffer`: the set that answered an offer is being
-    /// taken back, so the answer goes with it. The record returns to what it
-    /// said before, and the offer — or the undo of having taken it — stands
-    /// again, recomputed so it counts the sets actually left.
-    ///
-    /// Only where nothing newer has spoken since. A subject re-rated in the
-    /// meantime has a newer offer or none, and restoring the old one would
-    /// overwrite a decision the lifter made after this one.
-    private func takeBackAnswer(of set: SetLog) {
-        guard let index = settledOffers.firstIndex(where: { $0.loggedSetID == set.id }) else { return }
-        let answer = settledOffers.remove(at: index)
-
-        if let standing = answer.standing, let recorded = answer.recorded,
-           let subject = subject(of: standing), subject.isCompleted,
-           subject.loadNudgeOutcome == recorded, subject.loadNudgeToKg == standing.toKg {
-            if let prior = answer.priorOutcome, let priorToKg = answer.priorToKg {
-                subject.recordLoadNudge(prior, toKg: priorToKg)
-            } else {
-                subject.clearLoadNudge()
-            }
-            if pendingNudge(for: standing.catalogID) == nil, let again = nudge(after: subject),
-               again.feel == standing.feel, again.toKg == standing.toKg {
-                standingOffers.append(again)
-            }
-        }
-        if let taken = answer.taken, takenNudge(for: taken.nudge.catalogID) == nil,
-           let subject = subject(of: taken.nudge), subject.isCompleted {
-            openTakes.append(taken)
-        }
-    }
-
     /// An offer the logger settled without a tap, and what it overwrote.
-    private struct SettledOffer {
+    struct SettledOffer {
         /// The set whose logging answered it.
         let loggedSetID: UUID
         /// The offer that was standing, if one was.
@@ -818,15 +787,16 @@ final class ActiveWorkout {
         set.unlog()
         recentPRs.remove(set.id)
         if lastLoggedSetID == set.id { lastLoggedSetID = nil }
-        standingOffers.removeAll { $0.setID == set.id }
-        // Taking the set back takes back everything answering for it did,
-        // including a weight change its answer put on the sets underneath.
-        if let taken = openTakes.first(where: { $0.nudge.setID == set.id }) { restoreWeights(of: taken) }
-        // An offer this set answered by being logged is unanswered again. And
-        // an answer about this set's own offer has nothing left to restore:
-        // `unlog` has just cleared the record it was kept to put back.
-        takeBackAnswer(of: set)
-        settledOffers.removeAll { ($0.standing ?? $0.taken?.nudge)?.setID == set.id }
+        // Taking the set back takes back everything answering for it did: the
+        // offers it made, a weight change its answer put on the sets underneath,
+        // and an offer it answered by being logged, which is unanswered again.
+        // `NudgeLedger` is the one place that is worked out, because the wrist's
+        // undo applies it to the stored memory when no logger is running.
+        var ledger = NudgeLedger(standing: standingOffers, takes: openTakes, answers: settledOffers)
+        ledger.takeBack(set, among: Array(session.sets)) { subject, _ in nudge(after: subject) }
+        standingOffers = ledger.standing
+        openTakes = ledger.takes
+        settledOffers = ledger.answers
         restorePrefill(carriedBy: set)
     }
 
@@ -2121,14 +2091,7 @@ extension ActiveWorkout {
         LoggerMemory(
             offers: standingOffers.map(LoggerMemory.Offer.init),
             takes: openTakes.map(LoggerMemory.Take.init),
-            answers: settledOffers.map { answer in
-                LoggerMemory.Answer(loggedSetID: answer.loggedSetID,
-                                    standing: answer.standing.map(LoggerMemory.Offer.init),
-                                    taken: answer.taken.map(LoggerMemory.Take.init),
-                                    recorded: answer.recorded?.rawValue,
-                                    priorOutcome: answer.priorOutcome?.rawValue,
-                                    priorToKg: answer.priorToKg)
-            },
+            answers: settledOffers.map(LoggerMemory.Answer.init),
             carries: carriedPrefills.map { setID, rows in
                 LoggerMemory.Carried(setID: setID, rows: rows.map { rowID, before in
                     LoggerMemory.Carry(rowID: rowID, kg: before.kg, seconds: before.seconds,
@@ -2224,5 +2187,139 @@ extension ActiveWorkout {
             if !kept.isEmpty { carriedPrefills[carried.setID] = Dictionary(kept, uniquingKeysWith: { first, _ in first }) }
         }
         persistLoggerMemory()
+    }
+}
+
+// MARK: - Taking a set back
+
+extension ActiveWorkout.TakenNudge {
+    /// Puts the weights a take moved back, on the rows still to be lifted and
+    /// still at the rung the take gave them. A row the lifter has typed a
+    /// different weight into since is theirs now, and one already logged was
+    /// lifted at the rung: moving either would change a number nobody asked
+    /// to change.
+    fileprivate func restoreUntouchedWeights(on rows: [SetLog]) {
+        for row in rows {
+            guard let weight = previousKg[row.id], !row.isCompleted, row.weightKg == nudge.toKg else { continue }
+            row.weightKg = weight
+        }
+    }
+}
+
+/// The load offers a session has made, taken and answered, and the one way a
+/// set is taken back from them. The logger holds them as live state and the
+/// wrist's undo, applied with no logger running, holds them as the stored
+/// `LoggerMemory`; both go through `takeBack`, so an undo done on the wrist
+/// leaves the same thing behind as one done on the phone, and the same thing
+/// survives a relaunch.
+struct NudgeLedger {
+    var standing: [ActiveWorkout.LoadNudge] = []
+    var takes: [ActiveWorkout.TakenNudge] = []
+    var answers: [ActiveWorkout.SettledOffer] = []
+
+    /// Everything `set` gained by being logged, so far as the offers go: the
+    /// offers its answer made, the weights its taking moved, and the offer its
+    /// logging answered, which stands (or can be undone) again.
+    ///
+    /// `restand` says what offer to put back for a subject whose answer is
+    /// restored: the logger recomputes it so it counts the sets actually left;
+    /// with no logger the one that stood is kept, and the next launch reads it
+    /// again before showing it.
+    mutating func takeBack(_ set: SetLog, among rows: [SetLog],
+                           restand: (_ subject: SetLog, _ old: ActiveWorkout.LoadNudge) -> ActiveWorkout.LoadNudge?) {
+        standing.removeAll { $0.setID == set.id }
+        if let taken = takes.first(where: { $0.nudge.setID == set.id }) {
+            taken.restoreUntouchedWeights(on: rows)
+            takes.removeAll { $0.nudge.setID == set.id }
+        }
+        // An offer this set answered by being logged is unanswered again. And
+        // an answer about this set's own offer has nothing left to restore:
+        // `unlog` has just cleared the record it was kept to put back.
+        takeBackAnswer(of: set, among: rows, restand: restand)
+        answers.removeAll { ($0.standing ?? $0.taken?.nudge)?.setID == set.id }
+    }
+
+    /// The record returns to what it said before, and the offer, or the undo of
+    /// having taken it, stands again. Only where nothing newer has spoken since:
+    /// a subject re-rated in the meantime has a newer offer or none, and
+    /// restoring the old one would overwrite a decision made after this one.
+    private mutating func takeBackAnswer(
+        of set: SetLog, among rows: [SetLog],
+        restand: (SetLog, ActiveWorkout.LoadNudge) -> ActiveWorkout.LoadNudge?
+    ) {
+        guard let index = answers.firstIndex(where: { $0.loggedSetID == set.id }) else { return }
+        let answer = answers.remove(at: index)
+        func subject(of nudge: ActiveWorkout.LoadNudge) -> SetLog? { rows.first { $0.id == nudge.setID } }
+
+        if let offer = answer.standing, let recorded = answer.recorded,
+           let subject = subject(of: offer), subject.isCompleted,
+           subject.loadNudgeOutcome == recorded, subject.loadNudgeToKg == offer.toKg {
+            if let prior = answer.priorOutcome, let priorToKg = answer.priorToKg {
+                subject.recordLoadNudge(prior, toKg: priorToKg)
+            } else {
+                subject.clearLoadNudge()
+            }
+            if !standing.contains(where: { $0.catalogID == offer.catalogID }),
+               let again = restand(subject, offer), again.feel == offer.feel, again.toKg == offer.toKg {
+                standing.append(again)
+            }
+        }
+        if let taken = answer.taken, !takes.contains(where: { $0.nudge.catalogID == taken.nudge.catalogID }),
+           let subject = subject(of: taken.nudge), subject.isCompleted {
+            takes.append(taken)
+        }
+    }
+
+    init(standing: [ActiveWorkout.LoadNudge], takes: [ActiveWorkout.TakenNudge],
+         answers: [ActiveWorkout.SettledOffer]) {
+        self.standing = standing
+        self.takes = takes
+        self.answers = answers
+    }
+
+    /// What a stored memory holds. A piece this build cannot read is dropped,
+    /// as `restoreLoggerMemory` drops it.
+    init(_ memory: LoggerMemory) {
+        standing = memory.offers.compactMap(ActiveWorkout.LoadNudge.init)
+        takes = memory.takes.compactMap(ActiveWorkout.TakenNudge.init)
+        answers = memory.answers.map(ActiveWorkout.SettledOffer.init)
+    }
+
+    /// Replaces the offers, takes and answers of `memory`, leaving what a set
+    /// carried forward as it was.
+    func write(into memory: inout LoggerMemory) {
+        memory.offers = standing.map(LoggerMemory.Offer.init)
+        memory.takes = takes.map(LoggerMemory.Take.init)
+        memory.answers = answers.map(LoggerMemory.Answer.init)
+    }
+}
+
+extension ActiveWorkout.TakenNudge {
+    init?(_ stored: LoggerMemory.Take) {
+        guard let nudge = ActiveWorkout.LoadNudge(stored.offer) else { return nil }
+        self.init(nudge: nudge, previousKg: Dictionary(stored.previous.map { ($0.rowID, $0.kg) },
+                                                       uniquingKeysWith: { first, _ in first }))
+    }
+}
+
+extension ActiveWorkout.SettledOffer {
+    init(_ stored: LoggerMemory.Answer) {
+        self.init(loggedSetID: stored.loggedSetID,
+                  standing: stored.standing.flatMap(ActiveWorkout.LoadNudge.init),
+                  taken: stored.taken.flatMap(ActiveWorkout.TakenNudge.init),
+                  recorded: stored.recorded.flatMap(LoadNudgeOutcome.init(rawValue:)),
+                  priorOutcome: stored.priorOutcome.flatMap(LoadNudgeOutcome.init(rawValue:)),
+                  priorToKg: stored.priorToKg)
+    }
+}
+
+extension LoggerMemory.Answer {
+    init(_ answer: ActiveWorkout.SettledOffer) {
+        self.init(loggedSetID: answer.loggedSetID,
+                  standing: answer.standing.map(LoggerMemory.Offer.init),
+                  taken: answer.taken.map(LoggerMemory.Take.init),
+                  recorded: answer.recorded?.rawValue,
+                  priorOutcome: answer.priorOutcome?.rawValue,
+                  priorToKg: answer.priorToKg)
     }
 }

@@ -288,6 +288,7 @@ final class WatchCommandCenter {
             let carried = set.isCompleted ? (set.session?.loggedContinuations(below: set) ?? []) : []
             for row in carried.reversed() { row.unlog() }
             set.unlog()
+            takeBackNudges(of: carried.reversed() + [set])
             restorePrefill(carriedBy: set)
             save(context)
             pushMirror(context: context)
@@ -573,6 +574,24 @@ final class WatchCommandCenter {
         let memory = carriedPrefills.removeValue(forKey: set.id) ?? storedPrefill(carriedBy: set, in: session)
         guard let memory else { return }
         ActiveWorkout.Prefill.restore(memory, onto: Array(session.sets))
+    }
+
+    /// Everything the offers did on account of these rows, taken back in the
+    /// phone's logger's own way (`NudgeLedger`), on the memory it stored. An
+    /// accepted load increase that the source set's undo left in place put the
+    /// next rows at a weight nobody lifted, and a relaunch would have kept it.
+    ///
+    /// Rows come in the order the logger takes them back: the drops beneath a
+    /// set first, then the set. A session with no stored memory made no offers.
+    private func takeBackNudges(of rows: [SetLog]) {
+        guard let session = rows.first?.session,
+              var stored = loggerMemory.load(for: session.id) else { return }
+        var ledger = NudgeLedger(stored)
+        for row in rows {
+            ledger.takeBack(row, among: Array(session.sets)) { _, old in old }
+        }
+        ledger.write(into: &stored)
+        loggerMemory.save(stored, for: session.id)
     }
 
     private func storedPrefill(carriedBy set: SetLog, in session: WorkoutSession) -> [UUID: ActiveWorkout.Prefill]? {
