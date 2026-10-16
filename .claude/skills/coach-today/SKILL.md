@@ -8,8 +8,9 @@ description: A short daily check-in on the owner's GymTrack workout. Pulls the p
 You are the owner's coach right after a workout: a few minutes of honest
 feedback, not a review. The owner trains for muscle size and appearance first;
 strength is how progress is read. `/coach-review` owns the plan; this check
-owns the day. So it never proposes a plan change, never pushes anything to the
-phone and never names a load: the phone chooses loads.
+owns the day. So it never proposes a plan change and never names a load: the
+phone chooses loads. What it sends to the phone is the note itself, which Today
+shows until the next workout.
 
 Read `../coach-review/policy.md` before judging anything. Its definitions
 (working set, comparable exposure, performance, noise, effort) are the ones
@@ -92,3 +93,31 @@ deserve a plan change once enough sessions back it ("lateral raise sets came
 back easy for the third session running"), or "nothing". `/coach-review` reads
 these lines as leads to check against its stats. Write only what was measured
 or what the owner said; a guess is never written as a fact.
+
+## 6. Send it to the phone
+
+Write what you told the owner to `note.json` in the day's folder, then run
+`tools/coach/coach push-day`. It checks the file and copies it to the phone,
+where Today shows "Coach on <day>'s workout" until the next workout is
+finished.
+
+```json
+{
+  "format": "gymtrack-coach-day",
+  "version": 1,
+  "id": "<uuidgen>",
+  "createdAt": "<date -u +%Y-%m-%dT%H:%M:%SZ>",
+  "day": "<the folder's YYYY-MM-DD>",
+  "verdict": "One sentence.",
+  "wentWell": ["Up to three, each with its number."],
+  "watch": ["Up to two."],
+  "nextTime": ["One, or one per lift the owner asked about; at most three."]
+}
+```
+
+Leave out a part that has nothing rather than writing an empty list or `null`.
+Plain sentences, no markdown: the phone shows the text as it is. When the
+conversation changes the advice (the owner answers your question or asks for
+more), rewrite the file with a new `id` and push again; the new note replaces
+the old one. If the phone is not reachable, say so: the note stays in the
+folder, and `coach push-day <day>` sends it later.

@@ -61,3 +61,27 @@ enum CoachWording {
         date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
     }
 }
+
+extension CoachDayNote {
+
+    /// Which workout the note is about, as Today's line and the note's header
+    /// name it: "today's workout", "yesterday's workout", "Friday's workout"
+    /// within the week, and "your last workout" beyond it, where a weekday
+    /// alone would point at the wrong week.
+    func workoutName(now: Date = .now, calendar: Calendar = .current) -> String {
+        guard let start = dayStart(calendar: calendar) else { return "your last workout" }
+        let today = TrainingDay.key(for: now, calendar: calendar)
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: start), to: today).day ?? 0
+        switch days {
+        case 0: return "today's workout"
+        case 1: return "yesterday's workout"
+        case 2...6:
+            var weekday = Date.FormatStyle.dateTime.weekday(.wide)
+            weekday.calendar = calendar
+            weekday.timeZone = calendar.timeZone
+            weekday.locale = calendar.locale ?? .autoupdatingCurrent
+            return start.formatted(weekday) + "'s workout"
+        default: return "your last workout"
+        }
+    }
+}

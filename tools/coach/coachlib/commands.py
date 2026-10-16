@@ -246,6 +246,35 @@ def today(file: str | None = None, day: str | None = None, home: Path | None = N
     return 0
 
 
+def push_day(day: str | None = None, home: Path | None = None) -> int:
+    """Sends a day's note.json to the phone, where Today shows it until the
+    next workout. The latest daily folder with a note is the default."""
+    home = home or coach_home()
+    root = home / "daily"
+    if day:
+        folder = root / day
+    else:
+        dated = sorted(p.parent for p in root.glob("*/note.json")) if root.is_dir() else []
+        if not dated:
+            raise CoachError(f"no note.json under {root}; write one in the day's folder first")
+        folder = dated[-1]
+    path = folder / "note.json"
+    note = read_json(path)
+    problems = today_mod.validate_note(note, folder.name)
+    if problems:
+        _say(f"The note has {len(problems)} problem(s):")
+        for problem in problems:
+            _say(f"  - {problem}")
+        _say("Fix note.json and run the command again. Nothing was sent.")
+        return 1
+    phone = device.require_phone()
+    problem = device.copy_to(phone, path, device.DAY_NOTE_PATH)
+    if problem:
+        raise CoachError("Could not copy the note to the phone: " + problem)
+    _say(f"Sent the note on {folder.name} to the phone. Today shows it until the next workout is finished.")
+    return 0
+
+
 # --- proposal rounds --------------------------------------------------------
 
 def fingerprint(change: dict) -> str:

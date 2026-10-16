@@ -13,7 +13,14 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 
 from . import stats as st
-from .util import CoachError, parse_time
+from .util import CoachError, is_uuid, parse_time
+
+NOTE_FORMAT = "gymtrack-coach-day"
+NOTE_VERSION = 1
+# The note is read on a phone screen, so each part is capped where the skill
+# caps it: one verdict, up to three things that went well, two to watch.
+NOTE_LISTS = {"wentWell": 3, "watch": 2, "nextTime": 3}
+NOTE_LINE_MAX = 400
 
 PER_SESSION_CEILING = 11  # fractional sets per muscle; the second lever in policy.md (Remmert 2025)
 
@@ -297,6 +304,53 @@ def compute_day(snapshot: dict, day: date | None = None, now: datetime | None = 
     if weights:
         out["bodyWeightKg"] = round(weights[-1]["weightKg"], 1)
     return out
+
+
+# --- the note the phone shows -------------------------------------------------
+
+def validate_note(note: object, day: str) -> list[str]:
+    """Problems with a day's note.json, empty when the phone can show it. Keys
+    are checked by name so a typo is caught here rather than silently dropped
+    by the phone's decoder."""
+    if not isinstance(note, dict):
+        return ["note.json is not a JSON object"]
+    problems = []
+    allowed = {"format", "version", "id", "createdAt", "day", "verdict", *NOTE_LISTS}
+    for key in sorted(set(note) - allowed):
+        problems.append(f"unknown key {key!r}")
+    for key, value in note.items():
+        if value is None:
+            problems.append(f"{key} is null; leave the key out instead")
+    if note.get("format") != NOTE_FORMAT:
+        problems.append(f"format must be {NOTE_FORMAT!r}")
+    if note.get("version") != NOTE_VERSION:
+        problems.append(f"version must be {NOTE_VERSION}")
+    if not is_uuid(note.get("id")):
+        problems.append("id must be a UUID (uuidgen)")
+    try:
+        parse_time(str(note.get("createdAt", "")))
+    except ValueError:
+        problems.append("createdAt must be an ISO 8601 time")
+    if note.get("day") != day:
+        problems.append(f"day must be {day!r}, the training day this folder is for")
+    verdict = note.get("verdict")
+    if not isinstance(verdict, str) or not verdict.strip():
+        problems.append("verdict must be a sentence")
+    elif len(verdict) > NOTE_LINE_MAX:
+        problems.append(f"verdict is over {NOTE_LINE_MAX} characters")
+    for key, most in NOTE_LISTS.items():
+        if key not in note or note[key] is None:
+            continue
+        lines = note[key]
+        if not isinstance(lines, list) or not all(isinstance(line, str) and line.strip() for line in lines):
+            problems.append(f"{key} must be a list of non-empty strings")
+        elif not lines:
+            problems.append(f"{key} is empty; leave the key out instead")
+        elif len(lines) > most:
+            problems.append(f"{key} has {len(lines)} lines; at most {most}")
+        elif any(len(line) > NOTE_LINE_MAX for line in lines):
+            problems.append(f"a line in {key} is over {NOTE_LINE_MAX} characters")
+    return problems
 
 
 # --- markdown -----------------------------------------------------------------

@@ -36,6 +36,10 @@ final class CoachInbox {
     /// screen can say so. Nil when the inbox is empty or readable.
     private(set) var unreadableReason: String?
     private(set) var decisions: [CoachDecision] = []
+    /// The daily check's note on the latest workout it read, when one has been
+    /// pushed and this build can show it. Today decides whether it is still
+    /// current (`CoachDayNote.isCurrent`).
+    private(set) var dayNote: CoachDayNote?
 
     init() {}
 
@@ -96,8 +100,12 @@ final class CoachInbox {
         unreadableReason = nil
         guard let context else {
             review = nil
+            dayNote = nil
             return
         }
+        dayNote = store.dayNoteData()
+            .flatMap { try? CoachJSON.decoded(CoachDayNote.self, from: $0) }
+            .flatMap { $0.isReadable ? $0 : nil }
         guard let data = store.proposalData() else {
             review = nil
             return
@@ -121,6 +129,7 @@ final class CoachInbox {
         review = nil
         unreadableReason = nil
         decisions = []
+        dayNote = nil
         decidedThisLaunch = nil
     }
 

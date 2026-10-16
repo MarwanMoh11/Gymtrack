@@ -12,14 +12,7 @@ struct CoachAdviceCard: View {
                 SectionHeader("Coach's notes")
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Circle().fill(Theme.textTertiary).frame(width: 5, height: 5)
-                                .accessibilityHidden(true)
-                            Text(line)
-                                .font(Theme.rounded(15, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        CoachBulletLine(text: line)
                     }
                     Text("These don't change your plan.")
                         .font(Theme.rounded(11, weight: .medium))
@@ -27,6 +20,23 @@ struct CoachAdviceCard: View {
                 }
                 .gtCard()
             }
+        }
+    }
+}
+
+/// One line of the coach's words with a quiet bullet, as the review's notes
+/// and the daily note both set them.
+struct CoachBulletLine: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Circle().fill(Theme.textTertiary).frame(width: 5, height: 5)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(Theme.rounded(15, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

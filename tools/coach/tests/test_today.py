@@ -234,5 +234,74 @@ class Command(helpers.CoachTestCase):
         self.assertFalse((self.home / "daily").exists())
 
 
+def sample_note(day="2026-10-02", **changes):
+    note = {"format": "gymtrack-coach-day", "version": 1, "id": "6F1C2A4E-1D2B-4C3D-9E8F-0A1B2C3D4E5F",
+            "createdAt": "2026-10-02T20:00:00Z", "day": day, "verdict": "A normal day; everything held.",
+            "wentWell": ["Leg press held at 200 kg for 12."], "nextTime": ["Answer the effort question on every set."]}
+    note.update(changes)
+    return note
+
+
+class NoteChecks(unittest.TestCase):
+    def test_a_good_note_passes(self):
+        self.assertEqual(today.validate_note(sample_note(), "2026-10-02"), [])
+
+    def test_each_rule_names_its_problem(self):
+        cases = [
+            (sample_note(went_well=["typo"]), "unknown key 'went_well'"),
+            (sample_note(watch=None), "watch is null"),
+            (sample_note(watch=[]), "watch is empty"),
+            (sample_note(watch=["a", "b", "c"]), "watch has 3 lines; at most 2"),
+            (sample_note(verdict=" "), "verdict must be a sentence"),
+            (sample_note(id="not-a-uuid"), "id must be a UUID"),
+            (sample_note(format="gymtrack-coach-proposal"), "format must be"),
+            (sample_note(), "day must be '2026-10-03'"),
+            (sample_note(nextTime=["x" * 401]), "over 400 characters"),
+        ]
+        for note, needle in cases:
+            day = "2026-10-03" if needle.startswith("day must") else "2026-10-02"
+            with self.subTest(needle):
+                self.assertTrue(any(needle in p for p in today.validate_note(note, day)),
+                                today.validate_note(note, day))
+
+
+class PushDay(helpers.CoachTestCase):
+    def put_note(self, day, note=None):
+        folder = self.home / "daily" / day
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "note.json").write_text(json.dumps(note or sample_note(day)))
+
+    def test_sends_the_latest_note_to_the_phones_inbox(self):
+        self.put_note("2026-09-30")
+        self.put_note("2026-10-02")
+        (self.home / "daily" / "2026-10-05").mkdir(parents=True)
+        code, out, err = self.coach("push-day")
+        self.assertEqual(code, 0, err)
+        landed = self.phone / "phone" / "Documents" / "Coach" / "Inbox" / "daily.json"
+        self.assertEqual(json.loads(landed.read_text())["day"], "2026-10-02")
+        self.assertIn("until the next workout", out)
+
+    def test_a_named_day_is_sent(self):
+        self.put_note("2026-09-30")
+        self.put_note("2026-10-02")
+        code, _, err = self.coach("push-day", "2026-09-30")
+        self.assertEqual(code, 0, err)
+        landed = self.phone / "phone" / "Documents" / "Coach" / "Inbox" / "daily.json"
+        self.assertEqual(json.loads(landed.read_text())["day"], "2026-09-30")
+
+    def test_a_bad_note_sends_nothing(self):
+        self.put_note("2026-10-02", sample_note("2026-10-02", watch=None))
+        code, out, _ = self.coach("push-day")
+        self.assertEqual(code, 1)
+        self.assertIn("watch is null", out)
+        self.assertIn("Nothing was sent", out)
+        self.assertFalse((self.phone / "phone").exists())
+
+    def test_without_a_note_it_says_where_to_write_one(self):
+        code, _, err = self.coach("push-day")
+        self.assertEqual(code, 2)
+        self.assertIn("note.json", err)
+
+
 if __name__ == "__main__":
     unittest.main()

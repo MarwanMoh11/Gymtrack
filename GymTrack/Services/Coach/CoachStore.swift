@@ -7,6 +7,7 @@ import Foundation
 /// Documents/Coach/snapshot.json         written by the app
 /// Documents/Coach/decisions.json        written by the app
 /// Documents/Coach/Inbox/proposal.json   written by the Mac
+/// Documents/Coach/Inbox/daily.json      written by the Mac (the daily check)
 /// ```
 ///
 /// The Mac reaches these through `devicectl`, which copies a file's bytes at
@@ -30,6 +31,7 @@ struct CoachStore: Sendable {
     var decisionsURL: URL { root.appendingPathComponent("decisions.json") }
     var inboxURL: URL { root.appendingPathComponent("Inbox", isDirectory: true) }
     var proposalURL: URL { inboxURL.appendingPathComponent("proposal.json") }
+    var dayNoteURL: URL { inboxURL.appendingPathComponent("daily.json") }
     /// Written by an earlier build that let a proposal be rated. Nothing reads
     /// it any more, so `prepare()` deletes it: a file left on the phone would
     /// still be pulled to the Mac and read as an opinion nobody can now take
@@ -45,7 +47,8 @@ struct CoachStore: Sendable {
     }
 
     /// Removes everything the app keeps for the coach (snapshot, decisions,
-    /// any unreadable decision file set aside, and a pushed proposal), then
+    /// any unreadable decision file set aside, a pushed proposal and the
+    /// daily note), then
     /// recreates the empty inbox so the Mac's next push has somewhere to land.
     /// Part of erasing all data: the decisions hold the lifter's own notes.
     func erase() {
@@ -62,6 +65,12 @@ struct CoachStore: Sendable {
     /// When the file last changed, which for a push is when it arrived.
     func proposalArrivedAt() -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: proposalURL.path))?[.modificationDate] as? Date
+    }
+
+    // MARK: Daily note
+
+    func dayNoteData() -> Data? {
+        try? Data(contentsOf: dayNoteURL)
     }
 
     // MARK: Decisions

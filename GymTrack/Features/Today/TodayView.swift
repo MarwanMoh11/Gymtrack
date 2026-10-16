@@ -12,6 +12,7 @@ struct TodayView: View {
     @State private var showingDayPicker = false
     @State private var showingSettings = false
     @State private var showingCoachReview = false
+    @State private var showingCoachDay = false
     @State private var showingPastWorkout = false
     @State private var pastSession: WorkoutSession?
 
@@ -45,6 +46,7 @@ struct TodayView: View {
                     greeting
                     if let expiry = BuildExpiry.upcoming() { expiryNotice(expiry) }
                     if CoachInbox.shared.showsOnToday { coachNotice }
+                    if let note = currentDayNote { dayNoteNotice(note) }
                     heroCard
                     weekStrip
                     statsRow
@@ -72,6 +74,12 @@ struct TodayView: View {
             .sheet(isPresented: $showingCoachReview) {
                 NavigationStack { CoachReviewView(showsClose: true) }
                     .gtSheetBackground()
+            }
+            .sheet(isPresented: $showingCoachDay) {
+                if let note = CoachInbox.shared.dayNote {
+                    NavigationStack { CoachDayView(note: note) }
+                        .gtSheetBackground()
+                }
             }
             .sheet(isPresented: $showingDayPicker) {
                 DayPickerSheet(plan: activePlan) { day in
@@ -107,6 +115,34 @@ struct TodayView: View {
             .gtCard(padding: 12)
         }
         .buttonStyle(.plain)
+    }
+
+    /// The daily check's note while the workout it is about is still the
+    /// latest one trained. The next finished workout retires it, so it never
+    /// needs dismissing.
+    private var currentDayNote: CoachDayNote? {
+        guard let note = CoachInbox.shared.dayNote,
+              note.isCurrent(trainedStarts: finishedSessions.filter(TrainingStats.isTrained).map(\.startedAt))
+        else { return nil }
+        return note
+    }
+
+    private func dayNoteNotice(_ note: CoachDayNote) -> some View {
+        Button { showingCoachDay = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "text.bubble")
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+                Text("Coach on \(note.workoutName())")
+                    .font(Theme.rounded(13, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                DisclosureChevron()
+            }
+            .gtCard(padding: 12)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("coachDayNotice")
     }
 
     // MARK: - Signing

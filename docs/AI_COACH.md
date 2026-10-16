@@ -85,9 +85,18 @@ was done, and fractional sets per muscle for the day and the week so far.
 Sessions after that day are cut first, so a past day reads as it did that
 evening.
 
-It never proposes, pushes or names a load. Its folder is `daily/YYYY-MM-DD/`,
-never `reviews/`, so a daily check can never become the "previous review" a
-review measures its changes from. The coach's `notes.md` there ends with a
+It never proposes a plan change or names a load. Its folder is
+`daily/YYYY-MM-DD/`, never `reviews/`, so a daily check can never become the
+"previous review" a review measures its changes from.
+
+What the owner was told also goes to the phone: the coach writes `note.json`
+in the day's folder (a verdict, then at most three lines that went well, two to
+watch and three for next time) and `coach push-day` copies it to
+`Inbox/daily.json`. Today shows a quiet line, "Coach on Friday's workout",
+that opens the note, until a workout on a later training day is finished; its
+"next time" is about that workout, so there is nothing to dismiss. A new push
+replaces the note. The phone keeps no history of them; the Mac's folders are
+the record. The coach's `notes.md` there ends with a
 `For the next review:` line, which the next review reads as a lead to check
 against its own stats, not as evidence.
 
@@ -172,6 +181,7 @@ On the phone, in the app's Documents directory:
 | `Documents/Coach/snapshot.json` | app | The full backup archive, the same bytes and format as Settings, "Export a backup" (`BackupService.Archive`, version 2). |
 | `Documents/Coach/decisions.json` | app | Decisions (below). |
 | `Documents/Coach/Inbox/proposal.json` | Mac, `coach push` | The proposal awaiting a decision. The app creates `Inbox/` at launch so the destination always exists. |
+| `Documents/Coach/Inbox/daily.json` | Mac, `coach push-day` | The daily check's note on one workout (format `gymtrack-coach-day`, version 1; see "The daily check"). Read-only on the phone. |
 | `Library/Application Support/ProgressPhotos/<id>.jpg` | app | One JPEG per progress photo, at most 1600 px on the long side, with no metadata. Not in `Documents`, which the app shares with the Files app. `coach pull` copies the ones the snapshot names into the review's `photos/` as `<local date>-<pose>.jpg`. |
 
 The app writes `snapshot.json` atomically, debounced, after any save that
@@ -182,7 +192,7 @@ at every launch so a stale file cannot outlive the data it came from. While a
 workout is open, saves that touch only it, machine-setup changes and the launch
 write are all skipped, so the logging path stays clear; finishing or discarding
 the workout writes. Erase all data removes the snapshot, the decisions, any
-pushed proposal and the progress photos along with the records. `xcrun devicectl` reaches the container on
+pushed proposal or daily note and the progress photos along with the records. `xcrun devicectl` reaches the container on
 development-signed builds, which is all a free Apple ID makes:
 
 ```

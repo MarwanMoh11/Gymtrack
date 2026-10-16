@@ -18,6 +18,7 @@ BUNDLE_ID = "com.marwanmohamed.gymtrack"
 SNAPSHOT_PATH = "Documents/Coach/snapshot.json"
 DECISIONS_PATH = "Documents/Coach/decisions.json"
 INBOX_PATH = "Documents/Coach/Inbox/proposal.json"
+DAY_NOTE_PATH = "Documents/Coach/Inbox/daily.json"
 # Progress photos, `<id>.jpg` each. Not in Documents, which the app shares
 # with the Files app.
 PHOTOS_PATH = "Library/Application Support/ProgressPhotos"
