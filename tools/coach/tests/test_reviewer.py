@@ -92,6 +92,20 @@ class FindBinary(unittest.TestCase):
                 with self.assertRaises(ReviewerError):
                     reviewer.find_claude_binary()
 
+    def test_nested_install_layout(self):
+        env = {k: v for k, v in os.environ.items() if k != "COACH_CLAUDE_BIN"}
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            support = Path(home, "Library/Application Support/Claude")
+            for folder in ("claude-code/2.1.284", "claude-code/2.1.299/4fa9694b7975",
+                           "claude-code/2.1.295/9d6405864fdc", "claude-code-vm/9.9.9"):
+                binary = support / folder / "claude.app/Contents/MacOS/claude"
+                binary.parent.mkdir(parents=True)
+                binary.write_text("")
+            with mock.patch.dict(os.environ, {**env, "HOME": home}, clear=True), mock.patch("shutil.which", return_value=None):
+                self.assertEqual(reviewer.find_claude_binary(),
+                                 str(support / "claude-code/2.1.299/4fa9694b7975/claude.app/Contents/MacOS/claude"))
+
 
 class Command(unittest.TestCase):
     HELP = (helpers.FAKES / "claude").read_text()

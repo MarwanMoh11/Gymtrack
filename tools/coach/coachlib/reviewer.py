@@ -47,15 +47,22 @@ def find_claude_binary() -> str:
     on_path = shutil.which("claude")
     if on_path:
         return on_path
-    pattern = os.path.expanduser("~/Library/Application Support/Claude/claude-code/*/claude.app/Contents/MacOS/claude")
-    found = sorted(glob.glob(pattern), key=lambda p: _version_key(p), reverse=True)
+    root = Path(os.path.expanduser("~/Library/Application Support/Claude/claude-code"))
+    # The desktop app moved its install from <version>/claude.app to
+    # <version>/<hash>/claude.app; both are searched so the coach keeps finding
+    # whichever an update leaves behind. claude-code-vm/ is a sibling, not a
+    # child, so its Linux binary never matches.
+    found = [path for depth in ("*", "*/*")
+             for path in glob.glob(str(Path(glob.escape(str(root)), depth, "claude.app/Contents/MacOS/claude")))]
+    found.sort(key=lambda p: _version_key(p, root), reverse=True)
     if found:
         return found[0]
     raise ReviewerError("no claude binary: set COACH_CLAUDE_BIN, put `claude` on PATH, or install Claude Code")
 
 
-def _version_key(path: str):
-    folder = Path(path).parents[3].name
+def _version_key(path: str, root: Path):
+    """The version folder directly under claude-code/, whatever the layout below it."""
+    folder = Path(path).relative_to(root).parts[0]
     return tuple(int(part) if part.isdigit() else 0 for part in folder.split("."))
 
 
