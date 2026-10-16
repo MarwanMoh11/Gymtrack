@@ -59,6 +59,9 @@ enum CoachValidator {
         let problem: String?
 
         var hasApplicableChange: Bool { rows.contains { $0.status.isApplicable } }
+        /// Advice with no plan change behind it: there is nothing to accept or
+        /// decline, only something to read and acknowledge.
+        var isAdviceOnly: Bool { problem == nil && proposal.changes.isEmpty && !proposal.adviceLines.isEmpty }
         var applicableIDs: [String] { rows.filter { $0.status.isApplicable }.map(\.id) }
     }
 
@@ -96,7 +99,9 @@ enum CoachValidator {
             return "This proposal is written in a format this version of the app does not read."
         }
         if UUID(uuidString: proposal.id) == nil { return "The proposal has no valid ID." }
-        if proposal.changes.isEmpty { return "The proposal has no changes." }
+        // Advice about effort or rest needs no plan edit, and the Mac accepts a
+        // proposal that is advice alone, so the phone must too.
+        if proposal.changes.isEmpty && proposal.adviceLines.isEmpty { return "The proposal has no changes and no advice." }
         if proposal.changes.count > CoachProposal.maxChanges {
             return "The proposal has more than \(CoachProposal.maxChanges) changes."
         }

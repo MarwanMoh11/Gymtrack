@@ -60,12 +60,13 @@ final class CoachInbox {
 
     var proposal: CoachProposal? { review?.proposal }
     var rows: [CoachValidator.Row] { review?.rows ?? [] }
-    var advice: [String] { proposal?.advice ?? [] }
+    var advice: [String] { proposal?.adviceLines ?? [] }
 
     /// Whether Today should show its quiet line: a proposal waiting, with at
-    /// least one change that could be applied, and no decision made about it.
+    /// least one change that could be applied (or advice and no changes at all),
+    /// and no decision made about it.
     var showsOnToday: Bool {
-        guard let review, review.problem == nil, review.hasApplicableChange else { return false }
+        guard let review, review.problem == nil, review.hasApplicableChange || review.isAdviceOnly else { return false }
         return decision(for: review.proposal.id) == nil
     }
 
@@ -126,7 +127,7 @@ final class CoachInbox {
         guard decision(for: proposal.id) == nil else {
             return .failure(.init(reason: "This proposal has already been decided."))
         }
-        guard review.hasApplicableChange else {
+        guard review.hasApplicableChange || review.isAdviceOnly else {
             return .failure(.init(reason: "None of these changes fit the plan as it is now."))
         }
 
@@ -163,6 +164,16 @@ final class CoachInbox {
         self.review = CoachValidator.review(proposal, plans: (try? context.fetch(FetchDescriptor<Plan>())) ?? [])
         if decision.appliedAt != nil { CoachSnapshot.shared.request() }
         return .success(decision)
+    }
+
+    /// Marks an advice-only proposal as read. There is no plan edit to accept, so
+    /// this writes the same decision record as a decline of everything, with no
+    /// changes in it and nothing applied, which `coach pull` already reads.
+    func acknowledge() -> Result<CoachDecision, CoachApplier.Refusal> {
+        guard review?.isAdviceOnly == true else {
+            return .failure(.init(reason: "There is no advice to acknowledge."))
+        }
+        return apply(accepted: [])
     }
 
     /// Takes back the decision just made, as if it had never happened: the plan

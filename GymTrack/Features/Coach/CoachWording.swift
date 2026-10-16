@@ -13,6 +13,7 @@ extension CoachDecision {
 
     /// One line for what this decision did to the plan.
     var headline: String {
+        if changes.isEmpty { return "Advice read" }
         guard appliedAt != nil else { return "Nothing was changed" }
         if revertedAt != nil { return "Applied \(appliedCount), then reverted" }
         return appliedCount == 1 ? "Applied 1 change" : "Applied \(appliedCount) changes"
@@ -20,6 +21,7 @@ extension CoachDecision {
 
     /// "2 accepted · 1 declined", leaving out whatever is zero.
     var breakdown: String {
+        if changes.isEmpty { return "No plan changes" }
         let counts: [(Int, String)] = [
             (changes.filter { $0.decision == .accepted }.count, "accepted"),
             (changes.filter { $0.decision == .declined }.count, "declined"),

@@ -29,6 +29,12 @@ struct CoachProposal: Codable, Equatable, Sendable {
     var changes: [CoachChange]
     /// Things that are not plan edits. Shown, never acted on.
     var advice: [String]?
+
+    /// The advice lines with something in them, which is what the screens show
+    /// and what makes a proposal with no changes worth offering.
+    var adviceLines: [String] {
+        (advice ?? []).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
 }
 
 /// One edit to one slot (or one day, for adding a slot).

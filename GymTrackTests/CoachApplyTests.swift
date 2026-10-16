@@ -373,6 +373,55 @@ struct CoachApplyTests {
         #expect(!rig.inbox.showsOnToday, "A proposal with nothing applicable is not shown")
     }
 
+    // MARK: - Advice alone
+
+    @Test func anAdviceOnlyProposalIsOfferedOnTodayAndAcknowledgingItRecordsTheDecisionWithoutTouchingThePlan() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = try Rig(now: t0)
+        defer { rig.close() }
+        let planBefore = try rig.context.fetch(FetchDescriptor<PlanItem>()).map { ($0.id, $0.targetSets, $0.restSeconds) }
+        try rig.push([], extra: ["advice": ["Take longer rests."]])
+        #expect(rig.inbox.showsOnToday, "Advice alone is offered like any proposal")
+        #expect(rig.inbox.advice == ["Take longer rests."] && rig.inbox.rows.isEmpty)
+
+        let decision = applied(rig.inbox.acknowledge())
+        #expect(decision?.changes.isEmpty == true && decision?.appliedAt == nil && decision?.decidedAt == t0)
+        #expect(!rig.inbox.showsOnToday, "Acknowledged advice leaves Today")
+        #expect(rig.store.loadDecisions().decisions.map(\.proposalID) == [F.proposalID])
+        for key in ["appliedAt", "before", "after", "revertedAt", "null"] {
+            #expect(!rig.decisionsText.contains(key), "The record stores no \(key) key")
+        }
+        let planAfter = try rig.context.fetch(FetchDescriptor<PlanItem>()).map { ($0.id, $0.targetSets, $0.restSeconds) }
+        #expect(planAfter.count == planBefore.count && zip(planBefore, planAfter).allSatisfy { $0 == $1 },
+                "The plan is untouched")
+        #expect(refused(rig.inbox.acknowledge()), "It is acknowledged once")
+        #expect(rig.inbox.advice == ["Take longer rests."], "History can still show what was said")
+    }
+
+    @Test func undoingTheAcknowledgementBringsTheAdviceBackWithNoRecord() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = try Rig(now: t0)
+        defer { rig.close() }
+        try rig.push([], extra: ["advice": ["Take longer rests."]])
+        _ = rig.inbox.acknowledge()
+        #expect(rig.inbox.canUndoLastDecision)
+        #expect(rig.inbox.undoLastDecision() == nil)
+        #expect(rig.inbox.showsOnToday && rig.store.loadDecisions().decisions.isEmpty)
+    }
+
+    @Test func acknowledgingRefusesAProposalThatHasChangesOrNoAdvice() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = try Rig(now: t0)
+        defer { rig.close() }
+        try rig.push([sets("c1", item: F.bench, from: 4, to: 5)], extra: ["advice": ["Take longer rests."]])
+        #expect(refused(rig.inbox.acknowledge()), "Changes are accepted or declined, not acknowledged")
+        try rig.push([])
+        #expect(!rig.inbox.showsOnToday && refused(rig.inbox.acknowledge()), "Neither changes nor advice is not offered")
+    }
+
     // MARK: - Leftover ratings file
 
     @Test func theOldRatingsFileIsDeletedByAPushAndALaunchButTheProposalStays() throws {
@@ -414,9 +463,9 @@ struct CoachApplyTests {
         }
 
         /// What `coach push` does, then what opening the app does.
-        func push(_ changes: [[String: Any]], id: String = F.proposalID) throws {
+        func push(_ changes: [[String: Any]], id: String = F.proposalID, extra: [String: Any] = [:]) throws {
             store.prepare()
-            try F.proposalJSON(id: id, changes: changes).write(to: store.proposalURL)
+            try F.proposalJSON(id: id, changes: changes, extra: extra).write(to: store.proposalURL)
             inbox.reload()
         }
 

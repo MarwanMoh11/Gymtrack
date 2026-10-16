@@ -100,6 +100,30 @@ struct CoachValidationTests {
         #expect(sameID.problem?.contains("share an ID") == true, "Two changes under one ID are refused")
     }
 
+    @Test func phoneMustAcceptTheAdviceOnlyProposalTheMacAccepts() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let plans = try PlanShape.besideAnotherPlan.plans(in: context)
+        let proposal = try F.proposal(changes: [], extra: ["advice": ["Take longer rests."]])
+        #expect(CoachValidator.problem(with: proposal) == nil)
+        let review = CoachValidator.review(proposal, plans: plans)
+        #expect(review.problem == nil && review.isAdviceOnly && review.rows.isEmpty && !review.hasApplicableChange)
+        #expect(proposal.adviceLines == ["Take longer rests."])
+    }
+
+    @Test func aProposalWithNeitherChangesNorAdviceIsRefused() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let context = try TestStore.context()
+        let plans = try PlanShape.besideAnotherPlan.plans(in: context)
+        for extra: [String: Any] in [[:], ["advice": [String]()], ["advice": ["  ", ""]]] {
+            let review = CoachValidator.review(try F.proposal(changes: [], extra: extra), plans: plans)
+            #expect(review.problem?.contains("no changes and no advice") == true && !review.isAdviceOnly,
+                    "Blank advice is no advice: \(extra)")
+        }
+    }
+
     @Test func aProposalTheContractDoesNotDescribeIsRefusedButANewerKeyIsIgnored() throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }

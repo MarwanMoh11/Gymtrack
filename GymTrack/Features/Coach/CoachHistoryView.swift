@@ -48,7 +48,12 @@ struct CoachHistoryView: View {
         if inbox.showsOnToday { waiting }
         if let decision = inbox.latestDecision {
             decisionCard(decision)
-            outcomes(of: decision)
+            if !decision.changes.isEmpty { outcomes(of: decision) }
+            // The record keeps no wording, so advice is shown while the
+            // proposal it came with is still the one in the inbox.
+            if inbox.decisionOnProposal?.proposalID == decision.proposalID {
+                CoachAdviceCard(lines: inbox.advice)
+            }
             if let revertible = inbox.revertibleDecision { revertSection(revertible) }
         } else if !inbox.showsOnToday {
             unactionable
@@ -103,10 +108,13 @@ struct CoachHistoryView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeader("Changes")
-                ForEach(inbox.rows) { CoachChangeCard(row: $0) }
+            if !inbox.rows.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader("Changes")
+                    ForEach(inbox.rows) { CoachChangeCard(row: $0) }
+                }
             }
+            CoachAdviceCard(lines: inbox.advice)
         }
     }
 

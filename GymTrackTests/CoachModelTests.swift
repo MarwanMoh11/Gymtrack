@@ -128,6 +128,17 @@ struct CoachModelTests {
                 "A slot that did not exist has no item key at all")
     }
 
+    @Test func anAcknowledgedAdviceOnlyDecisionIsTheDeclinedShapeWithAnEmptyChangeList() throws {
+        let advice = CoachDecision(proposalID: "P1", receivedAt: t0, decidedAt: t0, changes: [])
+        let text = String(decoding: try CoachJSON.encoded(CoachDecisionFile(decisions: [advice])), as: UTF8.self)
+        for key in ["appliedAt", "before", "after", "revertedAt", "note", "null"] {
+            #expect(!text.contains(key), "An acknowledged piece of advice has no \(key)")
+        }
+        #expect(text.contains("\"changes\" : ["), "The Mac reader still finds a changes list to tally")
+        let back = try CoachJSON.decoded(CoachDecisionFile.self, from: Data(text.utf8))
+        #expect(back.decisions == [advice] && advice.headline == "Advice read" && advice.breakdown == "No plan changes")
+    }
+
     @Test func decisionsRoundTripAndAnUnreadableFileIsMovedAsideNotOverwritten() throws {
         let store = F.temporaryStore()
         defer { F.discard(store) }

@@ -88,11 +88,14 @@ struct CoachReviewView: View {
 
     private var shownRows: [CoachValidator.Row] { decided == nil ? inbox.rows : decidedRows }
 
-    private var changes: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader("Changes")
-            ForEach(shownRows) { row in
-                card(for: row)
+    /// Absent for advice alone, which has no cards to put under a heading.
+    @ViewBuilder private var changes: some View {
+        if !shownRows.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader("Changes")
+                ForEach(shownRows) { row in
+                    card(for: row)
+                }
             }
         }
     }
@@ -116,29 +119,8 @@ struct CoachReviewView: View {
 
     // MARK: - Advice
 
-    @ViewBuilder private var advice: some View {
-        let lines = inbox.advice.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        if !lines.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeader("Coach's notes")
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Circle().fill(Theme.textTertiary).frame(width: 5, height: 5)
-                                .accessibilityHidden(true)
-                            Text(line)
-                                .font(Theme.rounded(15, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    Text("These don't change your plan.")
-                        .font(Theme.rounded(11, weight: .medium))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .gtCard()
-            }
-        }
+    private var advice: some View {
+        CoachAdviceCard(lines: inbox.advice)
     }
 
     // MARK: - Deciding
@@ -158,8 +140,15 @@ struct CoachReviewView: View {
         return "Apply \(acceptedCount), decline \(declinedCount)"
     }
 
+    private var isAdviceOnly: Bool { inbox.review?.isAdviceOnly == true }
+
     @ViewBuilder private var decideArea: some View {
-        if applicableRows.isEmpty {
+        if isAdviceOnly {
+            // Nothing to accept or decline. Leaving without a tap is fine; the
+            // tap only stops Today offering the same advice again.
+            Button("Got it") { apply() }
+                .buttonStyle(PrimaryButtonStyle())
+        } else if applicableRows.isEmpty {
             note("None of these changes fit your plan as it is now, so there is nothing to decide. The next review will start from the plan as it is.")
         } else {
             VStack(spacing: 10) {
@@ -186,7 +175,8 @@ struct CoachReviewView: View {
         refusal = nil
         let accepted = Set(applicableRows.filter { choices[$0.id] == .accept }.map(\.id))
         let rowsBefore = inbox.rows
-        switch inbox.apply(accepted: accepted, notes: keptNotes) {
+        let result = isAdviceOnly ? inbox.acknowledge() : inbox.apply(accepted: accepted, notes: keptNotes)
+        switch result {
         case .success(let decision):
             decidedRows = rowsBefore
             decided = decision
@@ -214,7 +204,7 @@ struct CoachReviewView: View {
     /// Revert to fall back on later; saying "puts the plan back" would be false.
     private var undoExplanation: String {
         if decided?.appliedAt == nil {
-            return "Undo brings this review back undecided and leaves no record that you declined it."
+            return "Undo brings this review back undecided and leaves no record that you decided anything."
         }
         return "Undo puts the plan back and leaves no record that this happened. Once you close this screen, Settings has Revert instead, which keeps the record."
     }
