@@ -19,6 +19,9 @@ final class WatchRestTimer {
     private(set) var totalSeconds: Int = 0
     /// True while the rest is the watch's own rather than the phone's.
     private(set) var isLocal = false
+    /// Whether the heart rate has settled during this rest. Beside the
+    /// countdown and never part of it: the rest ends when `endsAt` says.
+    @ObservationIgnored let recovery: WatchRecoveryCue
 
     /// One timer, set for the instant the rest ends. Nothing ticks in between:
     /// the countdown is drawn by a `TimelineView` from `endsAt`, so the only
@@ -38,8 +41,10 @@ final class WatchRestTimer {
     /// the tap is the only thing that shows it.
     @ObservationIgnored private let restOver: () -> Void
 
-    init(restOver: @escaping () -> Void = WatchHaptics.restOver) {
+    init(restOver: @escaping () -> Void = WatchHaptics.restOver,
+         recovery: WatchRecoveryCue? = nil) {
         self.restOver = restOver
+        self.recovery = recovery ?? WatchRecoveryCue()
     }
 
     var isRunning: Bool { endsAt != nil }
@@ -75,6 +80,7 @@ final class WatchRestTimer {
         if let followed = followable(endsAt, now: now) {
             // The phone's rest supersedes a local one started a moment ago.
             guard followed != self.endsAt || isLocal else { return }
+            if !isRunning { recovery.beginRest(at: now) }
             self.endsAt = followed
             self.totalSeconds = max(total, 1)
             self.isLocal = false
@@ -100,6 +106,7 @@ final class WatchRestTimer {
     /// range.
     func startLocal(seconds: Int, now: Date = .now) {
         guard seconds > 0 else { return }
+        if !isRunning { recovery.beginRest(at: now) }
         endsAt = now.addingTimeInterval(TimeInterval(seconds))
         totalSeconds = seconds
         isLocal = true
@@ -130,6 +137,7 @@ final class WatchRestTimer {
         endsAt = nil
         totalSeconds = 0
         isLocal = false
+        recovery.endRest()
     }
 
     /// Sets the timer for the end of the rest, or ends it now if it is already

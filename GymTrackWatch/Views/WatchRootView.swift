@@ -90,6 +90,15 @@ struct WatchRootView: View {
             rest.sync(endsAt: endsAt, total: connector.session?.restTotalSeconds ?? 0,
                       unknown: connector.session?.restUnknown == true)
         }
+        // The cue hears the live trace, and the phone's setting for it. Absent
+        // on the wire means on.
+        .onAppear {
+            let cue = rest.recovery
+            recorder.onHeartRate = { date, bpm in cue.record(bpm: bpm, at: date) }
+        }
+        .onChange(of: connector.session?.heartRateCue, initial: true) { _, enabled in
+            rest.recovery.isEnabled = enabled != false
+        }
         .onChange(of: connector.session?.sessionID) { _, id in
             // Land on the logger for a new session rather than wherever the
             // last one was left.

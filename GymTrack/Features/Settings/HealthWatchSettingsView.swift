@@ -195,6 +195,16 @@ struct HealthWatchSettingsView: View {
             ))
             .tint(Theme.accent)
             .disabled(!watch.isLinked)
+
+            Toggle("Tap when heart rate settles in a rest", isOn: Binding(
+                get: { settings.heartRateReadyCue },
+                set: {
+                    settings.heartRateReadyCue = $0
+                    WatchBridge.shared.resend()
+                }
+            ))
+            .tint(Theme.accent)
+            .disabled(!watch.isLinked)
         } header: {
             Text("Apple Watch")
         } footer: {

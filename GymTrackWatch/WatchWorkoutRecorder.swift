@@ -28,6 +28,12 @@ final class WatchWorkoutRecorder: NSObject {
     private(set) var activeEnergyKcal: Double?
     private(set) var authorizationDenied = false
 
+    /// Told of each new heart-rate reading as it arrives, with the moment it
+    /// was taken. How the rest's "settled" cue hears the live trace; it keeps
+    /// nothing, and a recorder with no listener behaves as it always did.
+    @ObservationIgnored var onHeartRate: ((Date, Double) -> Void)?
+    @ObservationIgnored private var lastHeartRateAt: Date?
+
     /// The GymTrack session this recording belongs to, so a workout that ends
     /// on the phone while the watch is asleep doesn't leave a session running.
     private(set) var sessionID: UUID?
@@ -429,6 +435,7 @@ final class WatchWorkoutRecorder: NSObject {
         isRunning = false
         startedAt = nil
         heartRate = nil
+        lastHeartRateAt = nil
         averageHeartRate = nil
         maxHeartRate = nil
         activeEnergyKcal = nil
@@ -571,6 +578,14 @@ final class WatchWorkoutRecorder: NSObject {
             switch quantityType.identifier {
             case HKQuantityTypeIdentifier.heartRate.rawValue:
                 heartRate = statistics.mostRecentQuantity()?.doubleValue(for: beats)
+                // Each reading goes out once, stamped with when it was taken
+                // rather than when it arrived: the builder reports other types
+                // in between and a reading re-announced would flatten a trace.
+                if let reading = heartRate, let taken = statistics.mostRecentQuantityDateInterval()?.end,
+                   taken != lastHeartRateAt {
+                    lastHeartRateAt = taken
+                    onHeartRate?(taken, reading)
+                }
                 averageHeartRate = statistics.averageQuantity()?.doubleValue(for: beats)
                 maxHeartRate = statistics.maximumQuantity()?.doubleValue(for: beats)
             case HKQuantityTypeIdentifier.activeEnergyBurned.rawValue:

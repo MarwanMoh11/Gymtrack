@@ -585,6 +585,28 @@ struct WatchLinkWireTests {
         #expect(known["restUnknown"] == nil, "a known rest adds no key at all")
     }
 
+    @Test func theHeartRateCueSettingIsAnOptionalKeyThatAbsentMeansOn() throws {
+        func session(cue: Bool?) -> WatchSessionSnapshot {
+            WatchSessionSnapshot(sessionID: Self.sessionID, title: "Push", planName: "", startedAt: Self.t0,
+                                 exercises: [], restTotalSeconds: 0, restAutoStart: true, volumeKg: 0, unit: .kg,
+                                 heartRateCue: cue)
+        }
+        let off = try JSONEncoder.watchLink.encode(session(cue: false))
+        #expect(try JSONDecoder.watchLink.decode(WatchSessionSnapshot.self, from: off).heartRateCue == false)
+
+        let on = try json(session(cue: nil))
+        #expect(on["heartRateCue"] == nil, "the setting being on adds no key at all")
+
+        let old = LegacySession(sessionID: Self.sessionID, title: "Push", planName: "", startedAt: Self.t0,
+                                exercises: [], restEndsAt: nil, restStartedAt: nil, restTotalSeconds: 0,
+                                restAutoStart: true, volumeKg: 0, unit: .kg)
+        let fromOld = try JSONDecoder.watchLink.decode(WatchSessionSnapshot.self,
+                                                       from: JSONEncoder.watchLink.encode(old))
+        #expect(fromOld.heartRateCue == nil, "a mirror from an older phone means on")
+        let seenByOld = try JSONDecoder.watchLink.decode(LegacySession.self, from: off)
+        #expect(seenByOld.sessionID == Self.sessionID, "an older watch ignores the key")
+    }
+
     @Test(arguments: [WatchSessionEnd.Reason.finished, .discarded])
     func theWatchHearsWhetherASessionWasFinishedOrDiscarded(_ reason: WatchSessionEnd.Reason) throws {
         let end = WatchSessionEnd(sessionID: Self.sessionID, reason: reason)

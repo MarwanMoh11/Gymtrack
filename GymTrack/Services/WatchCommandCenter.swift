@@ -932,7 +932,8 @@ enum WatchSnapshotFactory {
             volumeKg: session.totalVolumeKg,
             unit: AppSettings.shared.weightUnit,
             effortEnabled: AppSettings.shared.trackRPE,
-            restUnknown: restUnknown ? true : nil
+            restUnknown: restUnknown ? true : nil,
+            heartRateCue: AppSettings.shared.heartRateReadyCue ? nil : false
         )
         // Asked of the snapshot rather than of the session, so this answer and
         // the watch's own — made while a log of its own is still unconfirmed —

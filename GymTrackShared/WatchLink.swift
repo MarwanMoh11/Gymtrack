@@ -182,6 +182,10 @@ struct WatchSessionSnapshot: Codable, Hashable, Sendable {
     /// the rest fields are the phone's real answer, as they always were. An
     /// older watch ignores the key and behaves exactly as it did.
     var restUnknown: Bool?
+    /// Whether the wrist plays its "heart rate settled" tap during a rest.
+    /// Optional so a mirror from an older phone still decodes; absent means on,
+    /// and the phone leaves the key out while the setting is on.
+    var heartRateCue: Bool?
     /// True while the phone thinks a rest is running.
     var isResting: Bool { restEndsAt != nil }
 

@@ -241,6 +241,13 @@ struct WatchLoggerView: View {
                 WatchRestCountdown(endsAt: endsAt, totalSeconds: rest.totalSeconds)
             }
 
+            if rest.recovery.isSettled {
+                Text("Heart rate settled · go")
+                    .font(Theme.rounded(12, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityIdentifier("watch.heartRateSettled")
+            }
+
             HStack(spacing: 6) {
                 Text("RESTING")
                     .font(Theme.eyebrow)

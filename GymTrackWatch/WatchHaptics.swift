@@ -12,6 +12,10 @@ enum WatchHaptics {
     static func start() { WKInterfaceDevice.current().play(.start) }
     static func log() { WKInterfaceDevice.current().play(.success) }
     static func restOver() { WKInterfaceDevice.current().play(.notification) }
+    /// The heart rate has settled and the next set can start. `.directionUp`
+    /// is not used by the other rest taps, so it can be told from rest-over
+    /// without looking.
+    static func recovered() { WKInterfaceDevice.current().play(.directionUp) }
     static func finish() { WKInterfaceDevice.current().play(.stop) }
     static func celebrate() {
         let device = WKInterfaceDevice.current()
