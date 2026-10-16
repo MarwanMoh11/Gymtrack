@@ -119,7 +119,9 @@ fills, a snapshot file, and one row in Settings.
   after as the phone computes it, the reason, and the reviewer's line (verdict, score, note, and a mark when the change is
   disputed and was kept anyway). Each change is accepted or declined on its own;
   advice is text with no button. Refused while a workout is running, as a restore
-  is.
+  is. A proposal that is advice alone, with no changes, is offered the same way
+  and has one "Got it" button in place of accept and decline; it edits nothing,
+  so it is allowed during a workout.
 - **Stale changes.** The phone checks every change against the live plan. One
   whose `expect` values no longer match its slot is marked stale: shown, never
   applicable. There is no rebase; the answer is the next review. Sessions logged
@@ -189,6 +191,12 @@ turn into false detail:
   planned was done instead or added. Sessions from before 2026-10-03 have no
   `plannedItems`, and for them a mismatch with today's plan may only be an edit
   made since; the first review misread two fresh edits as skipped slots.
+- An `exerciseCatalog` entry for a retired ID that the app merged into another
+  carries `mergedInto`, the survivor's ID; the key is absent for every other
+  entry and in exports from before 2026-10-16. The two IDs are one movement:
+  the stats group them under the survivor while every set keeps the ID it was
+  logged under, and a series or recent-sets row holding retired IDs lists them
+  in `loggedAs`.
 - `bodyMeasurements` is a top-level array of tape readings from the Progress
   check-in, and is absent when there are none. Each entry has an `id` (UUID), a
   `date` (ISO 8601) and only the parts that were measured, in centimetres: any
@@ -282,7 +290,9 @@ Six kinds, and nothing else is accepted:
 }
 ```
 
-A change's `decision` is `accepted`, `declined` or `stale`. This is a file in
+A change's `decision` is `accepted`, `declined` or `stale`. An advice-only
+proposal that was read is recorded with an empty `changes` list and no
+`appliedAt`. This is a file in
 Documents, not a SwiftData entity: the Mac reads it directly and it never needs
 migrating with the store. A reader ignores any key it does not know, since a file
 written by an older build can carry fields that have since been dropped.
@@ -328,7 +338,9 @@ underestimate their reps left by about one (Halperin 2022), so a run of `hard`
 may sit nearer two reps in reserve than one, and `easy` means "probably three or
 more", nothing finer. Never convert the buckets to percentages of a one-rep max.
 
-**Weekly volume.** Working sets per muscle per local week, counted fractionally:
+**Weekly volume.** Working sets per muscle per local Monday-first week, where
+a set logged before 04:00 belongs to the day before, as everywhere in the app
+(`TrainingDay`). Counted fractionally:
 one for the exercise's first listed muscle and a half for each further one. That
 counting predicted both hypertrophy and strength best in the largest
 dose-response meta-regression to date, with diminishing returns that come sooner
@@ -336,8 +348,11 @@ for strength than for size (Pelland 2025). More sets is never the default answer
 to a stall.
 
 **Adherence.** For a session started from a plan day, working sets logged
-against the slots the day held and the rep targets the sets recorded. For a
-week, plan days trained against plan days due.
+against the slots the day held (`plannedItems`, or today's plan for a session
+from before it was recorded) and the rep targets the sets recorded. The export
+does not say which slot a set filled, so repeated slots of one exercise are read
+as one total and each logged set counts once. For a week, plan days trained
+against plan days due.
 
 **Size.** GymTrack measures performance, not muscle. Comparable performance in
 the six-to-fifteen-rep range, at comparable effort, is the working proxy for
