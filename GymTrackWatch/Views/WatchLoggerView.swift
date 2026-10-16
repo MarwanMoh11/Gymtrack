@@ -112,6 +112,7 @@ struct WatchLoggerView: View {
 
                     if let set, let exercise {
                         values(for: set, exercise: exercise)
+                        plateCaption(exercise)
                         targetLine(set, exercise: exercise)
                         stepperRow
                         startStrip(for: set)
@@ -387,6 +388,25 @@ struct WatchLoggerView: View {
                     .minimumScaleFactor(0.8)
             }
             .accessibilityLabel("Target \(set.targetLabel) reps")
+        }
+    }
+
+    /// Plates for one end of the bar at the weight the crown is on, "20·10·2.5
+    /// /side". Only for a barbell exercise (the phone sends the bar's weight
+    /// for those and no other), and silent when the weight is not one plates
+    /// can make: a guess drawn as a fact is worse than a blank line.
+    @ViewBuilder
+    private func plateCaption(_ exercise: WatchExerciseSnapshot) -> some View {
+        if let bar = exercise.barWeight, exercise.tracking.logsWeight,
+           case .exact(let plates) = PlateMath.outcome(
+               total: weightDisplay, bar: bar, plates: PlateMath.standardPlates(scale.unit)),
+           !plates.isEmpty {
+            Text("\(PlateMath.caption(plates, separator: "·")) /side")
+                .font(Theme.rounded(11, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .accessibilityLabel("Per side \(PlateMath.caption(plates))")
         }
     }
 

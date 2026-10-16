@@ -1126,4 +1126,24 @@ struct WatchLinkWireTests {
             #expect(rows[2].completedAt == nil && rows[2].rpe == nil && rows[2].startedAt == nil)
         }
     }
+
+    // MARK: - The bar under a barbell exercise
+
+    @Test func aBarbellExercisesBarWeightSurvivesTheWire() throws {
+        let exercise = WatchExerciseSnapshot(
+            id: "barbell-bench-press", name: "Bench Press", order: 0, tracking: .weightReps,
+            restSeconds: 120, sets: [], scale: LoadScale(unit: .lb, increment: 5), barWeight: 45)
+        let data = try JSONEncoder.watchLink.encode(exercise)
+        #expect(try JSONDecoder.watchLink.decode(WatchExerciseSnapshot.self, from: data).barWeight == 45)
+    }
+
+    @Test func anExerciseWithoutABarCarriesNoBarKeyAndAnOldMirrorStillDecodes() throws {
+        let exercise = WatchExerciseSnapshot(
+            id: "lat-pulldown-wide", name: "Pulldown", order: 1, tracking: .weightReps,
+            restSeconds: 90, sets: [])
+        let data = try JSONEncoder.watchLink.encode(exercise)
+        let keys = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any]).keys
+        #expect(!keys.contains("barWeight"))
+        #expect(try JSONDecoder.watchLink.decode(WatchExerciseSnapshot.self, from: data).barWeight == nil)
+    }
 }

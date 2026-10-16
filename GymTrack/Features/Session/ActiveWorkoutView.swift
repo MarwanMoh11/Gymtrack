@@ -627,6 +627,8 @@ private struct ExerciseLogCard: View {
                 }
             }
 
+            PlatesStrip(group: group)
+
             setLogger
             .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.pendingNudge(for: group.catalogID))
             .animation(.spring(response: 0.34, dampingFraction: 0.86), value: workout.takenNudge(for: group.catalogID))

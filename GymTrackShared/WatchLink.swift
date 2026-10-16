@@ -121,6 +121,10 @@ struct WatchExerciseSnapshot: Codable, Hashable, Identifiable, Sendable {
     /// crown is worth on it. Optional only so a mirror in flight during an app
     /// update still decodes — read it through `resolvedScale`.
     var scale: LoadScale?
+    /// The empty bar's weight in `scale`'s unit, present only for an exercise
+    /// loaded with plates on a plain bar. Its presence is what puts a per-side
+    /// plate caption on the wrist; for every other exercise there is no key.
+    var barWeight: Double?
 
     /// The ladder to draw and turn, falling back to the session's unit for a
     /// mirror that predates per-exercise scales.

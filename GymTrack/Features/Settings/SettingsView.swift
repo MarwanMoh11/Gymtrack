@@ -96,6 +96,13 @@ struct SettingsView: View {
                         ForEach(WeightUnit.allCases) { Text($0.label).tag($0) }
                     }
 
+                    Picker("Barbell", selection: Binding(
+                        get: { settings.barWeight },
+                        set: { settings.barWeight = $0 }
+                    )) {
+                        ForEach(BarWeight.allCases) { Text($0.label).tag($0) }
+                    }
+
                     NavigationLink {
                         MachineWeightsView()
                     } label: {

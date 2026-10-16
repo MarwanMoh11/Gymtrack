@@ -920,7 +920,9 @@ enum WatchSnapshotFactory {
                         )
                     },
                     lastTimeLabel: lastTimeLabel(group.catalogID),
-                    scale: LoadScaleBook.shared.scale(for: group.catalogID)
+                    scale: LoadScaleBook.shared.scale(for: group.catalogID),
+                    barWeight: PlateLoading.bar(forCatalogID: group.catalogID,
+                                                scale: LoadScaleBook.shared.scale(for: group.catalogID))
                 )
             },
             preferredExerciseID: session.preferredExerciseID,

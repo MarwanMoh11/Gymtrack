@@ -3,6 +3,8 @@ import SwiftUI
 
 enum SettingsKey {
     static let weightUnit = "settings.weightUnit"
+    /// Which bar the plate calculator subtracts: a `BarWeight` raw value.
+    static let barWeight = "settings.barWeight"
     static let haptics = "settings.haptics"
     static let restTimerAutoStart = "settings.restTimerAutoStart"
     static let restTimerSound = "settings.restTimerSound"
@@ -75,6 +77,11 @@ final class AppSettings {
     var weightUnit: WeightUnit {
         didSet { defaults.set(weightUnit.rawValue, forKey: SettingsKey.weightUnit) }
     }
+    /// The bar under the plate calculator. Not part of the backup: it is how
+    /// the lifter's gym is stocked, not something they did.
+    var barWeight: BarWeight {
+        didSet { defaults.set(barWeight.rawValue, forKey: SettingsKey.barWeight) }
+    }
     var hapticsEnabled: Bool {
         didSet { defaults.set(hapticsEnabled, forKey: SettingsKey.haptics) }
     }
@@ -133,6 +140,7 @@ final class AppSettings {
     private init() {
         defaults.register(defaults: [
             SettingsKey.weightUnit: WeightUnit.kg.rawValue,
+            SettingsKey.barWeight: BarWeight.standard.rawValue,
             SettingsKey.haptics: true,
             SettingsKey.restTimerAutoStart: true,
             SettingsKey.defaultRestSeconds: 90,
@@ -145,6 +153,7 @@ final class AppSettings {
             SettingsKey.heartRateReadyCue: true,
         ])
         weightUnit = WeightUnit(rawValue: defaults.string(forKey: SettingsKey.weightUnit) ?? "kg") ?? .kg
+        barWeight = BarWeight(rawValue: defaults.string(forKey: SettingsKey.barWeight) ?? "") ?? .standard
         hapticsEnabled = defaults.bool(forKey: SettingsKey.haptics)
         restTimerAutoStart = defaults.bool(forKey: SettingsKey.restTimerAutoStart)
         defaultRestSeconds = defaults.integer(forKey: SettingsKey.defaultRestSeconds)
