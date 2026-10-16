@@ -377,6 +377,10 @@ def _describe_decision(entry: dict | None) -> str:
         return "no decision yet (still in the inbox, or opened and not decided)."
     if not entry.get("decidedAt"):
         return "received, not decided yet."
+    # An advice-only proposal has no changes to decide; the phone records the
+    # acknowledgement with an empty list, which must not print as "decided ()".
+    if not entry.get("changes"):
+        return "advice read; nothing to apply."
     counts = {}
     for change in entry.get("changes", []):
         counts[change.get("decision")] = counts.get(change.get("decision"), 0) + 1

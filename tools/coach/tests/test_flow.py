@@ -352,6 +352,13 @@ class PushAndStatus(CoachTestCase):
         decisions.write_text(json.dumps({"decisions": [entry]}))
         self.assertIn("decided (1 accepted, 1 declined); applied", line(self.coach("status")[1]))
 
+    def test_an_acknowledged_advice_only_proposal_is_named_plainly(self):
+        from coachlib.commands import _describe_decision
+        entry = {"proposalID": "p", "decidedAt": "2026-10-04T08:05:00Z", "changes": []}
+        self.assertEqual(_describe_decision(entry), "advice read; nothing to apply.")
+        entry.pop("changes")
+        self.assertEqual(_describe_decision(entry), "advice read; nothing to apply.")
+
     def test_status_with_nothing_pushed_and_no_phone(self):
         with mock.patch.dict(os.environ, {"FAKE_PHONE_STATE": "absent"}):
             code, out, _ = self.coach("status")

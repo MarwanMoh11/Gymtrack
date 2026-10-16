@@ -250,24 +250,63 @@ def _set_text(s: dict, tracking: str) -> str:
     return f"{text} {word}" if word else text
 
 
-def prescribed_sets(session: dict, plan_days: dict, catalog: dict) -> dict[str, int] | None:
-    """Movement -> sets the session's plan day asked for, summed over repeated
-    slots of the same exercise; None when no prescription is known. The
-    prescription frozen on the session (`plannedItems`) is the one that
-    applied. Only a session from before the app froze it falls back to the
-    live plan day, which may have been edited since, and to nothing when that
-    day or slot is gone. The export gives no per-set slot, so repeated slots
-    can only be read together."""
+def planned_slots(session: dict, plan_days: dict) -> list[dict] | None:
+    """The slots the session's plan day asked for; None when no prescription
+    is known. The prescription frozen on the session (`plannedItems`) is the
+    one that applied. Only a session from before the app froze it falls back
+    to the live plan day, which may have been edited since, and to nothing
+    when that day or slot is gone."""
     planned = session.get("plannedItems")
     if planned is None:
         day = plan_days.get(str(session.get("planDayID") or "").lower())
         if not day:
             return None
         planned = day.get("items", [])
+    return list(planned)
+
+
+def prescribed_sets(session: dict, plan_days: dict, catalog: dict) -> dict[str, int] | None:
+    """Movement -> sets the session's plan day asked for, summed over repeated
+    slots of the same exercise; None when no prescription is known. Used for
+    "was this session cut short", where only the total matters."""
+    planned = planned_slots(session, plan_days)
+    if planned is None:
+        return None
     totals: dict[str, int] = defaultdict(int)
     for slot in planned:
         totals[canonical_id(catalog, slot["catalogID"])] += slot["targetSets"]
     return totals
+
+
+def completed_slot_sets(slots: list[dict], sets: list[dict]) -> int:
+    """How many of an exercise's logged sets fill its prescribed slots, each
+    set counted once and never beyond the prescription. The export names no
+    slot per set, but each set carries the rep range it was logged against, so
+    where exactly one slot planned that range the set fills that slot, up to
+    its planned sets; the rest are extras. Sets that match no slot or several
+    are pooled over whatever capacity is left. Slots sharing a rep
+    range therefore read as one total, as before; slots with distinct ranges
+    stay apart, so a skipped back-off slot is not covered by the heavy sets."""
+    def range_of(row):
+        return row.get("targetRepsLow"), row.get("targetRepsHigh")
+
+    room = [slot["targetSets"] for slot in slots]
+    done = 0
+    pool = 0
+    for s in sets:
+        low, high = range_of(s)
+        hits = [i for i, slot in enumerate(slots)
+                if low and slot.get("targetRepsLow") == low
+                and (high is None or slot.get("targetRepsHigh") == high)]
+        if len(hits) == 1:
+            # Beyond its slot's planned sets it is an extra, not a stand-in
+            # for the skipped back-off.
+            if room[hits[0]] > 0:
+                room[hits[0]] -= 1
+                done += 1
+        else:
+            pool += 1
+    return done + min(pool, sum(room))
 
 
 def build_exposures(snapshot: dict, catalog: dict) -> dict[str, list[dict]]:
@@ -498,9 +537,9 @@ def muscle_volume(snapshot: dict, catalog: dict, now: datetime, tz) -> dict:
 
 def adherence(snapshot: dict, now: datetime, tz, catalog: dict | None = None) -> dict:
     """Only sessions started from a plan day can be measured against a plan.
-    Each logged working set counts toward the prescription at most once: the
-    export names no slot per set, so a repeated exercise's slots are summed
-    and the sets logged for it measured against that total."""
+    Each logged working set counts toward the prescription at most once, and
+    a repeated exercise's sets are matched to its slots by the rep range they
+    were logged against (see `completed_slot_sets`)."""
     catalog = catalog_index(snapshot) if catalog is None else catalog
     days = {}
     for plan in snapshot.get("plans", []):
@@ -516,16 +555,21 @@ def adherence(snapshot: dict, now: datetime, tz, catalog: dict | None = None) ->
         # The day as it stood when the session began, where the phone kept
         # it. Today's version of the day is the fallback for older sessions,
         # and it is wrong for any slot edited since.
-        prescribed = prescribed_sets(session, days, catalog)
-        if prescribed is None:
+        slots = planned_slots(session, days)
+        if slots is None:
             continue
+        by_movement = defaultdict(list)
+        for slot in slots:
+            by_movement[canonical_id(catalog, slot["catalogID"])].append(slot)
         from_plan += 1
         as_planned += session.get("plannedItems") is not None
         sets = working_sets(session)
-        logged = Counter(canonical_id(catalog, s["catalogID"]) for s in sets)
-        for cid, total in prescribed.items():
-            done += min(logged[cid], total)
-            target += total
+        logged = defaultdict(list)
+        for s in sets:
+            logged[canonical_id(catalog, s["catalogID"])].append(s)
+        for cid, own in by_movement.items():
+            done += completed_slot_sets(own, logged[cid])
+            target += sum(slot["targetSets"] for slot in own)
         for s in sets:
             low = s.get("targetRepsLow")
             if low and s.get("reps") is not None:
@@ -998,10 +1042,14 @@ Every number below is computed by `coach stats` and is the only source for
   shoulders, rearDelts, biceps, triceps, lats, upperBack, quads, ...). Siblings:
   `.lastWeekFractionalSets`, `.thisWeekFractionalSets` (partial),
   `.maxSessionFractionalSets` (largest single session in the window).
-- `ex.<catalogID>.exposures | performance | performanceBest | noise |
+- `ex.<canonicalID>.exposures | performance | performanceBest | noise |
   effortMean | easyShare | effortAnsweredShare | deltaLatest | plateau |
   beyondNoise | painNotes90d`: per exercise, over its current comparable series.
   `noise` and `beyondNoise` are absent until six comparable exposures exist.
+  The ID is the canonical one: an exercise the app merged into another is
+  keyed by the survivor, with sets logged under the retired ID read as the same
+  movement (the row says `loggedAs`). Stats `mergedInto` maps retired to
+  survivor; a citation of a retired ID is resolved for you.
 - `adherence.slotSetsShare | repTargetHitShare | weekDaysTrainedShare` (last
   four weeks), `body.latestKg | change28dKg`, `notes.painEntries90d`.
 - `tape.<part>.latestCm | changeCm | daysSincePrevious`, for part arm, chest,

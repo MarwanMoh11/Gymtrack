@@ -390,7 +390,7 @@ class Output(unittest.TestCase):
     def test_markdown_documents_the_metric_names(self):
         md = stats.render_markdown(compute())
         self.assertIn("<muscle>.weeklyFractionalSets", md)
-        self.assertIn("ex.<catalogID>.", md)
+        self.assertIn("ex.<canonicalID>.", md)
         self.assertIn("## Anything to review?", md)
 
     def test_committed_fixture_matches_the_builder(self):

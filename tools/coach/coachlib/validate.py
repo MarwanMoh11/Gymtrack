@@ -9,7 +9,7 @@ coach fixes a proposal in one pass or not at all.
 """
 from __future__ import annotations
 
-from .stats import active_plan, catalog_index, is_timed
+from .stats import active_plan, canonical_id, catalog_index, is_timed
 from .util import is_uuid, same_id, parse_time
 
 KINDS = ("setSets", "setRepRange", "setRest", "substitute", "addSlot", "removeSlot")
@@ -157,7 +157,7 @@ def _check_change(label, change, plan, catalog, default_rest, metrics, seen_ids,
         problems.append(f"{label}: evidence must list at least one {{metric, value}} pair")
     else:
         for pair in evidence:
-            problems += _check_evidence(label, pair, metrics)
+            problems += _check_evidence(label, pair, metrics, catalog)
 
     day = _find_day(plan, change.get("dayID"))
     if not is_uuid(change.get("dayID")) or day is None:
@@ -285,7 +285,17 @@ def _check_exercise(label, to, catalog) -> list[str]:
     return problems
 
 
-def _check_evidence(label, pair, metrics) -> list[str]:
+def _metric_key(metric: str, catalog: dict) -> str:
+    """Exercise metrics are keyed by the canonical (survivor) ID, but a plan or
+    the coach's own notes may still hold a retired one, so `ex.<retired>.plateau`
+    reads as `ex.<survivor>.plateau`."""
+    if metric.startswith("ex.") and metric.count(".") >= 2:
+        exercise, _, field = metric[3:].rpartition(".")
+        return f"ex.{canonical_id(catalog, exercise)}.{field}"
+    return metric
+
+
+def _check_evidence(label, pair, metrics, catalog=None) -> list[str]:
     if not (isinstance(pair, dict) and isinstance(pair.get("metric"), str) and "value" in pair):
         return [f"{label}: each evidence entry needs a metric and a value"]
     value = pair["value"]
@@ -293,9 +303,10 @@ def _check_evidence(label, pair, metrics) -> list[str]:
         return [f"{label}: evidence value for {pair['metric']} must be a number, string or boolean"]
     if metrics is None:
         return []
-    if pair["metric"] not in metrics:
+    key = _metric_key(pair["metric"], catalog or {})
+    if key not in metrics:
         return [f"{label}: evidence metric {pair['metric']!r} is not a key in stats.json"]
-    actual = metrics[pair["metric"]]
+    actual = metrics[key]
     if isinstance(actual, bool) or isinstance(value, bool) or isinstance(actual, str) or isinstance(value, str):
         same = actual == value
     else:

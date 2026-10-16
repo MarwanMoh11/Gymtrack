@@ -94,6 +94,55 @@ class RepeatedSlotAdherence(unittest.TestCase):
         self.assertEqual(stats.adherence(snap, NOW, CAIRO)["slotSetsShare"], 0.4)
 
 
+class SlotsKeptApartByRepRange(unittest.TestCase):
+    """R9: where the sets' own rep targets say which slot they filled, a
+    skipped back-off slot is not covered by the heavy sets."""
+
+    SLOTS = [slot(sets=2, low=3, high=5), slot(sets=3, low=8, high=12)]
+
+    def share(self, heavy, backoff, slots=None, extra=()):
+        sets = ([work(reps=4, targetRepsLow=3, targetRepsHigh=5) for _ in range(heavy)]
+                + [work(reps=9, targetRepsLow=8, targetRepsHigh=12) for _ in range(backoff)]
+                + list(extra))
+        slots = slots or self.SLOTS
+        snap = snapshot([session(sets=sets, planned=slots)], live_items=slots)
+        return stats.adherence(snap, NOW, CAIRO)["slotSetsShare"]
+
+    def test_five_heavy_sets_with_the_back_off_skipped_is_forty_percent(self):
+        sets = [work(reps=4, targetRepsLow=3, targetRepsHigh=5) for _ in range(5)]
+        snap = snapshot([session(sets=sets, planned=self.SLOTS)], live_items=self.SLOTS)
+        self.assertEqual(stats.adherence(snap, NOW, CAIRO)["slotSetsShare"], 0.4)
+
+    def test_both_slots_partly_done(self):
+        self.assertEqual(self.share(1, 2), 0.6)
+
+    def test_both_slots_full(self):
+        self.assertEqual(self.share(2, 3), 1.0)
+
+    def test_extra_sets_on_one_slot_do_not_fill_the_other(self):
+        self.assertEqual(self.share(4, 1), 0.6)
+
+    def test_equal_ranges_fall_back_to_the_sum(self):
+        slots = [slot(sets=2, low=8, high=12), slot(sets=3, low=8, high=12)]
+        self.assertEqual(self.share(0, 2, slots=slots), 0.4)
+        self.assertEqual(self.share(0, 5, slots=slots), 1.0)
+        self.assertEqual(self.share(0, 8, slots=slots), 1.0)
+
+    def test_sets_without_a_target_are_pooled_over_what_is_left(self):
+        slots = self.SLOTS
+        sets = [work(reps=9, targetRepsLow=8, targetRepsHigh=12) for _ in range(3)]
+        sets += [work(), work()]
+        snap = snapshot([session(sets=sets, planned=slots)], live_items=slots)
+        # back-off full (3), the two targetless sets take the heavy slot's room
+        self.assertEqual(stats.adherence(snap, NOW, CAIRO)["slotSetsShare"], 1.0)
+        snap = snapshot([session(sets=[work(), work()], planned=slots)], live_items=slots)
+        self.assertEqual(stats.adherence(snap, NOW, CAIRO)["slotSetsShare"], 0.4)
+
+    def test_a_set_whose_range_matches_no_slot_is_pooled(self):
+        stray = [work(reps=6, targetRepsLow=6, targetRepsHigh=8)]
+        self.assertEqual(self.share(0, 3, extra=stray), 0.8)
+
+
 class ShortenedUsesTheFrozenPrescription(unittest.TestCase):
     """R10: a later plan edit never changes how an earlier session reads."""
 

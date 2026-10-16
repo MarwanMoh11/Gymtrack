@@ -110,7 +110,11 @@ Write `proposal.json` in the review folder:
   change as stale and never applies it.
 - `lever` is one of effort, volume, priority, exerciseChoice, pain, repRange, rest.
 - `evidence` pairs name keys of `stats.json`'s `metrics`, with the value copied
-  exactly. A number you cannot point to is not evidence.
+  exactly. A number you cannot point to is not evidence. Exercise metrics are
+  `ex.<canonicalID>.<field>`: an exercise the app merged into another is keyed
+  by the survivor, and its rows in `stats.md` say `loggedAs` for the old ID.
+  `stats.json`'s `mergedInto` maps retired to survivor (a retired ID in a plan
+  is still a real slot for `itemID`/`expect`, but cite the survivor's metrics).
 - Leave out keys that have no value; never write `null`. Never write `review`;
   the command adds it.
 - Advice is for what a plan edit cannot say, such as pushing the last set of

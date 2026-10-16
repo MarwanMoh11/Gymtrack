@@ -170,6 +170,36 @@ CASES = [
 ]
 
 
+class MergedExerciseEvidence(unittest.TestCase):
+    """R12: metrics are keyed by the survivor; a retired ID still cites them."""
+
+    def merged_snapshot(self):
+        snap = copy.deepcopy(SNAPSHOT)
+        snap["exerciseCatalog"].append({"catalogID": "old-bench", "name": "Old bench", "muscles": ["chest"],
+                                        "trackingRaw": "weightReps", "mergedInto": "barbell-bench-press"})
+        return snap
+
+    def cite(self, metric, value):
+        return proposal(change(evidence=[{"metric": metric, "value": value}]))
+
+    def test_evidence_citing_the_retired_id_validates(self):
+        key = "ex.barbell-bench-press.exposures"
+        retired = "ex.old-bench.exposures"
+        self.assertEqual(validate(self.cite(retired, METRICS[key]), self.merged_snapshot(), METRICS), [])
+
+    def test_the_value_is_still_checked_against_the_survivors_metric(self):
+        problems = validate(self.cite("ex.old-bench.exposures", 999), self.merged_snapshot(), METRICS)
+        self.assertTrue(any("stats.json has" in p for p in problems), problems)
+
+    def test_a_made_up_id_is_still_rejected(self):
+        problems = validate(self.cite("ex.made-up.exposures", 1), self.merged_snapshot(), METRICS)
+        self.assertTrue(any("is not a key in stats.json" in p for p in problems), problems)
+
+    def test_a_retired_id_without_a_merge_entry_is_rejected(self):
+        problems = validate(self.cite("ex.old-bench.exposures", 1), SNAPSHOT, METRICS)
+        self.assertTrue(any("is not a key in stats.json" in p for p in problems), problems)
+
+
 class EveryRule(unittest.TestCase):
     def test_each_rule_is_enforced(self):
         for name, bad, fragment in CASES:
