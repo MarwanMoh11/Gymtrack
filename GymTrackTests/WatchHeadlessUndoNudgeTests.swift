@@ -138,7 +138,9 @@ struct WatchHeadlessUndoNudgeTests {
             logger.rate(sets[0], feel: .easy)
             let offer = try #require(logger.pendingNudge(for: sets[0].catalogID))
 
-            rig.send(rig.log(sets[1], weight: sets[1].weightKg, at: 120))
+            // The wrist drew the offer over the set; one it did not draw is
+            // not answered (`WatchLoadOfferTests`).
+            rig.send(rig.log(sets[1], weight: sets[1].weightKg, at: 120, offer: offer.setID))
             try #require(sets[1].isCompleted)
             #expect(sets[0].loadNudgeOutcome == .declined)
             #expect(sets[0].loadNudgeToKg == offer.toKg)

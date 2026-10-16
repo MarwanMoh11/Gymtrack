@@ -42,6 +42,11 @@ struct WatchLoggerView: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @State private var showingExercises = false
     @FocusState private var isCrownFocused: Bool
+    /// A load offer as the last tap here left it, taken or undone, until the
+    /// phone's mirror says how it stands. Without it the row flicked back to
+    /// what it was before the tap for as long as the phone took to answer, and
+    /// out of range that is until the lifter is back.
+    @State private var tappedOffer: WatchLoadOffer?
 
     private enum Field: Hashable { case weight, reps, seconds }
 
@@ -72,6 +77,7 @@ struct WatchLoggerView: View {
                 if was?.id == now?.id { adopt(now) } else { load(now) }
             }
             .onChange(of: session.sessionID) { _, _ in dismissEffort() }
+            .onChange(of: exercise?.loadOffer) { _, _ in tappedOffer = nil }
             .onChange(of: session.effortEnabled) { _, enabled in
                 if enabled != true { dismissEffort() }
             }
@@ -114,6 +120,10 @@ struct WatchLoggerView: View {
                         values(for: set, exercise: exercise)
                         plateCaption(exercise)
                         targetLine(set, exercise: exercise)
+                        if let offer = loadOffer(on: set, exercise: exercise) {
+                            WatchLoadOfferRow(offer: offer, scale: scale,
+                                              take: { take(offer) }, undo: { undoTake(offer) })
+                        }
                         stepperRow
                         // In Start set's slot, so nothing below moves. See
                         // `WatchMotionOfferRow`.
@@ -671,7 +681,8 @@ struct WatchLoggerView: View {
             set,
             weightKg: scale.kilograms(weightDisplay),
             reps: Int(repsValue),
-            seconds: Int(secondsValue)
+            seconds: Int(secondsValue),
+            offer: loadOffer(on: set, exercise: exercise)?.subjectID
         )
         editing = nil
         isCrownFocused = false
@@ -685,6 +696,43 @@ struct WatchLoggerView: View {
         if session.restAutoStart, exercise.restSeconds > 0 {
             rest.startLocal(seconds: exercise.restSeconds)
         }
+    }
+
+    /// The phone's load offer over the set that's up, as the last tap here
+    /// left it while the phone has not answered yet.
+    private func loadOffer(on set: WatchSetSnapshot, exercise: WatchExerciseSnapshot) -> WatchLoadOffer? {
+        guard var offer = exercise.loadOffer, offer.covers(set), !set.isCompleted else { return nil }
+        if let tapped = tappedOffer, tapped.subjectID == offer.subjectID { offer.taken = tapped.taken }
+        return offer
+    }
+
+    /// The dial goes to the rung at the tap rather than when the phone answers,
+    /// and counts as dialled here: the phone may be in a locker, and the next
+    /// set should be logged at the weight the lifter just chose, not at the one
+    /// a mirror sent before the take reached the phone.
+    private func take(_ offer: WatchLoadOffer) {
+        connector.takeLoadOffer(offer)
+        var taken = offer
+        taken.taken = true
+        tappedOffer = taken
+        editing = nil
+        isCrownFocused = false
+        touched.insert(.weight)
+        weightDisplay = scale.display(offer.toKg)
+        focus.touch(at: .now)
+        WatchHaptics.tick()
+    }
+
+    /// The weight goes back to whatever the phone puts back, which is what the
+    /// row held before the take and can only be known over there.
+    private func undoTake(_ offer: WatchLoadOffer) {
+        connector.undoLoadOffer(offer)
+        var standing = offer
+        standing.taken = false
+        tappedOffer = standing
+        touched.remove(.weight)
+        focus.touch(at: .now)
+        WatchHaptics.tick()
     }
 
     private var allDone: some View {

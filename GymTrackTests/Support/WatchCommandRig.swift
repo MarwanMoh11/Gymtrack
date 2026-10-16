@@ -188,8 +188,11 @@ final class WatchCommandRig {
 
     // MARK: Driving
 
-    func log(_ set: SetLog, weight: Double = 62.5, reps: Int = 6, at seconds: TimeInterval) -> WatchCommand {
-        .logSet(id: set.id, weightKg: weight, reps: reps, seconds: 0, at: at(seconds))
+    /// `offer` is the load offer the wrist drew over the set, by the set that
+    /// produced it; none by default, which answers no offer.
+    func log(_ set: SetLog, weight: Double = 62.5, reps: Int = 6, at seconds: TimeInterval,
+             offer: UUID? = nil) -> WatchCommand {
+        .logSet(id: set.id, weightKg: weight, reps: reps, seconds: 0, at: at(seconds), offer: offer)
     }
 
     func send(_ command: WatchCommand) { center.handle(command) }

@@ -117,7 +117,7 @@ final class WatchCommandCenter {
     /// remembers its own; see `DroppedSetMemory.rememberHeardLog`. The logger
     /// reports nothing back, so the store is asked whether the row holds it.
     private func rememberHeardLog(_ command: WatchCommand) {
-        guard case .logSet(let id, _, _, _, let loggedAt, _) = command, loggedAt != nil,
+        guard case .logSet(let id, _, _, _, let loggedAt, _, _) = command, loggedAt != nil,
               let context else { return }
         var byID = FetchDescriptor<SetLog>(predicate: #Predicate { $0.id == id })
         byID.fetchLimit = 1
@@ -167,7 +167,7 @@ final class WatchCommandCenter {
             save(context)
             pushMirror(context: context)
 
-        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected, let offer):
             // A log the wrist already took back, whose undo got here first.
             guard !DroppedSetMemory.shared.wasTakenBack(id, loggedAt: loggedAt) else { return }
             // A log this path already applied and the lifter has since undone,
@@ -219,7 +219,7 @@ final class WatchCommandCenter {
             // After the starts are settled, so a start this log dropped no
             // longer stands in the way; see `SetLog.takeMotionWindow`.
             set.takeMotionWindow(detected)
-            settleNudges(answeredBy: set, in: context)
+            settleNudges(answeredBy: set, wristOffer: offer, in: context)
             carryLoadForward(from: set, in: context)
             set.stampWristMachine(loggedAt: loggedMoment, context: context)
             save(context)
@@ -237,6 +237,12 @@ final class WatchCommandCenter {
             set.rpe = rating.rpe
             if set.loadNudgeOutcome == .declined { set.clearLoadNudge() }
             save(context)
+            pushMirror(context: context)
+
+        case .takeLoadOffer, .undoLoadOffer:
+            // Offers are a running logger's, and the mirror this path sends
+            // draws none, so there is nothing here to take or undo. The mirror
+            // says as much to the wrist, which stops drawing the offer.
             pushMirror(context: context)
 
         case .announceStart(let id, let moment):
@@ -420,7 +426,7 @@ final class WatchCommandCenter {
     func applyToFinishedSession(_ command: WatchCommand) {
         guard let context else { return }
         switch command {
-        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected, _):
             restoreDroppedSet(id, weightKg: weightKg, reps: reps, seconds: seconds,
                               loggedAt: loggedAt, detected: detected, in: context, loggerRunning: true)
         case .undoSet(let id, let completion):
@@ -594,11 +600,14 @@ final class WatchCommandCenter {
     /// Without it a take outlived the lifting of the rows it moved, and a later
     /// undo of its source set put the rows still to come back under the weight
     /// just lifted.
-    private func settleNudges(answeredBy set: SetLog, in context: ModelContext) {
+    ///
+    /// The offer is answered only if the wrist drew it over this set
+    /// (`wristOffer`), as on the logger.
+    private func settleNudges(answeredBy set: SetLog, wristOffer: UUID?, in context: ModelContext) {
         guard let session = set.session,
               var stored = loggerMemory.load(for: session.id) else { return }
         var ledger = NudgeLedger(stored)
-        ledger.settle(answeredBy: set, among: Array(session.sets)) { subject in
+        ledger.settle(answeredBy: set, among: Array(session.sets), seen: { $0.setID == wristOffer }) { subject in
             SessionFactory.laterRowsInSlot(of: subject, in: session, context: context)
         }
         ledger.write(into: &stored)
@@ -882,7 +891,8 @@ enum WatchSnapshotFactory {
                          restUnknown: Bool = false,
                          restSeconds: (String) -> Int,
                          lastTimeLabel: (String) -> String?,
-                         lastSet: (SetLog) -> SetLog? = { _ in nil }) -> WatchSessionSnapshot {
+                         lastSet: (SetLog) -> SetLog? = { _ in nil },
+                         loadOffer: (String) -> WatchLoadOffer? = { _ in nil }) -> WatchSessionSnapshot {
         let groups = session.exerciseGroups
         let day = session.planDayID.flatMap { dayID in
             session.modelContext.flatMap { context -> PlanDay? in
@@ -926,7 +936,8 @@ enum WatchSnapshotFactory {
                     lastTimeLabel: lastTimeLabel(group.catalogID),
                     scale: LoadScaleBook.shared.scale(for: group.catalogID),
                     barWeight: PlateLoading.bar(forCatalogID: group.catalogID,
-                                                scale: LoadScaleBook.shared.scale(for: group.catalogID))
+                                                scale: LoadScaleBook.shared.scale(for: group.catalogID)),
+                    loadOffer: loadOffer(group.catalogID)
                 )
             },
             preferredExerciseID: session.preferredExerciseID,

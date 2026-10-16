@@ -385,6 +385,14 @@ enum BackupService {
     /// declining covers the cross and simply lifting the next set at the weight
     /// that stood, which the app can't tell apart and doesn't pretend to.
     ///
+    /// Either is filed only for an offer the lifter could see when they logged
+    /// that next set: on the phone's card, or on the wrist once the wrist drew
+    /// it there. A set logged on a wrist that was not showing it (a watch build
+    /// from before the wrist drew offers, or one whose copy of the session had
+    /// not caught up yet) answers nothing, and an offer nobody answered leaves
+    /// no key at all. Before 17 October 2026 the wrist drew no offers, so a
+    /// `declined` in a session logged from the wrist may be one it never showed.
+    ///
     /// The rung travels with the outcome because neither is worth anything
     /// alone: turning down 62.5 → 65 on a squat and turning down 20 → 25 on a
     /// curl are different decisions. The other end of it is the set's own

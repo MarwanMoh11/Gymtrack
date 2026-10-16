@@ -160,6 +160,14 @@ final class WatchConnector: NSObject {
                 return other
             }
         }
+        // The first of an offer's rows logged answers it on the phone, and
+        // closes a take's undo, and undoing the set that produced it withdraws
+        // it. Drawn on past either until the phone replied, it would sit over
+        // the next set as a question already answered.
+        if let offer = exercise.loadOffer,
+           offer.rows.contains(where: { pending.logs[$0] != nil }) || pending.undos.contains(offer.subjectID) {
+            exercise.loadOffer = nil
+        }
         return exercise
     }
 
@@ -230,8 +238,11 @@ final class WatchConnector: NSObject {
     /// locker or left at home, in which case this command waits in the delivery
     /// queue and the phone's own clock on arrival describes the walk back
     /// rather than the set.
+    ///
+    /// `offer` is the load offer drawn over the set as it was logged, by the
+    /// set that produced it; see `WatchCommand.logSet`.
     @discardableResult
-    func logSet(_ set: WatchSetSnapshot, weightKg: Double, reps: Int, seconds: Int) -> Date {
+    func logSet(_ set: WatchSetSnapshot, weightKg: Double, reps: Int, seconds: Int, offer: UUID? = nil) -> Date {
         let moment = Date()
         guard let session else { return moment }
         pending.adopt(session.sessionID)
@@ -254,8 +265,20 @@ final class WatchConnector: NSObject {
         pending.logs[set.id] = WatchPendingLog(setID: set.id, weightKg: weightKg, reps: reps,
                                                seconds: seconds, completedAt: moment, detected: detected)
         send(.logSet(id: set.id, weightKg: weightKg, reps: reps, seconds: seconds, at: moment,
-                     detected: detected))
+                     detected: detected, offer: offer))
         return moment
+    }
+
+    /// Takes the phone's load offer through the phone's own take, which moves
+    /// the rows and files the answer. Nothing is folded in here: the logger
+    /// draws the tap until the phone's mirror answers it.
+    func takeLoadOffer(_ offer: WatchLoadOffer) {
+        send(.takeLoadOffer(setID: offer.subjectID, toKg: offer.toKg))
+    }
+
+    /// The phone's Undo of that take.
+    func undoLoadOffer(_ offer: WatchLoadOffer) {
+        send(.undoLoadOffer(setID: offer.subjectID))
     }
 
     func rateSet(_ set: WatchSetSnapshot, rpe: Double?) {

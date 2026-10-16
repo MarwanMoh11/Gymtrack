@@ -579,7 +579,11 @@ final class ActiveWorkout {
     ///   screen is the one a phone tap was done on, but a wrist log can land
     ///   after the setup changed, so it takes only one from before it; see
     ///   `SetLog.stampWristMachine`.
-    func complete(_ set: SetLog, restSeconds: Int?, at moment: Date = .now, fromWrist: Bool = false) {
+    /// - Parameter wristOffer: for a wrist log, the load offer the wrist drew
+    ///   over the set, by the set that produced it. A wrist log answers only an
+    ///   offer it drew; see `settleOffer`.
+    func complete(_ set: SetLog, restSeconds: Int?, at moment: Date = .now, fromWrist: Bool = false,
+                  wristOffer: UUID? = nil) {
         set.isCompleted = true
         set.completedAt = moment
         // Logged inside the count-in, so the start it was counting towards
@@ -595,7 +599,7 @@ final class ActiveWorkout {
         // `SetLog.startStillDescribes` and `WorkoutSession.dropOvertakenStarts`.
         session.settleStarts(afterLogging: set, at: moment)
         lastLoggedSetID = set.id
-        settleOffer(answeredBy: set)
+        settleOffer(answeredBy: set, seen: { !fromWrist || $0.setID == wristOffer })
         // The rest this set's announcement cut short can no longer be put
         // back: the set it would have been counting down to has been done.
         // The same for the rest a continuation cut short, which was the rest
@@ -646,12 +650,21 @@ final class ActiveWorkout {
     /// What the answer replaced is kept, so that undoing the set puts the offer
     /// and the record back exactly as they were — see `takeBackAnswer`.
     ///
+    /// Only an offer the lifter could see is answered. The phone draws it on
+    /// the card; a set logged on the wrist answers it only when the wrist says
+    /// it drew it (`seen`). Before the wrist drew offers at all, every set
+    /// logged there at the old weight was filed as a decline the lifter never
+    /// made, and the coach read a choice to hold into a session that held
+    /// nothing of the kind.
+    ///
     /// `NudgeLedger.settle` is the one place that is worked out, because the
     /// wrist's log applies it to the stored memory when no logger is running.
-    private func settleOffer(answeredBy set: SetLog) {
+    private func settleOffer(answeredBy set: SetLog, seen: (LoadNudge) -> Bool) {
         updateLedger { ledger in
-            ledger.settle(answeredBy: set, among: Array(session.sets)) { subject in
+            ledger.settle(answeredBy: set, among: Array(session.sets), seen: seen) { subject in
                 SessionFactory.laterRowsInSlot(of: subject, in: session, layout: slotLayout(of: subject.catalogID))
+            } restand: { subject, _ in
+                nudge(after: subject)
             }
         }
     }
@@ -1706,8 +1719,22 @@ final class ActiveWorkout {
                     .resolvedRestSeconds ?? AppSettings.shared.defaultRestSeconds
             },
             lastTimeLabel: { [self] catalogID in lastTimeLabel(for: catalogID) },
-            lastSet: { [self] set in previousSet(for: set) }
+            lastSet: { [self] set in previousSet(for: set) },
+            loadOffer: { [self] catalogID in watchOffer(for: catalogID) }
         )
+    }
+
+    /// The offer standing over an exercise, or else the take of one still open
+    /// to undo, as the wrist draws it: the same one the card shows, over the
+    /// rows taking it would move.
+    private func watchOffer(for catalogID: String) -> WatchLoadOffer? {
+        let standing = pendingNudge(for: catalogID)
+        guard let nudge = standing ?? takenNudge(for: catalogID)?.nudge else { return nil }
+        let rows = session.sets.filter { !$0.isCompleted && offer(nudge, covers: $0) }
+            .sorted(by: SetLog.precedesInSession)
+        guard !rows.isEmpty else { return nil }
+        return WatchLoadOffer(subjectID: nudge.setID, fromKg: nudge.fromKg, toKg: nudge.toKg,
+                              rows: rows.map(\.id), taken: standing == nil)
     }
 
     private func lastTimeLabel(for catalogID: String) -> String? {
@@ -1751,7 +1778,7 @@ final class ActiveWorkout {
     @discardableResult
     func apply(_ command: WatchCommand) -> Bool {
         switch command {
-        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected):
+        case .logSet(let id, let weightKg, let reps, let seconds, let loggedAt, let detected, let offer):
             // Not a row of this session, so possibly one the last Finish
             // deleted before the wrist's log of it could arrive. Swallowed
             // here, that lift was lost from the record; `RootView` passes it
@@ -1781,7 +1808,7 @@ final class ActiveWorkout {
             if set.tracking == .duration { set.seconds = seconds }
             complete(set,
                      restSeconds: planItem(for: set)?.resolvedRestSeconds,
-                     at: WatchCommand.loggedMoment(loggedAt), fromWrist: true)
+                     at: WatchCommand.loggedMoment(loggedAt), fromWrist: true, wristOffer: offer)
             // After `complete`, which settles the start this log may have
             // dropped; saved again because `complete` already has.
             if detected != nil {
@@ -1806,6 +1833,25 @@ final class ActiveWorkout {
             } else {
                 clearRating(set)
             }
+            return true
+
+        case .takeLoadOffer(let setID, let toKg):
+            // Only the offer the wrist drew. One answered, withdrawn or
+            // replaced since has nothing left to take, and moving the rows on
+            // the strength of it would put a rung on the record nobody chose.
+            guard let nudge = standingOffers.first(where: { $0.setID == setID }), nudge.toKg == toKg else {
+                pushToWatch()
+                return true
+            }
+            apply(nudge)
+            return true
+
+        case .undoLoadOffer(let setID):
+            guard let taken = openTakes.first(where: { $0.nudge.setID == setID }) else {
+                pushToWatch()
+                return true
+            }
+            undoTakenNudge(taken)
             return true
 
         case .undoSet(let id, let completion):
@@ -2304,12 +2350,25 @@ struct NudgeLedger {
     /// `laterRows` gives the rows after a subject in its plan slot: the logger
     /// reads them off the slots it holds, the wrist's headless path off the
     /// store.
+    ///
+    /// `seen` says whether the lifter could see the standing offer when the
+    /// set was logged. One they could not is not answered: nothing is filed,
+    /// so the record keeps no key for it, and it stands on over the sets still
+    /// to come, as `restand` reads it again (with no logger, the one that
+    /// stood, which the next launch reads again before showing it).
     mutating func settle(answeredBy set: SetLog, among rows: [SetLog],
-                         laterRows: (_ subject: SetLog) -> [SetLog]) {
+                         seen: (_ offer: ActiveWorkout.LoadNudge) -> Bool = { _ in true },
+                         laterRows: (_ subject: SetLog) -> [SetLog],
+                         restand: (_ subject: SetLog, _ old: ActiveWorkout.LoadNudge)
+                             -> ActiveWorkout.LoadNudge? = { _, old in old }) {
         func answered(_ nudge: ActiveWorkout.LoadNudge) -> Bool {
             Self.offer(nudge, covers: set, among: rows, laterRows: laterRows)
         }
-        let standing = self.standing.first { $0.catalogID == set.catalogID }.flatMap { answered($0) ? $0 : nil }
+        var standing = self.standing.first { $0.catalogID == set.catalogID }.flatMap { answered($0) ? $0 : nil }
+        if let unseen = standing, !seen(unseen) {
+            standOn(unseen, among: rows, restand: restand)
+            standing = nil
+        }
         let taken = takes.first { $0.nudge.catalogID == set.catalogID }.flatMap { answered($0.nudge) ? $0 : nil }
         guard standing != nil || taken != nil else { return }
 
@@ -2330,6 +2389,19 @@ struct NudgeLedger {
         let subjectID = (standing ?? taken?.nudge)?.setID
         answers.removeAll { ($0.standing ?? $0.taken?.nudge)?.setID == subjectID }
         answers.append(answer)
+    }
+
+    /// Keeps an offer nobody has answered standing, read again so that it
+    /// counts the sets left; one with no set left to move goes, unanswered.
+    private mutating func standOn(_ offer: ActiveWorkout.LoadNudge, among rows: [SetLog],
+                                  restand: (SetLog, ActiveWorkout.LoadNudge) -> ActiveWorkout.LoadNudge?) {
+        guard let index = standing.firstIndex(where: { $0.setID == offer.setID }) else { return }
+        if let subject = rows.first(where: { $0.id == offer.setID }),
+           let again = restand(subject, offer), again.feel == offer.feel, again.toKg == offer.toKg {
+            standing[index] = again
+        } else {
+            standing.remove(at: index)
+        }
     }
 
     /// Whether `row` is one of the rows an offer is about; see

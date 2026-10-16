@@ -149,7 +149,7 @@ struct WatchLinkWireTests {
 
         let payload = command.watchPayload(key: WatchLink.commandKey)
         let decoded = try #require(WatchCommand.fromWatchPayload(payload, key: WatchLink.commandKey))
-        guard case .logSet(_, _, _, _, let back, _) = decoded else {
+        guard case .logSet(_, _, _, _, let back, _, _) = decoded else {
             Issue.record("The command decoded as something else")
             return
         }
@@ -1161,7 +1161,7 @@ extension WatchLinkWireTests {
                                           detected: Self.motion)
         let payload = command.watchPayload(key: WatchLink.commandKey)
         let decoded = try #require(WatchCommand.fromWatchPayload(payload, key: WatchLink.commandKey))
-        guard case .logSet(_, _, _, _, _, let window) = decoded else {
+        guard case .logSet(_, _, _, _, _, let window, _) = decoded else {
             Issue.record("The command decoded as something else")
             return
         }
@@ -1175,7 +1175,7 @@ extension WatchLinkWireTests {
         #expect(!String(decoding: data, as: UTF8.self).contains("detected"))
         let decoded = try JSONDecoder.watchLink.decode(WatchCommand.self, from: data)
         #expect(decoded == plain)
-        guard case .logSet(_, _, _, _, _, let window) = decoded else {
+        guard case .logSet(_, _, _, _, _, let window, _) = decoded else {
             Issue.record("The command decoded as something else")
             return
         }
@@ -1226,5 +1226,54 @@ extension WatchLinkWireTests {
         let data = try JSONEncoder.watchLink.encode(session)
         #expect(!String(decoding: data, as: UTF8.self).contains("motionSetDetection"))
         #expect(try JSONDecoder.watchLink.decode(WatchSessionSnapshot.self, from: data).motionSetDetection == nil)
+    }
+}
+
+// MARK: - The load offer
+
+extension WatchLinkWireTests {
+
+    private static let subjectID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+
+    private static func exercise(offer: WatchLoadOffer?) -> WatchExerciseSnapshot {
+        WatchExerciseSnapshot(id: "curl", name: "Curl", order: 0, tracking: .weightReps, restSeconds: 90,
+                              sets: [], loadOffer: offer)
+    }
+
+    @Test func aLogCarriesTheOfferTheWristDrewAndOneFromAnOlderWatchCarriesNone() throws {
+        let drawn = WatchCommand.logSet(id: Self.setID, weightKg: 25, reps: 12, seconds: 0, at: Self.t0,
+                                        offer: Self.subjectID)
+        let back = try JSONDecoder.watchLink.decode(WatchCommand.self, from: JSONEncoder.watchLink.encode(drawn))
+        #expect(back == drawn)
+
+        // What a watch from before the wrist drew offers sends: no `offer` key,
+        // which the phone reads as a wrist that showed none.
+        let plain = WatchCommand.logSet(id: Self.setID, weightKg: 25, reps: 12, seconds: 0, at: Self.t0)
+        let data = try JSONEncoder.watchLink.encode(plain)
+        #expect(!String(decoding: data, as: UTF8.self).contains("offer"))
+        guard case .logSet(_, _, _, _, _, _, let offer) = try JSONDecoder.watchLink.decode(WatchCommand.self, from: data)
+        else {
+            Issue.record("The command decoded as something else")
+            return
+        }
+        #expect(offer == nil)
+    }
+
+    @Test(arguments: [WatchCommand.takeLoadOffer(setID: WatchLinkWireTests.subjectID, toKg: 30),
+                      WatchCommand.undoLoadOffer(setID: WatchLinkWireTests.subjectID)])
+    func aTakeAndItsUndoCrossTheWire(_ command: WatchCommand) throws {
+        let payload = command.watchPayload(key: WatchLink.commandKey)
+        #expect(WatchCommand.fromWatchPayload(payload, key: WatchLink.commandKey) == command)
+    }
+
+    @Test func anExerciseWithNoOfferWritesNoKeyAndOneWithAnOfferKeepsIt() throws {
+        let bare = try JSONEncoder.watchLink.encode(Self.exercise(offer: nil))
+        #expect(!String(decoding: bare, as: UTF8.self).contains("loadOffer"))
+        #expect(try JSONDecoder.watchLink.decode(WatchExerciseSnapshot.self, from: bare).loadOffer == nil)
+
+        let offer = WatchLoadOffer(subjectID: Self.subjectID, fromKg: 25, toKg: 30,
+                                   rows: [Self.setID], taken: false)
+        let data = try JSONEncoder.watchLink.encode(Self.exercise(offer: offer))
+        #expect(try JSONDecoder.watchLink.decode(WatchExerciseSnapshot.self, from: data).loadOffer == offer)
     }
 }

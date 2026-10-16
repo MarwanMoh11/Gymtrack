@@ -125,6 +125,11 @@ struct WatchExerciseSnapshot: Codable, Hashable, Identifiable, Sendable {
     /// loaded with plates on a plain bar. Its presence is what puts a per-side
     /// plate caption on the wrist; for every other exercise there is no key.
     var barWeight: Double?
+    /// The load offer standing over this exercise on the phone, or the take of
+    /// one still open to undo. No key when there is neither, which is every
+    /// exercise nobody rated Easy or All out, and every mirror from a phone
+    /// that predates the wrist drawing offers.
+    var loadOffer: WatchLoadOffer?
 
     /// The ladder to draw and turn, falling back to the session's unit for a
     /// mirror that predates per-exercise scales.
@@ -147,6 +152,31 @@ struct WatchExerciseSnapshot: Codable, Hashable, Identifiable, Sendable {
 
     /// How many sets the exercise holds, counted the same way.
     var effortCount: Int { sets.filter { !$0.isContinuation }.count }
+}
+
+/// One `ActiveWorkout.LoadNudge` as the wrist draws it: a change to the sets
+/// still to come, offered after the lifter said how a set felt.
+///
+/// Without it a wrist-driven session could not see the offer at all, and the
+/// next set logged there at the old weight was filed as the lifter turning it
+/// down, a decision nobody made. The wrist now draws it, and says with each
+/// log whether it did; see `WatchCommand.logSet`.
+struct WatchLoadOffer: Codable, Hashable, Sendable {
+    /// The set whose answer produced the offer, which names it to the phone.
+    var subjectID: UUID
+    var fromKg: Double
+    var toKg: Double
+    /// The rows still to come that taking it moves, and the only rows whose
+    /// logging answers it. Listed by the phone, which owns the plan slots,
+    /// rather than worked out again here.
+    var rows: [UUID]
+    /// Taken and still open to undo, rather than standing.
+    var taken: Bool
+
+    var isBackOff: Bool { toKg < fromKg }
+
+    /// Whether this is drawn over `set`.
+    func covers(_ set: WatchSetSnapshot) -> Bool { rows.contains(set.id) }
 }
 
 /// A session in progress, as the watch sees it.
@@ -493,8 +523,13 @@ enum WatchCommand: Codable, Hashable, Sendable {
     /// `detected` is the set as the wrist's motion showed it, for a set nobody
     /// announced. Optional, like the moment, so a log queued by an older watch
     /// still decodes; absent on most logs.
+    ///
+    /// `offer` names the standing load offer the wrist drew over this set when
+    /// it was logged, by the set that produced it (`WatchLoadOffer.subjectID`).
+    /// Only an offer the lifter could see is answered by the log; with no key,
+    /// which is also every log from an older watch, the log answers nothing.
     case logSet(id: UUID, weightKg: Double, reps: Int, seconds: Int, at: Date?,
-                detected: WatchMotionWindow? = nil)
+                detected: WatchMotionWindow? = nil, offer: UUID? = nil)
     /// Takes a set back, naming the completion being taken back.
     ///
     /// The stamp is the `completedAt` of the log the lifter undid. Log and undo
@@ -510,6 +545,12 @@ enum WatchCommand: Codable, Hashable, Sendable {
     /// every undo used to.
     case undoSet(id: UUID, completedAt: Date? = nil)
     case rateSet(WatchSetRating)
+    /// Takes the load offer the wrist drew, through the phone's own take. It
+    /// names the offer by the set that produced it and the rung it offered, so
+    /// one that has since been answered, withdrawn or replaced moves nothing.
+    case takeLoadOffer(setID: UUID, toKg: Double)
+    /// Undoes that take, the phone's Undo said from the wrist.
+    case undoLoadOffer(setID: UUID)
     /// "I'm starting this set." The moment is when the set begins, with the
     /// count-in the wrist added at the tap already in it; the phone writes it
     /// as it came and never adds the count again. It travels with the command
