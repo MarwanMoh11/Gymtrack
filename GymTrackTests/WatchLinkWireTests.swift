@@ -268,6 +268,24 @@ struct WatchLinkWireTests {
             WatchIdleSnapshot.self, from: JSONSerialization.data(withJSONObject: idle)) == .empty)
     }
 
+    @Test func lastSessionsSetTravelsOnTheRowAndAbsentMeansNoCounterpart() throws {
+        var set = WatchSetSnapshot(
+            id: Self.setID, index: 0, weightKg: 60, reps: 8, seconds: 0, targetRepsLow: 6,
+            targetRepsHigh: 8, isCompleted: false)
+        #expect(try json(set)["lastSession"] == nil, "a row with no counterpart sends no key")
+
+        set.lastSession = LastSetRecap(weightKg: 80, reps: 8, seconds: 0, measuredSeconds: 42)
+        let sent = try json(set)
+        let recap = try #require(sent["lastSession"] as? [String: Any])
+        #expect(recap["measuredSeconds"] as? Int == 42)
+        #expect(try JSONDecoder.watchLink.decode(
+            WatchSetSnapshot.self, from: JSONSerialization.data(withJSONObject: sent)) == set)
+
+        set.lastSession = LastSetRecap(weightKg: 80, reps: 8, seconds: 0, measuredSeconds: nil)
+        let unmeasured = try #require(try json(set)["lastSession"] as? [String: Any])
+        #expect(unmeasured["measuredSeconds"] == nil, "an unmeasured duration is no key, not zero")
+    }
+
     /// Issue #51. The idle screen exactly as a phone from before the done card
     /// sends it: it reads as "not done", which is what that phone meant.
     @Test func anIdleScreenFromAPhoneThatPredatesTheDoneCardReadsAsNotDone() throws {

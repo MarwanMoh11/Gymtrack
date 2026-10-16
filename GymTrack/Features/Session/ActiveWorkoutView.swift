@@ -1113,6 +1113,10 @@ private struct SetRow: View {
                 .accessibilityHint("Erases what you logged for it")
             }
 
+            if let previous {
+                LastSessionLine(previous: previous, tracking: set.tracking, scale: scale, onDark: isPR)
+            }
+
             if showsEffortStrip {
                 EffortPicker(current: set.feel,
                              onDark: isPR,
@@ -1504,9 +1508,7 @@ private struct SetRow: View {
     }
 
     private func previousLabel(_ previous: SetLog) -> String {
-        if previous.tracking == .duration { return "was \(previous.seconds)s" }
-        if previous.weightKg == 0 { return "was \(previous.reps)" }
-        return "was \(scale.format(previous.weightKg, showUnit: false)) × \(previous.reps)"
+        LastSessionLine.text(previous, tracking: set.tracking, scale: scale)
     }
 
     // MARK: Bindings (display unit in, kilograms out)

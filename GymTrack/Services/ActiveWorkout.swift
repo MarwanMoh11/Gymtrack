@@ -216,6 +216,27 @@ enum SessionFactory {
         return (rows, slotPositions(of: rows, layout: layout), index)
     }
 
+    /// Last time's set opposite `set`, paired by position within its slot, and
+    /// nothing for a row that continued another or has no counterpart.
+    ///
+    /// The one pairing behind the phone's "last …" hint, the gain badge and the
+    /// wrist's, so no two of them can disagree about which set was which. A
+    /// shorter slot last time leaves the later rows without a partner rather
+    /// than borrowing a number from another set.
+    ///
+    /// - Parameter last: the exercise's whole last performance, before it is
+    ///   split by slot.
+    static func pairedLastSet(for set: SetLog, in session: WorkoutSession,
+                              layout: [PlanItem], last: [SetLog]) -> SetLog? {
+        guard !set.isContinuation,
+              let place = slotPlace(of: set, in: session, layout: layout) else { return nil }
+        let share = layout.count > 1
+            ? slotShare(of: last, position: place.slots[place.index], layout: layout)
+            : last
+        let position = place.rows[..<place.index].indices.filter { place.slots[$0] == place.slots[place.index] }.count
+        return position < share.count ? share[position] : nil
+    }
+
     /// The day's slots for one exercise, in the order the session was built.
     private static func slotLayout(of catalogID: String, in session: WorkoutSession,
                                    context: ModelContext) -> [PlanItem] {
@@ -541,12 +562,8 @@ final class ActiveWorkout {
     /// Last time's set opposite this one, paired by position within its slot,
     /// and nothing for a row that continued another.
     func previousSet(for set: SetLog) -> SetLog? {
-        guard !set.isContinuation,
-              let place = SessionFactory.slotPlace(of: set, in: session, layout: slotLayout(of: set.catalogID))
-        else { return nil }
-        let position = place.rows[..<place.index].indices.filter { place.slots[$0] == place.slots[place.index] }.count
-        let last = lastPerformance(for: set)
-        return position < last.count ? last[position] : nil
+        SessionFactory.pairedLastSet(for: set, in: session, layout: slotLayout(of: set.catalogID),
+                                     last: lastPerformance(for: set.catalogID))
     }
 
     // MARK: - Logging
@@ -1688,7 +1705,8 @@ final class ActiveWorkout {
                 (nextRow(of: catalogID).flatMap(planItem(for:)) ?? planItem(for: catalogID))?
                     .resolvedRestSeconds ?? AppSettings.shared.defaultRestSeconds
             },
-            lastTimeLabel: { [self] catalogID in lastTimeLabel(for: catalogID) }
+            lastTimeLabel: { [self] catalogID in lastTimeLabel(for: catalogID) },
+            lastSet: { [self] set in previousSet(for: set) }
         )
     }
 

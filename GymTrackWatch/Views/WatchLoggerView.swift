@@ -204,8 +204,8 @@ struct WatchLoggerView: View {
                              : "Set \(session.currentSetNumber)/\(exercise?.effortCount ?? 0)")
                             .font(Theme.number(11, weight: .bold))
                             .foregroundStyle(phase.gradient)
-                        if let last = exercise?.lastTimeLabel {
-                            Text("last \(last)")
+                        if let last = exercise?.lastTimeLine(for: set, sessionUnit: session.unit) {
+                            Text(last)
                                 .font(Theme.rounded(11, weight: .medium))
                                 .foregroundStyle(Theme.textTertiary)
                                 .lineLimit(1)

@@ -704,6 +704,7 @@ final class WatchCommandCenter {
 
         let history = sessions.filter { !$0.isActive }
         let items = planItems(for: session, in: context)
+        let layouts = slotLayouts(for: session, in: context)
         return WatchSnapshotFactory.snapshot(
             for: session,
             rest: (nil, nil, 0),
@@ -715,6 +716,11 @@ final class WatchCommandCenter {
                 WatchSnapshotFactory.label(
                     for: TrainingStats.lastPerformance(of: catalogID, in: history, excluding: session.id)
                 )
+            },
+            lastSet: { set in
+                SessionFactory.pairedLastSet(
+                    for: set, in: session, layout: layouts[set.catalogID] ?? [],
+                    last: TrainingStats.lastPerformance(of: set.catalogID, in: history, excluding: session.id))
             }
         )
     }
@@ -833,6 +839,15 @@ final class WatchCommandCenter {
         return Dictionary(day.orderedItems.map { ($0.catalogID, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// The day's slots for each exercise, for pairing a row with last time's.
+    private func slotLayouts(for session: WorkoutSession, in context: ModelContext) -> [String: [PlanItem]] {
+        guard let dayID = session.planDayID else { return [:] }
+        var byID = FetchDescriptor<PlanDay>(predicate: #Predicate { $0.id == dayID })
+        byID.fetchLimit = 1
+        guard let day = (try? context.fetch(byID))?.first else { return [:] }
+        return Dictionary(grouping: day.orderedItems, by: \.catalogID)
+    }
+
     private func save(_ context: ModelContext) {
         do { try context.save() } catch {
             assertionFailure("Watch command couldn't be saved: \(error)")
@@ -841,6 +856,15 @@ final class WatchCommandCenter {
 }
 
 // MARK: - Building the mirror
+
+extension LastSetRecap {
+    /// Read off a past set. The duration is the measured one or none; see
+    /// `measuredSeconds`.
+    init(_ past: SetLog) {
+        self.init(weightKg: past.weightKg, reps: past.reps, seconds: past.seconds,
+                  measuredSeconds: past.timeUnderTension.map { Int($0.rounded()) })
+    }
+}
 
 /// Shapes a session into what the watch draws. Both callers hand it their own
 /// way of answering "how long is the rest here" and "what did this look like
@@ -853,7 +877,8 @@ enum WatchSnapshotFactory {
                          rest: (endsAt: Date?, startedAt: Date?, total: Int),
                          restUnknown: Bool = false,
                          restSeconds: (String) -> Int,
-                         lastTimeLabel: (String) -> String?) -> WatchSessionSnapshot {
+                         lastTimeLabel: (String) -> String?,
+                         lastSet: (SetLog) -> SetLog? = { _ in nil }) -> WatchSessionSnapshot {
         let groups = session.exerciseGroups
         let day = session.planDayID.flatMap { dayID in
             session.modelContext.flatMap { context -> PlanDay? in
@@ -890,7 +915,8 @@ enum WatchSnapshotFactory {
                             startedAt: set.startedAt,
                             completedAt: set.completedAt,
                             rpe: set.rpe,
-                            slot: slots[set.id]
+                            slot: slots[set.id],
+                            lastSession: lastSet(set).map(LastSetRecap.init)
                         )
                     },
                     lastTimeLabel: lastTimeLabel(group.catalogID),

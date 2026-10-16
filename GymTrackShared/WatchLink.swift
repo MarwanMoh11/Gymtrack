@@ -81,6 +81,10 @@ struct WatchSetSnapshot: Codable, Hashable, Identifiable, Sendable {
     /// slots share one. Absent from a phone that predates it, in which case
     /// the wrist carries to the end of the exercise as it always did.
     var slot: Int?
+    /// What the set opposite this one did last session. Absent when it had no
+    /// counterpart, and from a phone that predates it, in which case the wrist
+    /// falls back to the exercise's `lastTimeLabel`.
+    var lastSession: LastSetRecap?
 
     /// A continuation's weight was chosen for that row alone, so it neither
     /// carries forward onto the sets still to come nor accepts a load carried
