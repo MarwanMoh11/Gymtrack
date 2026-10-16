@@ -185,6 +185,64 @@ struct CoachSnapshotTests {
         #expect(try rig.archive().sessions.count == 1)
     }
 
+    @Test func aMachineSetupSavedDuringAWorkoutWritesNothingUntilItFinishes() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = await Rig.started(try TestStore.container())
+        defer { rig.finish() }
+        let session = WorkoutSession(title: "Live", startedAt: TestClock.reference)
+        rig.context.insert(session)
+        try rig.context.save()
+        await rig.writer.settled()
+        let launched = try #require(rig.writer.lastWrittenAt)
+
+        let setup = MachineSetupRecord(catalogID: "machine-chest-press", machineID: "panatta-chest-press", at: TestClock.reference)
+        rig.context.insert(setup)
+        try rig.context.save()
+        setup.settingsRaw = "{\"seat\":4}"
+        try rig.context.save()
+        await rig.writer.settled()
+        #expect(rig.writer.lastWrittenAt == launched, "Choosing a machine and nudging a seat mid-workout")
+
+        session.endedAt = TestClock.reference.addingTimeInterval(1_800)
+        try rig.context.save()
+        await rig.writer.settled()
+        #expect(rig.writer.lastWrittenAt != launched, "Finishing writes it")
+        #expect(try rig.archive().machineSetups?.count == 1)
+    }
+
+    @Test func aMachineSetupSavedBetweenWorkoutsAsksForANewSnapshot() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = await Rig.started(try TestStore.container())
+        defer { rig.finish() }
+        let launched = try #require(rig.writer.lastWrittenAt)
+
+        rig.context.insert(MachineSetupRecord(catalogID: "machine-chest-press", machineID: "panatta-chest-press", at: TestClock.reference))
+        try rig.context.save()
+        await rig.writer.settled()
+        #expect(rig.writer.lastWrittenAt != launched)
+    }
+
+    @Test func aLaunchWithAnOpenWorkoutWritesWhenItFinishes() async throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let container = try TestStore.container()
+        let session = WorkoutSession(title: "Live", startedAt: TestClock.reference)
+        container.mainContext.insert(session)
+        try container.mainContext.save()
+        let rig = await Rig.started(container)
+        defer { rig.finish() }
+        #expect(rig.writer.lastWrittenAt == nil, "Relaunching mid-workout starts no export")
+        #expect(!rig.store.hasSnapshot)
+
+        session.endedAt = TestClock.reference.addingTimeInterval(1_800)
+        try rig.context.save()
+        await rig.writer.settled()
+        #expect(rig.writer.lastWrittenAt != nil)
+        #expect(try rig.archive().sessions.count == 1)
+    }
+
     @Test func lateHealthVitalsOnAFinishedSessionAskForANewSnapshot() async throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }

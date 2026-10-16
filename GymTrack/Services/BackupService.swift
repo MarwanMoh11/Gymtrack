@@ -1766,7 +1766,9 @@ enum BackupService {
     /// The coach's decisions, proposal and snapshot go with the records, but
     /// only once the local erase has saved: a refused or failed erase leaves
     /// them alone. A snapshot write that was waiting or running is cancelled
-    /// first, so it cannot put pre-erase history back on disk.
+    /// before the first record is deleted, so it can neither read models the
+    /// erase removed nor put pre-erase history back on disk. A failed erase
+    /// asks for a fresh write, since the cancelled one is gone.
     @MainActor
     @discardableResult
     static func wipe(
@@ -1775,20 +1777,34 @@ enum BackupService {
         coachSnapshot: CoachSnapshot = .shared,
         removingHealthWorkouts: Bool = false,
         deletingHealthWorkout: ((UUID) async -> Bool)? = nil,
-        deletingHealthWorkouts: (([UUID]) async -> [UUID])? = nil
+        deletingHealthWorkouts: (([UUID]) async -> [UUID])? = nil,
+        /// A test seam that fails the erase once its snapshot writes are
+        /// cancelled, the one stretch a real store gives no way to make throw.
+        beforeDeleting: (() throws -> Void)? = nil
     ) async throws -> HealthCleanupResult? {
         let open = try context.fetchCount(FetchDescriptor<WorkoutSession>(
             predicate: #Predicate { $0.endedAt == nil }))
         guard open == 0 else { throw WipeError.workoutInProgress }
 
+        // Before anything is deleted: a paced snapshot read yields between
+        // sessions, and resuming over models the erase had just removed could
+        // trap, or leave the coach files on disk if the app died there.
+        await coachSnapshot.cancelWrites()
         let healthIDs: Set<UUID>
         do {
+            try beforeDeleting?()
             healthIDs = Set(try deleteStoredRecords(context: context).map(\.workout))
             try context.save()
         } catch {
             context.rollback()
+            // The cancelled write was not replaced by anything; without this
+            // the files stay as stale as the last save left them.
+            coachSnapshot.request()
             throw error
         }
+        // The erase's own save is a save like any other to the snapshot writer,
+        // which asked for a write of the now-empty store. The coach files are
+        // about to go, so that write is dropped too.
         await coachSnapshot.cancelWrites()
         coachInbox.erase()
         LoadScaleBook.shared.reload()

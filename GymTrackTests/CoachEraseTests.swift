@@ -92,6 +92,34 @@ struct CoachEraseTests {
         #expect(try rig.context.fetchCount(FetchDescriptor<Plan>()) == 1)
     }
 
+    @Test func anEraseThatFailsAfterCancellingWritesLeavesTheCoachFilesAndAsksForANewWrite() async throws {
+        struct Refused: Error {}
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = try Rig.seeded()
+        defer { rig.discard() }
+        rig.snapshot.start(container: rig.container, store: rig.store)
+        await rig.snapshot.settled()
+        // Marks the file the cancelled write would have replaced, so a fresh
+        // write is told apart from the one the launch made.
+        let marker = Data("{}".utf8)
+        try rig.store.writeSnapshot(marker)
+
+        await #expect(throws: Refused.self) {
+            try await BackupService.wipe(context: rig.context, coachInbox: rig.inbox,
+                                         coachSnapshot: rig.snapshot, beforeDeleting: { throw Refused() })
+        }
+        await rig.snapshot.settled()
+
+        rig.inbox.reload()
+        #expect(rig.inbox.decisions.count == 1, "A failed erase leaves the decisions")
+        #expect(rig.inbox.proposal != nil)
+        #expect(try rig.context.fetchCount(FetchDescriptor<Plan>()) == 1)
+        let rewritten = try Data(contentsOf: rig.store.snapshotURL)
+        #expect(rewritten != marker, "The cancelled write is replaced, not lost")
+        #expect(try BackupService.decodedArchive(from: rewritten).plans.count == 1)
+    }
+
     @Test func aFreshInboxOverTheSameFolderFindsNothingAfterErase() async throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }

@@ -70,7 +70,11 @@ final class CoachSnapshot {
         // who then neither trains nor edits. One write per launch, after the
         // quiet period, costs far less than a file that stays wrong; telling a
         // stale file from a current one would take the same read of the store.
-        request()
+        //
+        // Not while a workout is open: relaunching mid-set (a crash, a
+        // memory-pressure kill) would otherwise run the full paced export
+        // against the lifter. The workout's finish or discard writes it.
+        if !Self.hasActiveSession(container.mainContext) { request() }
     }
 
     /// Stops watching for saves. The app never calls this; a check that starts
@@ -101,6 +105,10 @@ final class CoachSnapshot {
     /// deleted session, set or note therefore counts unless a workout is in
     /// progress; then it is most likely part of that workout, and anything
     /// older that went with it is picked up when the workout finishes.
+    ///
+    /// Machine-setup records are the one always-exported entity that is also
+    /// saved from the logger; while a workout is open they are skipped like the
+    /// workout's own saves, because the finish or discard writes everything.
     static func changesExport(_ note: Notification) -> Bool {
         guard let context = note.object as? ModelContext else { return true }
         var unresolvableRemoval = false
@@ -108,6 +116,14 @@ final class CoachSnapshot {
         for key in keys {
             let ids = note.userInfo?[key.rawValue] as? [PersistentIdentifier] ?? []
             for id in ids {
+                if id.entityName == "MachineSetupRecord" {
+                    // Choosing a machine or nudging a seat happens in the logger.
+                    // Mid-workout it waits for the workout's own finish, like the
+                    // sets beside it, rather than running a full export under a
+                    // lifter who is between sets.
+                    if !hasActiveSession(context) { return true }
+                    continue
+                }
                 if alwaysExported.contains(id.entityName) { return true }
                 switch id.entityName {
                 case "WorkoutSession", "SetLog", "ExerciseNote":
@@ -161,8 +177,9 @@ final class CoachSnapshot {
     /// Drops any write that is waiting and waits out one that is running, so
     /// that nothing written afterwards can come from data read before an
     /// erase. A write already in the middle of reading the store is told its
-    /// data is stale and writes nothing. Called by the erase after its records
-    /// are gone, ahead of the coach files being removed.
+    /// data is stale and writes nothing. Called by the erase before it deletes
+    /// anything, so a paced read cannot resume over models the erase just
+    /// removed; an erase that then fails asks for a fresh write with `request()`.
     func cancelWrites() async {
         generation += 1
         requested = false

@@ -399,16 +399,34 @@ struct CoachApplyTests {
         #expect(rig.inbox.advice == ["Take longer rests."], "History can still show what was said")
     }
 
-    @Test func undoingTheAcknowledgementBringsTheAdviceBackWithNoRecord() throws {
+    @Test func anAcknowledgementOfAdviceOffersNoUndo() throws {
         let saved = PersistenceFixtures.pin()
         defer { saved.restore() }
         let rig = try Rig(now: t0)
         defer { rig.close() }
         try rig.push([], extra: ["advice": ["Take longer rests."]])
         _ = rig.inbox.acknowledge()
-        #expect(rig.inbox.canUndoLastDecision)
-        #expect(rig.inbox.undoLastDecision() == nil)
-        #expect(rig.inbox.showsOnToday && rig.store.loadDecisions().decisions.isEmpty)
+        // Opening the review is the acknowledgement, so there is no mis-tap to
+        // take back and the record stays.
+        #expect(!rig.inbox.canUndoLastDecision)
+        #expect(rig.inbox.undoLastDecision() != nil)
+        #expect(!rig.inbox.showsOnToday)
+        #expect(rig.store.loadDecisions().decisions.map(\.proposalID) == [F.proposalID])
+    }
+
+    @Test func anAcknowledgementThatCannotBeWrittenIsRefusedAndLeavesTheAdviceOnToday() throws {
+        let saved = PersistenceFixtures.pin()
+        defer { saved.restore() }
+        let rig = try Rig(now: t0)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: rig.store.root.path)
+            rig.close()
+        }
+        try rig.push([], extra: ["advice": ["Take longer rests."]])
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: rig.store.root.path)
+        #expect(refused(rig.inbox.acknowledge()), "The review screen shows this refusal")
+        #expect(rig.inbox.showsOnToday, "Nothing was recorded, so the advice is still offered")
+        #expect(!rig.inbox.canUndoLastDecision)
     }
 
     @Test func acknowledgingRefusesAProposalThatHasChangesOrNoAdvice() throws {

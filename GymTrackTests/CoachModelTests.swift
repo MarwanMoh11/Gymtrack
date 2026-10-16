@@ -248,7 +248,8 @@ struct CoachModelTests {
         #expect(launched != nil, "A launch with a snapshot already on disk refreshes it")
 
         // Logging saves after every set; none of it should rewrite the file.
-        context.insert(WorkoutSession(title: "Push", planDayID: F.uuid(0x200), startedAt: t0))
+        let push = WorkoutSession(title: "Push", planDayID: F.uuid(0x200), startedAt: t0)
+        context.insert(push)
         try context.save()
         await quiet.settled()
         #expect(quiet.lastWrittenAt == launched, "Starting a workout does not ask for a snapshot")
@@ -259,6 +260,12 @@ struct CoachModelTests {
         try context.save()
         await quiet.settled()
         #expect(quiet.lastWrittenAt != launched, "Saving a plan edit asks for a snapshot")
+
+        // A launch with a workout still open starts no export (the finish
+        // writes it), so the Push session ends before the next one starts.
+        push.endedAt = t0.addingTimeInterval(3_600)
+        try context.save()
+        await quiet.settled()
 
         // A session that is already finished when it is inserted, as one
         // logged afterwards is.

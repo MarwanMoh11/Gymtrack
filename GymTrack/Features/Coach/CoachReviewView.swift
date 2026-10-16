@@ -53,7 +53,10 @@ struct CoachReviewView: View {
                 }
             }
         }
-        .onAppear { inbox.reload() }
+        .onAppear {
+            inbox.reload()
+            acknowledgeAdvice()
+        }
     }
 
     // MARK: - Content
@@ -144,10 +147,10 @@ struct CoachReviewView: View {
 
     @ViewBuilder private var decideArea: some View {
         if isAdviceOnly {
-            // Nothing to accept or decline. Leaving without a tap is fine; the
-            // tap only stops Today offering the same advice again.
-            Button("Got it") { apply() }
-                .buttonStyle(PrimaryButtonStyle())
+            // Nothing to accept or decline, and no button: opening the advice
+            // is reading it (see `acknowledgeAdvice`). Only a failure to write
+            // that down is worth saying.
+            if let refusal { note(refusal, color: Theme.negative) }
         } else if applicableRows.isEmpty {
             note("None of these changes fit your plan as it is now, so there is nothing to decide. The next review will start from the plan as it is.")
         } else {
@@ -175,8 +178,7 @@ struct CoachReviewView: View {
         refusal = nil
         let accepted = Set(applicableRows.filter { choices[$0.id] == .accept }.map(\.id))
         let rowsBefore = inbox.rows
-        let result = isAdviceOnly ? inbox.acknowledge() : inbox.apply(accepted: accepted, notes: keptNotes)
-        switch result {
+        switch inbox.apply(accepted: accepted, notes: keptNotes) {
         case .success(let decision):
             decidedRows = rowsBefore
             decided = decision
@@ -184,6 +186,19 @@ struct CoachReviewView: View {
             Haptics.success()
         case .failure(let failure):
             refusal = failure.reason
+        }
+    }
+
+    /// Records advice-only proposals as read when the screen shows them, so
+    /// Today stops offering advice the lifter has now seen without a tap to
+    /// dismiss it (a tap that decides nothing is friction). The decision is
+    /// not kept on this screen, so no status card or Undo appears: there is
+    /// nothing to take back. A failed write shows its refusal in the decide area.
+    private func acknowledgeAdvice() {
+        guard isAdviceOnly, inbox.showsOnToday else { return }
+        switch inbox.acknowledge() {
+        case .success: refusal = nil
+        case .failure(let failure): refusal = failure.reason
         }
     }
 

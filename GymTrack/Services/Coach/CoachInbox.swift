@@ -182,11 +182,16 @@ final class CoachInbox {
     /// Marks an advice-only proposal as read. There is no plan edit to accept, so
     /// this writes the same decision record as a decline of everything, with no
     /// changes in it and nothing applied, which `coach pull` already reads.
+    ///
+    /// Opening the advice does this, so there is no mis-tap to take back: the
+    /// decision is not offered to `undoLastDecision`.
     func acknowledge() -> Result<CoachDecision, CoachApplier.Refusal> {
         guard review?.isAdviceOnly == true else {
             return .failure(.init(reason: "There is no advice to acknowledge."))
         }
-        return apply(accepted: [])
+        let result = apply(accepted: [])
+        if case .success = result { decidedThisLaunch = nil }
+        return result
     }
 
     /// Takes back the decision just made, as if it had never happened: the plan
