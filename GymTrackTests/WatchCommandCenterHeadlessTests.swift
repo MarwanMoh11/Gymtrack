@@ -773,6 +773,37 @@ struct WatchCommandCenterHeadlessTests {
         }
     }
 
+    /// The wrist sends its Finish again for as long as the phone's mirrors
+    /// still call the session live (see `WatchSessionTombstone.finishToResend`),
+    /// so the phone can hear it more than once: as tapped, before Health has
+    /// saved, and then as it went out, with the workout. The session closes
+    /// once, at the tap, takes the wrist's log once, and links the watch's
+    /// workout from the later copy.
+    @Test func aFinishSentAgainClosesTheSessionOnceAndTakesTheWorkoutFromTheLaterCopy() throws {
+        try withRig { rig in
+            let (session, sets) = try rig.seed()
+            rig.send(rig.log(sets[0], at: 600))
+            var batch = finishBatch(session.id, logs: [pendingLog(sets[1].id, at: rig.at(700))])
+            batch.endedAt = rig.at(900)
+            let workout = UUID()
+            var metrics = WatchWorkoutMetrics(sessionID: session.id, healthWorkoutID: workout)
+            metrics.averageHeartRate = 121
+
+            rig.send(.finishSession(batch, metrics: nil))
+            #expect(!session.isActive)
+            rig.send(.finishSession(batch, metrics: metrics))
+            rig.send(.finishSession(batch, metrics: metrics))
+
+            #expect(rig.sessions().map(\.id) == [session.id])
+            #expect(sameMoment(session.endedAt, rig.at(900)))
+            #expect(Set(session.completedSets.map(\.id)) == [sets[0].id, sets[1].id])
+            #expect(rig.allSets().count == 2, "the unlogged row went with the first close and stays gone")
+            #expect(session.healthWorkoutID == workout)
+            #expect(session.averageHeartRate == 121)
+            #expect(rig.health.orphanWorkouts.isEmpty)
+        }
+    }
+
     @Test func aDiscardedSessionTakesItsRowsWithIt() throws {
         try withRig { rig in
             let sessionID = try rig.seed().session.id

@@ -12,18 +12,22 @@ import Foundation
 /// start, which the phone then linked in place of the real one.
 ///
 /// Persisted, because a relaunch is exactly when that stale context arrives.
-/// It holds the ID, and for a Finish what the idle screen may say about it: the
-/// sets the phone has not confirmed stay in `WatchPendingActions`, where they
-/// still have to reach it.
+/// It holds the ID, for a Finish what the idle screen may say about it, and
+/// the Finish itself: the sets the phone has not confirmed stay in
+/// `WatchPendingActions`, where they still have to reach it.
 struct WatchSessionTombstone: Equatable, Sendable {
 
     static let defaultsKey = "watch.endedLocally"
     static let finishedKey = "watch.endedLocally.finished"
+    static let finishCommandKey = "watch.endedLocally.finishCommand"
 
     private(set) var sessionID: UUID?
     /// Set when the session ended with a Finish that had sets in it, until
     /// the phone answers for it. See `WatchIdleRules.doneCard`.
     private(set) var finished: WatchWristFinish?
+    /// The Finish that ended the session, as the wrist last sent it, until the
+    /// phone answers for it. `nil` for a Discard. See `finishToResend`.
+    private(set) var finishCommand: WatchCommand?
 
     init(sessionID: UUID? = nil) {
         self.sessionID = sessionID
@@ -36,6 +40,9 @@ struct WatchSessionTombstone: Equatable, Sendable {
         // Saved by a build that wrote the two keys apart, or half-written: a
         // record of another session says nothing about this one.
         finished = saved?.sessionID == sessionID ? saved : nil
+        let command = defaults.data(forKey: Self.finishCommandKey)
+            .flatMap { try? JSONDecoder().decode(WatchCommand.self, from: $0) }
+        finishCommand = command.flatMap { Self.finishes($0, sessionID) ? $0 : nil }
     }
 
     func save(to defaults: UserDefaults) {
@@ -49,13 +56,59 @@ struct WatchSessionTombstone: Equatable, Sendable {
         } else {
             defaults.removeObject(forKey: Self.finishedKey)
         }
+        if let finishCommand, let data = try? JSONEncoder().encode(finishCommand) {
+            defaults.set(data, forKey: Self.finishCommandKey)
+        } else {
+            defaults.removeObject(forKey: Self.finishCommandKey)
+        }
     }
 
-    /// - Parameter finished: what a Finish with sets in it may show until the
-    ///   phone answers; `nil` for a Discard, or a Finish with nothing logged.
-    mutating func mark(_ id: UUID, finished: WatchWristFinish? = nil) {
+    /// - Parameters:
+    ///   - finished: what a Finish with sets in it may show until the phone
+    ///     answers; `nil` for a Discard, or a Finish with nothing logged.
+    ///   - batch: the Finish's batch, taken at the tap; `nil` for a Discard.
+    ///     Kept from here rather than from the send, which waits on Health: a
+    ///     wrist app that ends during that wait never sends it at all.
+    mutating func mark(_ id: UUID, finished: WatchWristFinish? = nil, finishing batch: WatchFinishBatch? = nil) {
         sessionID = id
         self.finished = finished?.sessionID == id ? finished : nil
+        finishCommand = batch.flatMap { $0.sessionID == id ? .finishSession($0, metrics: nil) : nil }
+    }
+
+    /// Keeps the Finish as it went out, with the workout Health saved for it,
+    /// so a resend hands that workout over too and the phone does not write
+    /// its own copy. Only while the session it ends is still marked: one the
+    /// phone answered for while Health saved has nothing left to resend.
+    mutating func noteSent(_ command: WatchCommand) {
+        guard finishCommand != nil, Self.finishes(command, sessionID) else { return }
+        finishCommand = command
+    }
+
+    /// The Finish to send again, when a mirror fresh from the phone still
+    /// calls the session it ended live.
+    ///
+    /// Sending a command once is no promise it is applied: a live message is
+    /// lost with a phone app that ends before it is handled, and the wrist
+    /// app can end before its Finish leaves. The phone then kept the session
+    /// running and named it in every mirror, the tombstone refused every one
+    /// of them, and the wrist said "Saving on your phone" for good. A fresh
+    /// mirror naming the session is the phone saying it has not heard, so the
+    /// Finish goes again. A repeat is safe: the phone finishes a session once,
+    /// and a Finish for one it has closed or deleted only fills in what the
+    /// first left out.
+    ///
+    /// The cached context proves nothing, as in `settle`. A Discard is never
+    /// sent again: arriving late, it deleted whatever the lifter had gone on to
+    /// log on the phone.
+    func finishToResend(after mirror: WatchMirror, fromCache: Bool) -> WatchCommand? {
+        guard !fromCache, let finishCommand, let ended = sessionID,
+              mirror.session?.sessionID == ended else { return nil }
+        return finishCommand
+    }
+
+    private static func finishes(_ command: WatchCommand, _ id: UUID?) -> Bool {
+        guard case .finishSession(let batch, _) = command else { return false }
+        return batch.sessionID == id
     }
 
     /// Whether a session may be drawn as in progress and recorded to Health.
@@ -78,6 +131,7 @@ struct WatchSessionTombstone: Equatable, Sendable {
         guard !fromCache, let ended = sessionID, mirror.session?.sessionID != ended else { return }
         sessionID = nil
         finished = nil
+        finishCommand = nil
     }
 
     /// The mirrored session the wrist may treat as in progress, before its own

@@ -601,6 +601,74 @@ struct WatchSessionStateTests {
         #expect(WatchSessionTombstone(defaults: defaults).sessionID == session.sessionID)
     }
 
+    /// The phone never applied the wrist's Finish, so it kept the session
+    /// running and every fresh mirror, the reply to each Start among them,
+    /// went on naming it. The tombstone refused it each time, and the wrist sat
+    /// on "Saving on your phone" until the phone ended the session some other
+    /// way. Each fresh mirror that still calls it live now hands the Finish
+    /// back to be sent again: before Health has saved, as tapped; after, as it
+    /// went out.
+    @Test func aFinishThePhoneNeverAppliedGoesAgainWithEachFreshMirrorThatStillCallsItLive() throws {
+        let defaults = watchTestDefaults()
+        let session = watchSession(startedAt: t0, exercises: [watchExercise(sets: [watchSet(completedAt: t0)])])
+        let batch = WatchFinishBatch(sessionID: session.sessionID, logs: [], undos: [], starts: [:], cancels: [],
+                                     ratings: [], endedAt: t0.addingTimeInterval(60))
+        var tombstone = WatchSessionTombstone()
+        tombstone.mark(session.sessionID, finished: WatchIdleRules.wristFinish(of: session), finishing: batch)
+        let stillLive = watchMirror(session, at: t0.addingTimeInterval(120))
+
+        #expect(tombstone.finishToResend(after: stillLive, fromCache: false) == .finishSession(batch, metrics: nil))
+        var metrics = WatchWorkoutMetrics(sessionID: session.sessionID)
+        metrics.healthWorkoutID = UUID()
+        let sent = WatchCommand.finishSession(batch, metrics: metrics)
+        tombstone.noteSent(sent)
+        #expect(tombstone.finishToResend(after: stillLive, fromCache: false) == sent)
+        #expect(!tombstone.admits(session.sessionID), "resending it does not bring the session back")
+
+        // A cached context can predate the Finish, and another session or none
+        // at all is the phone having moved on.
+        #expect(tombstone.finishToResend(after: stillLive, fromCache: true) == nil)
+        let other = watchMirror(watchSession(sets: [watchSet()]), at: t0.addingTimeInterval(120))
+        #expect(tombstone.finishToResend(after: other, fromCache: false) == nil)
+        #expect(tombstone.finishToResend(after: watchMirror(nil, at: t0.addingTimeInterval(120)),
+                                         fromCache: false) == nil)
+
+        // It outlives a relaunch, as the stuck screen did.
+        tombstone.save(to: defaults)
+        #expect(WatchSessionTombstone(defaults: defaults).finishToResend(after: stillLive, fromCache: false) == sent)
+
+        // Once the phone stops calling the session live there is nothing left
+        // to send, and no key left behind.
+        tombstone.settle(with: watchMirror(nil, at: t0.addingTimeInterval(180)), fromCache: false)
+        #expect(tombstone.finishToResend(after: stillLive, fromCache: false) == nil)
+        tombstone.noteSent(sent)
+        #expect(tombstone.finishToResend(after: stillLive, fromCache: false) == nil,
+                "a send that completes after the phone answered keeps nothing")
+        tombstone.save(to: defaults)
+        #expect(defaults.data(forKey: WatchSessionTombstone.finishCommandKey) == nil)
+
+        // A Discard is never sent again: a late one would delete whatever the
+        // lifter went on to log on the phone. Nor is another session's Finish.
+        tombstone.mark(session.sessionID, finishing: batch)
+        tombstone.mark(session.sessionID)
+        #expect(tombstone.finishToResend(after: stillLive, fromCache: false) == nil)
+        tombstone.noteSent(sent)
+        #expect(tombstone.finishToResend(after: stillLive, fromCache: false) == nil)
+        tombstone.mark(UUID(), finishing: batch)
+        #expect(tombstone.finishCommand == nil)
+
+        // Read back beside another session's ID, or unreadable: nothing.
+        var saved = WatchSessionTombstone()
+        saved.mark(session.sessionID, finishing: batch)
+        saved.save(to: defaults)
+        defaults.set(UUID().uuidString, forKey: WatchSessionTombstone.defaultsKey)
+        #expect(WatchSessionTombstone(defaults: defaults).finishCommand == nil)
+        saved.save(to: defaults)
+        defaults.set(Data("not json".utf8), forKey: WatchSessionTombstone.finishCommandKey)
+        #expect(WatchSessionTombstone(defaults: defaults).finishCommand == nil)
+        #expect(WatchSessionTombstone(defaults: defaults).sessionID == session.sessionID)
+    }
+
     /// Finish tapped on the wrist with the phone out of range, and the reply to
     /// `requestMirror` overtaking the queued Finish. Asked at the reply's own
     /// moment, so the twelve-hour rule cannot be what refuses the session: an

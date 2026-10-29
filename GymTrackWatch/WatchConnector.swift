@@ -194,6 +194,7 @@ final class WatchConnector: NSObject {
     func send(_ command: WatchCommand) {
         var payload = command.watchPayload(key: WatchLink.commandKey)
         guard !payload.isEmpty, WCSession.isSupported() else { return }
+        endedLocally.noteSent(command)
         // Beside the command, not in it, so a phone that predates these keys
         // reads the command as it always did. See `WatchCommandDelivery`.
         payload.merge(WatchCommandDelivery.stamp(command, showing: self.session?.sessionID).payload) { $1 }
@@ -364,10 +365,15 @@ final class WatchConnector: NSObject {
     /// The unconfirmed sets are left where they are: they still belong to the
     /// phone's copy of the session, whenever it hears them.
     ///
-    /// - Parameter finished: what the idle screen may say about a Finish until
-    ///   the phone answers; `nil` for a Discard. See `WatchIdleRules`.
-    func markEndedLocally(_ sessionID: UUID, finished: WatchWristFinish? = nil) {
-        endedLocally.mark(sessionID, finished: finished)
+    /// - Parameters:
+    ///   - finished: what the idle screen may say about a Finish until the
+    ///     phone answers; `nil` for a Discard. See `WatchIdleRules`.
+    ///   - batch: the Finish's batch, kept to be sent again while the phone
+    ///     goes on calling the session live; `nil` for a Discard. See
+    ///     `WatchSessionTombstone.finishToResend`.
+    func markEndedLocally(_ sessionID: UUID, finished: WatchWristFinish? = nil,
+                          finishing batch: WatchFinishBatch? = nil) {
+        endedLocally.mark(sessionID, finished: finished, finishing: batch)
     }
 
     /// A session finished on this wrist that the phone has not answered for.
@@ -388,6 +394,7 @@ final class WatchConnector: NSObject {
         guard WatchMirrorReconciliation.accepts(incoming, over: mirror) else { return }
         mirror = incoming
         if let session = incoming.session { lastMirroredSession = session }
+        if let finish = endedLocally.finishToResend(after: incoming, fromCache: fromCache) { send(finish) }
         endedLocally.settle(with: incoming, fromCache: fromCache)
         if !fromCache { waitingForFreshMirror = false }
         hasEverReceivedMirror = true
