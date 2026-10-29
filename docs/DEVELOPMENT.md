@@ -70,6 +70,15 @@ way leaves the job unsure what is on the phone, and it stops and says so.
 The app shows a line on Today three days before its signing runs out; seeing
 it means the refresh has stopped reaching the phone.
 
+The watch app runs out on its own clock and says nothing first: when it
+"crashes" on open and only a reinstall fixes it, its signing has lapsed. It
+only gets a new copy when this Mac can reach the watch during an install, and
+only if the profile lists the watch, which a free team has dropped before. So
+the script registers the watch whenever a build's profile leaves it out,
+records the watch copy's own expiry in `build/phone/watch-expires`, refreshes
+early as soon as the watch is in reach with three days or less left, and
+notifies from the Mac two days before the copy stops opening.
+
 If every build suddenly exits 69, Xcode's licence needs re-accepting after a
 major upgrade (`sudo xcodebuild -license accept`). Only the user can run that.
 

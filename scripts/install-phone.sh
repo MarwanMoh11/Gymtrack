@@ -13,6 +13,14 @@
 # the day before a workout. Every build here first moves GymTrack's cached
 # profiles aside, so each install starts a full week.
 #
+# The watch app runs out the same way, on its own clock: it only gets a new
+# copy when this Mac can reach the watch at install time, and only if the
+# profile lists the watch. Neither held for a week in October, and the watch
+# app stopped opening on the 24th, mid-workout, until it was reinstalled by
+# hand. So the watch is registered whenever its profile leaves it out, its
+# copy's expiry is kept apart from the phone's, and the refresh acts as soon
+# as the watch is in reach with its copy close to running out.
+#
 # A refresh rebuilds the exact source that was last installed, kept under
 # refs/gymtrack/on-phone, rather than whatever the tree holds now. Installing
 # older code over a store a newer build has written leaves the app unable to
@@ -41,7 +49,14 @@ AGENT="$HOME/Library/LaunchAgents/$LABEL.plist"
 REFRESH_AFTER_MINUTES=2820
 STAMP="$WORK/last-install"
 EXPIRES="$WORK/expires"
+# The copy on the watch, written only when an install there succeeds. A build
+# the watch never got does nothing for the one it runs.
+WATCH_EXPIRES="$WORK/watch-expires"
+# How close the watch's copy may run to its expiry before the refresh stops
+# waiting for the phone's two days and takes the first chance to reach it.
+WATCH_DUE_SECONDS=259200
 APP="$WORK/dd/Build/Products/Debug-iphoneos/GymTrack.app"
+WATCH_APP="$APP/Watch/GymTrackWatch.app"
 NOTIFIER_APP="$WORK/GymTrack Notifier.app"
 NOTIFIER="$NOTIFIER_APP/Contents/MacOS/notifier"
 
@@ -75,9 +90,10 @@ limit() {
     perl -e 'alarm shift; exec @ARGV' "$@"
 }
 
-# The phone build's expiry, in seconds since 1970, or nothing if unknown.
+# A recorded expiry, in seconds since 1970, or nothing if unknown. The phone
+# build's by default; the watch's copy given $WATCH_EXPIRES.
 expires_at() {
-    value=$(cat "$EXPIRES" 2>/dev/null || true)
+    value=$(cat "${1:-$EXPIRES}" 2>/dev/null || true)
     case "$value" in ''|*[!0-9]*) ;; *) echo "$value" ;; esac
 }
 
@@ -119,6 +135,20 @@ xcode_build() {
         -allowProvisioningUpdates build > "$WORK/build.log" 2>&1
 }
 
+# Building the watch app for the watch itself registers it with the signing
+# team, which a build for a generic phone never does.
+register_watch() {
+    limit 1800 xcodebuild -project "$WORK/src/GymTrack.xcodeproj" -scheme GymTrackWatch -configuration Debug \
+        -destination "id=$WATCH" -derivedDataPath "$WORK/watch-dd" \
+        -allowProvisioningUpdates -allowProvisioningDeviceRegistration build > "$WORK/watch-build.log" 2>&1
+}
+
+# Whether a watch app's profile names this watch. A build whose profile leaves
+# it out is one the watch turns down at install.
+lists_watch() {
+    security cms -D -i "$1/embedded.mobileprovision" 2>/dev/null | grep -qF "$WATCH"
+}
+
 build_snapshot() {
     src="$WORK/src"
     rm -rf "$src"
@@ -126,6 +156,23 @@ build_snapshot() {
     git archive "$1" | tar -x -C "$src"
     set_profiles_aside
     say "Building"
+    build_for_phone || return 1
+    # The profile lists the devices registered to the team, and a free team
+    # has dropped the watch before: the profile made on 25 October left it
+    # out. Registered while it's in reach, the next profile lists it.
+    if [ -d "$WATCH_APP" ] && ! lists_watch "$WATCH_APP" && reachable "$WATCH"; then
+        say "Registering the watch, which this build's profile leaves out"
+        if register_watch; then
+            set_profiles_aside
+            say "Building again with the watch in the profile"
+            build_for_phone || return 1
+        else
+            say "Couldn't register the watch. See build/phone/watch-build.log."
+        fi
+    fi
+}
+
+build_for_phone() {
     xcode_build && return 0
     # With nothing cached, Xcode can fetch one target's profile twice in a
     # single build and delete the first copy while another target is still
@@ -161,14 +208,63 @@ install_built() {
         notify "GymTrack is installed but its expiry couldn't be read, so the warning before it runs out won't come from this Mac."
     fi
 
-    watch_app="$APP/Watch/GymTrackWatch.app"
-    [ -d "$watch_app" ] || return 0
-    if reachable "$WATCH" &&
-        limit 300 xcrun devicectl device install app --device "$WATCH" "$watch_app" >> "$WORK/install.log" 2>&1; then
-        say "Watch app installed, signed until $(expiry_of "$watch_app")"
-    else
-        say "Watch not reachable from this Mac; it gets the new build from the phone if automatic app install is on"
+    [ -d "$WATCH_APP" ] || return 0
+    # Not left to the phone's automatic app install: a copy it passes on is
+    # still turned down by a watch the profile leaves out.
+    if ! reachable "$WATCH"; then
+        watch_left "Can't reach the watch from this Mac"
+        return 0
     fi
+    if ! lists_watch "$WATCH_APP"; then
+        watch_left "The watch isn't in this build's signing profile"
+        return 0
+    fi
+    if ! limit 300 xcrun devicectl device install app --device "$WATCH" "$WATCH_APP" >> "$WORK/install.log" 2>&1; then
+        tail -5 "$WORK/install.log"
+        watch_left "The watch install failed"
+        return 0
+    fi
+    if watch_expiry=$(expiry_of "$WATCH_APP") &&
+        date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$watch_expiry" +%s > "$WATCH_EXPIRES.new" 2>/dev/null; then
+        mv "$WATCH_EXPIRES.new" "$WATCH_EXPIRES"
+        say "Watch app installed, signed until $(date -r "$(expires_at "$WATCH_EXPIRES")" '+%a %d %b %H:%M')"
+    else
+        rm -f "$WATCH_EXPIRES.new" "$WATCH_EXPIRES"
+        say "Watch app installed; its expiry couldn't be read"
+    fi
+}
+
+# Says why the watch kept the copy it has, and until when that copy opens. Its
+# end is a notification once it is two days off or past: the watch says
+# nothing before its app stops opening.
+watch_left() {
+    expiry=$(expires_at "$WATCH_EXPIRES")
+    if [ -z "$expiry" ]; then
+        say "$1. The watch keeps the copy it has, which this Mac has no expiry for."
+        return 0
+    fi
+    when=$(date -r "$expiry" '+%A at %H:%M')
+    left=$((expiry - $(date +%s)))
+    if [ "$left" -le 0 ]; then
+        notify "$1. GymTrack on the watch stopped opening $when. Keep the watch on and near this Mac so the refresh can reinstall it."
+    elif [ "$left" -lt 172800 ]; then
+        notify "$1. GymTrack on the watch stops opening $when. Keep the watch on and near this Mac so the refresh can reach it."
+    else
+        say "$1. The watch keeps the copy signed until $(date -r "$expiry" '+%a %d %b %H:%M')."
+    fi
+}
+
+# Whether the watch's copy is close enough to running out that the refresh
+# shouldn't wait for the phone's two days: its expiry unknown or inside
+# $WATCH_DUE_SECONDS, and the watch in reach to take a new one.
+watch_due() {
+    expiry=$(expires_at "$WATCH_EXPIRES")
+    if [ -n "$expiry" ] && [ $((expiry - $(date +%s))) -ge "$WATCH_DUE_SECONDS" ]; then
+        return 1
+    fi
+    reachable "$WATCH" && return 0
+    [ -n "$expiry" ] && watch_left "Can't reach the watch from this Mac"
+    return 1
 }
 
 refresh() {
@@ -177,7 +273,10 @@ refresh() {
         return 1
     fi
     if [ -f "$STAMP" ] && [ -z "$(find "$STAMP" -mmin +$REFRESH_AFTER_MINUTES 2>/dev/null)" ]; then
-        return 0
+        # The phone is fresh, but the watch's copy runs out on its own clock,
+        # and this may be the first time in days the watch is in reach.
+        watch_due || return 0
+        say "Refreshing early for the watch"
     fi
     # A device build made some other way since the last install is probably
     # what the phone runs now. Rebuilding the snapshot would put older code
