@@ -155,7 +155,7 @@ final class AppSettings {
     private init() {
         defaults.register(defaults: [
             SettingsKey.weightUnit: WeightUnit.kg.rawValue,
-            SettingsKey.barWeight: BarWeight.standard.rawValue,
+            SettingsKey.barWeight: BarWeight.notCounted.rawValue,
             SettingsKey.haptics: true,
             SettingsKey.restTimerAutoStart: true,
             SettingsKey.defaultRestSeconds: 90,
@@ -169,7 +169,7 @@ final class AppSettings {
             SettingsKey.watchMotionSets: true,
         ])
         weightUnit = WeightUnit(rawValue: defaults.string(forKey: SettingsKey.weightUnit) ?? "kg") ?? .kg
-        barWeight = BarWeight(rawValue: defaults.string(forKey: SettingsKey.barWeight) ?? "") ?? .standard
+        barWeight = BarWeight(rawValue: defaults.string(forKey: SettingsKey.barWeight) ?? "") ?? .notCounted
         hapticsEnabled = defaults.bool(forKey: SettingsKey.haptics)
         restTimerAutoStart = defaults.bool(forKey: SettingsKey.restTimerAutoStart)
         defaultRestSeconds = defaults.integer(forKey: SettingsKey.defaultRestSeconds)

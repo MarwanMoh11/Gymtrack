@@ -18,11 +18,11 @@ struct PlateMathTests {
     @Test(arguments: [
         Case(total: 20, unit: .kg, perSide: []),
         Case(total: 60, unit: .kg, perSide: [20]),
-        Case(total: 100, unit: .kg, perSide: [25, 15]),
-        Case(total: 92.5, unit: .kg, perSide: [25, 10, 1.25]),
+        Case(total: 100, unit: .kg, perSide: [20, 20]),
+        Case(total: 92.5, unit: .kg, perSide: [20, 15, 1.25]),
         Case(total: 62.5, unit: .kg, perSide: [20, 1.25]),
         Case(total: 22.5, unit: .kg, perSide: [1.25]),
-        Case(total: 190, unit: .kg, perSide: [25, 25, 25, 10]),
+        Case(total: 190, unit: .kg, perSide: [20, 20, 20, 20, 5]),
         Case(total: 45, unit: .lb, perSide: []),
         Case(total: 135, unit: .lb, perSide: [45]),
         Case(total: 185, unit: .lb, perSide: [45, 25]),
@@ -146,5 +146,27 @@ struct PlateMathTests {
         #expect(PlateLoading.bar(for: bench, scale: .kilograms, preset: .light) == 15)
         let press = ExerciseCatalog.shared.exercise(id: "dumbbell-bench-press")
         #expect(PlateLoading.bar(for: press, scale: .kilograms, preset: .standard) == nil)
+    }
+
+    @Test func aBarNotCountedSplitsTheWholeWeightAcrossTheEnds() throws {
+        // The owner's squat: 67.5 kg logged as plates drew 20 + 2.5 + 1.25 a
+        // side when a 20 kg bar was taken off it first.
+        let squat = ExerciseCatalog.shared.exercise(id: "barbell-back-squat")
+        let bar = try #require(PlateLoading.bar(for: squat, scale: .kilograms, preset: .notCounted))
+        #expect(bar == 0)
+        let outcome = PlateMath.outcome(total: 67.5, bar: bar, plates: PlateMath.standardPlates(.kg))
+        #expect(outcome == .exact(perSide: [20, 10, 2.5, 1.25]))
+        #expect(PlateCalculatorText.line(outcome, scale: .kilograms, bar: bar) == "Per side 20 + 10 + 2.5 + 1.25")
+        #expect(BarWeight.notCounted.weight(in: .lb) == 0)
+        #expect(BarWeight.notCounted.label == "Not counted")
+    }
+
+    @Test func anEmptyLoadWithNoBarCountedReadsAsNoPlates() {
+        let none = PlateMath.outcome(total: 0, bar: 0, plates: PlateMath.standardPlates(.kg))
+        #expect(PlateCalculatorText.line(none, scale: .kilograms, bar: 0) == "No plates")
+        let short = PlateMath.outcome(total: 1, bar: 0, plates: PlateMath.standardPlates(.kg))
+        #expect(PlateCalculatorText.line(short, scale: .kilograms, bar: 0) == "Per side no plates · 1 kg short")
+        let bar = PlateMath.outcome(total: 20, bar: 20, plates: PlateMath.standardPlates(.kg))
+        #expect(PlateCalculatorText.line(bar, scale: .kilograms, bar: 20) == "Bar only · 20 kg")
     }
 }

@@ -31,7 +31,7 @@ struct AppSettingsTests {
         #expect(defaults[SettingsKey.trackRPE] as? Bool == true)
         #expect(defaults[SettingsKey.watchAutoLaunch] as? Bool == true)
         #expect(defaults[SettingsKey.heartRateReadyCue] as? Bool == true)
-        #expect(defaults[SettingsKey.barWeight] as? String == BarWeight.standard.rawValue)
+        #expect(defaults[SettingsKey.barWeight] as? String == BarWeight.notCounted.rawValue)
     }
 
     /// Health writes are left out on purpose: the bench turns them off so that

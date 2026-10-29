@@ -47,12 +47,15 @@ struct PlatesStrip: View {
 /// strip and in the sheet.
 enum PlateCalculatorText {
     static func line(_ outcome: PlateMath.Outcome, scale: LoadScale, bar: Double) -> String {
+        // With the bar not counted, an empty load is no plates rather than a
+        // "0 kg" bar.
         switch outcome {
+        case .exact(let plates) where plates.isEmpty:
+            return bar > 0 ? "Bar only · \(scale.text(bar)) \(scale.unit.short)" : "No plates"
         case .exact(let plates):
-            return plates.isEmpty ? "Bar only · \(scale.text(bar)) \(scale.unit.short)"
-                                  : "Per side \(PlateMath.caption(plates))"
+            return "Per side \(PlateMath.caption(plates))"
         case .unreachable(let plates, let short):
-            let made = plates.isEmpty ? "bar only" : PlateMath.caption(plates)
+            let made = plates.isEmpty ? (bar > 0 ? "bar only" : "no plates") : PlateMath.caption(plates)
             return "Per side \(made) · \(PlateMath.label(short)) \(scale.unit.short) short"
         case .belowBar:
             return "Lighter than the \(scale.text(bar)) \(scale.unit.short) bar"
@@ -83,6 +86,12 @@ struct PlateCalculatorSheet: View {
         PlateMath.outcome(total: total, bar: bar, plates: PlateMath.standardPlates(scale.unit))
     }
 
+    private var footnote: String {
+        bar > 0
+            ? "Bar \(scale.text(bar)) \(scale.unit.short), the same plates on both ends. Change the bar in Settings."
+            : "The weight is the plates alone, half on each end. Count the bar in Settings."
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 18) {
@@ -93,7 +102,7 @@ struct PlateCalculatorSheet: View {
                     .foregroundStyle(Theme.textPrimary)
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("plates.result")
-                Text("Bar \(scale.text(bar)) \(scale.unit.short), the same plates on both ends. Change the bar in Settings.")
+                Text(footnote)
                     .font(Theme.rounded(12, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                     .multilineTextAlignment(.center)

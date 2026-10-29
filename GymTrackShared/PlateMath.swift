@@ -76,8 +76,10 @@ enum PlateMath {
 
     /// Plates a commercial gym racks, in each unit. Kilograms stop at 1.25 and
     /// pounds at 2.5 because those are the smallest a plate is commonly cast.
+    /// Kilograms top out at 20 because the owner's gym has no 25s, and a 25
+    /// in the set turned his 20 + 10 into a 25 + 5 he cannot load.
     static func standardPlates(_ unit: WeightUnit) -> [Double] {
-        unit == .kg ? [25, 20, 15, 10, 5, 2.5, 1.25] : [45, 35, 25, 10, 5, 2.5]
+        unit == .kg ? [20, 15, 10, 5, 2.5, 1.25] : [45, 35, 25, 10, 5, 2.5]
     }
 
     /// The Olympic bar: 20 kg, or 45 lb where the plates are stamped in pounds.
@@ -121,18 +123,24 @@ enum PlateMath {
     }
 }
 
-/// How heavy the lifter's bar is. A preset rather than a free number: the
-/// Olympic bar is nearly everyone's, a lighter one covers the others, and a
-/// preset reads correctly in either unit without a conversion that would put
-/// 20 kg at 44.09 lb.
+/// How much of a logged barbell weight is the bar. A preset rather than a free
+/// number: the Olympic bar is nearly everyone's, a lighter one covers the
+/// others, and a preset reads correctly in either unit without a conversion
+/// that would put 20 kg at 44.09 lb.
+///
+/// `notCounted` is the default because the owner logs a barbell lift as the
+/// plates alone: subtracting a bar from 67.5 drew 20 + 2.5 + 1.25 a side when
+/// he loads 20 + 10 + 2.5 + 1.25.
 enum BarWeight: String, CaseIterable, Identifiable, Sendable {
-    case standard, light, lightest
+    case notCounted, standard, light, lightest
 
     var id: String { rawValue }
 
-    /// The bar in the unit the exercise is marked in.
+    /// The bar in the unit the exercise is marked in; zero when the logged
+    /// weight is the plates alone.
     func weight(in unit: WeightUnit) -> Double {
         switch (self, unit) {
+        case (.notCounted, _): 0
         case (.standard, .kg): 20
         case (.standard, .lb): 45
         case (.light, .kg): 15
@@ -144,6 +152,7 @@ enum BarWeight: String, CaseIterable, Identifiable, Sendable {
 
     /// "20 kg / 45 lb", both units, since the setting is one choice for both.
     var label: String {
-        "\(PlateMath.label(weight(in: .kg))) kg / \(PlateMath.label(weight(in: .lb))) lb"
+        if self == .notCounted { return "Not counted" }
+        return "\(PlateMath.label(weight(in: .kg))) kg / \(PlateMath.label(weight(in: .lb))) lb"
     }
 }
