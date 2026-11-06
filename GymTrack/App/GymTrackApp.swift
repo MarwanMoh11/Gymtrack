@@ -90,6 +90,10 @@ struct GymTrackApp: App {
         // exercise would be built into weight × reps rows it can never leave.
         ExerciseCatalog.shared.loadLibrary(from: ModelContext(container))
 
+        // After the catalog, which names each slot. Before the watch link, so
+        // a command that wakes the app already finds the routine it should.
+        PlanTemplate.adoptTransformation(in: ModelContext(container))
+
         // How each machine is marked is read from everywhere — the logger, a
         // progression suggestion, the watch mirror — so the book is loaded once
         // here rather than fetched per screen.

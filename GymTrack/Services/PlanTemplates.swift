@@ -229,6 +229,82 @@ struct PlanTemplate: Identifiable {
             ]),
         ]
     )
+
+    /// The lifter's own one-year program, set on 2026-11-06.
+    ///
+    /// Kept out of `all`: it is built around one person's history, so it is no
+    /// starter to offer at onboarding. No day is pinned to a weekday, because
+    /// pinned days were what lost the back and biceps work: a missed Wednesday
+    /// never came round again, and three push days in a row went by without
+    /// either. In rotation a missed day waits for the next session. The first
+    /// two exercises of each day are the whole of a short session, so the
+    /// priority muscles lead wherever they can.
+    static let transformation = PlanTemplate(
+        id: "transformation",
+        name: "Transformation",
+        summary: "Four days in rotation. Train whichever comes next, three times a week to start.",
+        daysPerWeek: 3,
+        level: "Any",
+        symbol: "flame.fill",
+        days: [
+            Day(name: "Pull", weekday: nil, items: [
+                Item("pull-up", 5, 3, 3),
+                Item("seated-cable-row", 3, 8, 12, rest: 120),
+                Item("preacher-curl-machine", 3, 8, 12, rest: 120),
+                Item("hammer-curl", 2, 8, 12),
+            ]),
+            Day(name: "Push", weekday: nil, items: [
+                Item("incline-dumbbell-press", 3, 8, 12, rest: 120),
+                Item("dumbbell-lateral-raise", 3, 12, 20),
+                Item("chest-press-hammer-strength", 3, 8, 12, rest: 120),
+                Item("tricep-pushdown-v-bar", 3, 10, 15),
+            ]),
+            Day(name: "Legs", weekday: nil, items: [
+                Item("barbell-back-squat", 4, 8, 12, rest: 150),
+                Item("seated-leg-curl-machine", 3, 10, 15),
+                Item("leg-extension-machine", 2, 10, 15),
+                Item("cable-crunch", 2, 10, 15),
+            ]),
+            Day(name: "V + Arms", weekday: nil, items: [
+                Item("lat-pulldown-wide", 3, 8, 12, rest: 120),
+                Item("shoulder-press-iso-lateral", 2, 8, 12),
+                Item("dumbbell-lateral-raise", 3, 12, 20),
+                Item("overhead-tricep-extension-cable", 3, 10, 15),
+                Item("concentration-curl-cable", 2, 10, 15),
+                Item("pec-deck-reverse-fly", 2, 12, 20),
+            ]),
+        ]
+    )
+
+    /// Makes `transformation` the active routine, once, on a phone already
+    /// training from another one.
+    ///
+    /// A coach proposal can only edit a routine, and entering eighteen slots by
+    /// hand is the friction the program exists to remove, so the app adds it
+    /// itself. The flag is what lets the lifter delete it later and have it
+    /// stay deleted. The routine it replaces stays in the list, and history is
+    /// untouched: sessions hold their plan's name as text.
+    ///
+    /// A new install has no routine to replace, and its choice belongs to
+    /// onboarding, so it is marked done without adding anything.
+    static func adoptTransformation(in context: ModelContext, defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: SettingsKey.didAdoptTransformation) else { return }
+        guard let plans = try? context.fetch(FetchDescriptor<Plan>()),
+              let openSessions = try? context.fetchCount(
+                FetchDescriptor<WorkoutSession>(predicate: #Predicate { $0.endedAt == nil })
+              )
+        else { return }
+        // Swapping routines under a running workout would move Today and the
+        // wrist off the day being trained. The next launch tries again.
+        guard openSessions == 0 else { return }
+
+        if !plans.isEmpty {
+            for plan in plans { plan.isActive = false }
+            transformation.materialise(in: context, makeActive: true)
+            guard (try? context.save()) != nil else { return }
+        }
+        defaults.set(true, forKey: SettingsKey.didAdoptTransformation)
+    }
 }
 
 // MARK: - Editing routines

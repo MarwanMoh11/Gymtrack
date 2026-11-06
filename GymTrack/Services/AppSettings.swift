@@ -21,6 +21,9 @@ enum SettingsKey {
     /// One-shot marker for the migration that turned per-exercise rest into a
     /// real override rather than a copy of the default.
     static let didClearBakedRest = "settings.didClearBakedRest"
+    /// One-shot marker for adding the Transformation routine, so a lifter who
+    /// later deletes it does not get it back on the next launch.
+    static let didAdoptTransformation = "settings.didAdoptTransformation"
     /// One-shot marker for the cleanup that removed sets logged as warm-ups
     /// back when the app had them.
     static let didDropWarmupSets = "settings.didDropWarmupSets"

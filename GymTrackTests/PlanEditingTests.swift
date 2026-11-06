@@ -274,3 +274,93 @@ struct PlanEditingTests {
         #expect(try context.fetchCount(FetchDescriptor<Plan>()) == 0)
     }
 }
+
+// MARK: - The Transformation routine
+
+extension PlanEditingTests {
+
+    private func allRoutines(in context: ModelContext) throws -> [Plan] {
+        try context.fetch(FetchDescriptor<Plan>())
+    }
+
+    @Test func theTransformationRoutineRotatesThroughFourDaysOfTheProgrammedSets() throws {
+        let context = try TestStore.context()
+        let days = PlanTemplate.transformation.materialise(in: context, makeActive: true).orderedDays
+
+        #expect(days.map(\.name) == ["Pull", "Push", "Legs", "V + Arms"])
+        // One pinned day would bring back what the rotation exists to end: a
+        // missed session that never comes round again.
+        #expect(days.allSatisfy { $0.weekday == nil })
+        // `materialise` drops a slot it cannot find, so a bad ID reads as a short day.
+        #expect(days.map { $0.items.reduce(0) { $0 + $1.targetSets } } == [13, 12, 11, 15])
+    }
+
+    @Test func adoptingMakesItTheOnlyActiveRoutineAndKeepsTheOldOne() throws {
+        let context = try TestStore.context()
+        let old = PlanTemplate.minimalist.materialise(in: context, makeActive: true)
+        try context.save()
+
+        PlanTemplate.adoptTransformation(in: context, defaults: TestClock.freshDefaults())
+
+        let plans = try allRoutines(in: context)
+        #expect(plans.count == 2)
+        #expect(plans.filter(\.isActive).map(\.name) == ["Transformation"])
+        #expect(old.days.count == PlanTemplate.minimalist.days.count)
+        let active = plans.first(where: \.isActive)
+        let adopted = try #require(active)
+        #expect(adopted.nextDay(on: today, after: [], calendar: calendar)?.name == "Pull")
+    }
+
+    @Test func aDeletedTransformationRoutineStaysDeleted() throws {
+        let context = try TestStore.context()
+        let defaults = TestClock.freshDefaults()
+        let old = PlanTemplate.minimalist.materialise(in: context, makeActive: true)
+        try context.save()
+        PlanTemplate.adoptTransformation(in: context, defaults: defaults)
+
+        let plans = try allRoutines(in: context)
+        let active = plans.first(where: \.isActive)
+        let adopted = try #require(active)
+        context.delete(adopted)
+        old.isActive = true
+        try context.save()
+        PlanTemplate.adoptTransformation(in: context, defaults: defaults)
+
+        #expect(try allRoutines(in: context).map(\.name) == [PlanTemplate.minimalist.name])
+        #expect(old.isActive)
+    }
+
+    @Test func aWorkoutInProgressPutsAdoptionOffUntilTheNextLaunch() throws {
+        let context = try TestStore.context()
+        let defaults = TestClock.freshDefaults()
+        let old = PlanTemplate.minimalist.materialise(in: context, makeActive: true)
+        let session = WorkoutSession(title: "Day A", startedAt: today)
+        context.insert(session)
+        try context.save()
+
+        PlanTemplate.adoptTransformation(in: context, defaults: defaults)
+
+        #expect(try allRoutines(in: context).count == 1)
+        #expect(old.isActive)
+
+        session.endedAt = today.addingTimeInterval(1800)
+        try context.save()
+        PlanTemplate.adoptTransformation(in: context, defaults: defaults)
+
+        #expect(try allRoutines(in: context).filter(\.isActive).map(\.name) == ["Transformation"])
+    }
+
+    @Test func aNewInstallLeavesTheChoiceToOnboarding() throws {
+        let context = try TestStore.context()
+        let defaults = TestClock.freshDefaults()
+
+        PlanTemplate.adoptTransformation(in: context, defaults: defaults)
+        #expect(try allRoutines(in: context).isEmpty)
+
+        PlanTemplate.upperLower.materialise(in: context, makeActive: true)
+        try context.save()
+        PlanTemplate.adoptTransformation(in: context, defaults: defaults)
+
+        #expect(try allRoutines(in: context).map(\.name) == [PlanTemplate.upperLower.name])
+    }
+}
